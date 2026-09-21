@@ -1,0 +1,22 @@
+# secrets — never commit
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+infra/state/
+
+# build artefacts
+agent/bin/
+node_modules/
+vendor/
+dist/
+.superpowers/
+
+# local
+.DS_Store
+*.log
+tests/e2e/.playwright/
+test-results/
+playwright-report/
