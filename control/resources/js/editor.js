@@ -25,6 +25,8 @@ const SITE = {
   filesUrl: root.dataset.files,
   dbTablesUrl: root.dataset.dbTables,
   dbQueryUrl: root.dataset.dbQuery,
+  commandUrl: root.dataset.command,
+  logsUrl: root.dataset.logs,
 };
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
 const DRAFTS_KEY = `cic.drafts.${SITE.id}`;
@@ -762,6 +764,144 @@ $('sql').addEventListener('keydown', (e) => {
   }
 });
 
+
+/* ───────────────────────── terminal and logs ───────────────────────── */
+
+let panelTab = 'terminal';
+
+function showPanel(tab = panelTab) {
+  panelTab = tab;
+  $('panel').hidden = false;
+  $('ptTerminal').classList.toggle('on', tab === 'terminal');
+  $('ptLogs').classList.toggle('on', tab === 'logs');
+  $('termView').hidden = tab !== 'terminal';
+  $('logsView').hidden = tab !== 'logs';
+  if (tab === 'terminal') $('termArgs').focus();
+  if (tab === 'logs' && !$('logOut').textContent) loadLogs();
+}
+
+/**
+ * Render ANSI-coloured output WITHOUT innerHTML: every run of text becomes a
+ * text node inside a span whose class is chosen from a fixed list. Output is
+ * whatever composer or a package printed - it must never become markup.
+ */
+function appendAnsi(target, text) {
+  const frag = document.createDocumentFragment();
+  let classes = [];
+  const parts = text.split(/\x1b\[([0-9;]*)m/);
+  for (let i = 0; i < parts.length; i++) {
+    if (i % 2 === 1) {
+      for (const code of parts[i].split(';').map(Number)) {
+        if (code === 0 || Number.isNaN(code)) classes = [];
+        else if (code === 1) classes.push('a-b');
+        else if (code >= 30 && code <= 37) classes = classes.filter((c) => !/^a-3/.test(c)).concat(`a-${code}`);
+        else if (code >= 90 && code <= 97) classes = classes.filter((c) => !/^a-3/.test(c)).concat(`a-${code - 60}`);
+      }
+      continue;
+    }
+    if (!parts[i]) continue;
+    // Any other escape sequence (cursor movement, erase) is dropped.
+    const clean = parts[i].replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').replace(/\r(?!\n)/g, '');
+    const span = document.createElement('span');
+    if (classes.length) span.className = classes.join(' ');
+    span.textContent = clean;
+    frag.append(span);
+  }
+  target.append(frag);
+  target.scrollTop = target.scrollHeight;
+}
+
+function termLine(text, cls) {
+  const span = document.createElement('span');
+  span.className = cls;
+  span.textContent = text + '\n';
+  $('termOut').append(span);
+  $('termOut').scrollTop = $('termOut').scrollHeight;
+}
+
+/** Split an argument line the way a shell would split plain words and quotes. */
+function splitArgs(line) {
+  const out = [];
+  const re = /"([^"]*)"|'([^']*)'|(\S+)/g;
+  let m;
+  while ((m = re.exec(line)) !== null) out.push(m[1] ?? m[2] ?? m[3]);
+  return out;
+}
+
+/**
+ * Run one allow-listed command. A person is asked in-page before one that
+ * destroys data; an agent calling cic.run gets the refusal and must resend
+ * with { confirm: true } itself.
+ */
+async function runCommand(tool, args, { confirm = false, interactive = true } = {}) {
+  showPanel('terminal');
+  termLine(`$ ${tool} ${args.join(' ')}`, 't-cmd');
+  let res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm });
+
+  if (res.status === 409 && res.error === 'needs_confirm' && interactive) {
+    const yes = await ask(`"${tool} ${args[0]}" destroys data in this site. Run it?`, { okLabel: 'Run it' });
+    if (!yes) {
+      termLine('Not run.', 't-dim');
+      return res;
+    }
+    res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm: true });
+  }
+
+  if (res.result) {
+    appendAnsi($('termOut'), res.result.output || '');
+    const r = res.result;
+    termLine(`${r.timedOut ? 'stopped at the time limit' : `exit ${r.exitCode}`} · ${(r.elapsedMs / 1000).toFixed(1)} s${r.truncated ? ' · output truncated' : ''}`,
+      r.exitCode === 0 ? 't-dim' : 't-err');
+    // make:* and composer write files; show them.
+    if (r.exitCode === 0 && (tool === 'composer' || /^make:/.test(args[0]))) {
+      for (const dir of ['/', ...expanded]) await loadDir(dir);
+      renderTree();
+    }
+  } else {
+    termLine(res.hint || res.error || 'failed', 't-err');
+  }
+  return res;
+}
+
+async function loadLogs(source = $('logSource').value, lines = 300) {
+  $('logSource').value = source;
+  $('logMeta').textContent = 'Loading…';
+  const url = new URL(SITE.logsUrl, location.origin);
+  url.searchParams.set('source', source);
+  url.searchParams.set('lines', lines);
+  const res = await apiAt(url.toString(), 'GET');
+  $('logOut').replaceChildren();
+  if (!res.ok) {
+    $('logMeta').textContent = res.hint || res.error;
+    return res;
+  }
+  if (res.log.lines) appendAnsi($('logOut'), res.log.lines);
+  else $('logOut').textContent = 'Nothing logged yet.';
+  $('logMeta').textContent = `${res.log.lines ? res.log.lines.split('\n').length : 0} line(s)${res.log.truncated ? ', older lines not shown' : ''} · ${new Date().toLocaleTimeString()}`;
+  return res;
+}
+
+$('sbPanel').addEventListener('click', () => ($('panel').hidden ? showPanel() : ($('panel').hidden = true)));
+$('ptTerminal').addEventListener('click', () => showPanel('terminal'));
+$('ptLogs').addEventListener('click', () => showPanel('logs'));
+$('ptClose').addEventListener('click', () => { $('panel').hidden = true; });
+$('logRefresh').addEventListener('click', () => loadLogs());
+$('logSource').addEventListener('change', () => loadLogs());
+$('termForm').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const args = splitArgs($('termArgs').value.trim());
+  if (!args.length) return;
+  $('termArgs').value = '';
+  runCommand($('termTool').value, args);
+});
+document.addEventListener('keydown', (e) => {
+  if (e.ctrlKey && e.key === '`') {
+    e.preventDefault();
+    if ($('panel').hidden) showPanel();
+    else $('panel').hidden = true;
+  }
+});
+
 /* ───────────────────────── agent API ───────────────────────── */
 
 const HELP = `window.cic — drive this editor from code. Every call returns the server's answer:
@@ -779,6 +919,18 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
   cic.rm(path)                 delete a file (not recursive)    -> { ok, deleted }
   cic.open(path)               open a file in the editor for the person watching
   cic.state()                  what is open, which tabs are unsaved or in conflict
+
+  cic.run(tool, args, { confirm })
+                               run ONE allow-listed command in the site's container:
+                               tool 'artisan' (migrate, route:list, make:*, cache:clear, ...)
+                               or 'composer' (require, remove, install, update, dump-autoload).
+                               -> { ok, result: { exitCode, output, truncated, timedOut } }
+                               ok is false when the command exits non-zero; the output is
+                               still in result. Destructive commands (migrate:fresh,
+                               migrate:rollback, db:seed, key:generate) are refused with 409 /
+                               "needs_confirm" and NOTHING runs, unless confirm: true.
+  cic.logs(source, lines)      source 'app' (storage/logs), 'access' (requests) or
+                               'container' (PHP and Apache errors)  -> { ok, log: { lines } }
 
   cic.db.tables()              the site's tables, with InnoDB row estimates
   cic.db.query(sql, { write }) run ONE statement as the site's own MySQL user
@@ -840,6 +992,15 @@ window.cic = Object.freeze({
   },
 
   rm: (path) => removeFile(path),
+
+  run: (tool, args = [], options = {}) => {
+    if (!Array.isArray(args)) args = splitArgs(String(args));
+    return runCommand(String(tool), args.map(String), { confirm: options.confirm === true, interactive: false });
+  },
+  logs: (source = 'app', lines = 200) => {
+    showPanel('logs');
+    return loadLogs(source, lines);
+  },
 
   db: Object.freeze({
     tables: () => loadTables(),

@@ -17,6 +17,8 @@
      data-files="{{ route('files.index', $site) }}"
      data-db-tables="{{ route('db.tables', $site) }}"
      data-db-query="{{ route('db.query', $site) }}"
+     data-command="{{ route('console.run', $site) }}"
+     data-logs="{{ route('console.logs', $site) }}"
      data-back="{{ route('dashboard') }}">
 
     <header class="titlebar">
@@ -76,13 +78,41 @@
                 <p>Open a file from the explorer.</p>
                 <p class="hint">Save with <kbd>⌘S</kbd> / <kbd>Ctrl S</kbd>. An AI agent can drive this page through <code>window.cic</code> — run <code>cic.help()</code> in the console.</p>
             </div>
+            <section id="panel" class="panel" hidden>
+                <div class="panel-tabs" role="tablist">
+                    <button type="button" id="ptTerminal" class="on" role="tab">Terminal</button>
+                    <button type="button" id="ptLogs" role="tab">Logs</button>
+                    <span class="panel-spacer"></span>
+                    <button type="button" id="ptClose" title="Close panel (Ctrl `)">✕</button>
+                </div>
+                <div id="termView" class="panel-body">
+                    <pre id="termOut" class="term-out" aria-live="polite"></pre>
+                    <form id="termForm" class="term-line">
+                        <select id="termTool" aria-label="Tool"><option>artisan</option><option>composer</option></select>
+                        <input id="termArgs" autocomplete="off" spellcheck="false" placeholder="migrate:status" aria-label="Arguments">
+                        <button type="submit">Run</button>
+                    </form>
+                </div>
+                <div id="logsView" class="panel-body" hidden>
+                    <div class="logs-bar">
+                        <select id="logSource" aria-label="Log">
+                            <option value="app">Laravel (storage/logs)</option>
+                            <option value="access">Requests</option>
+                            <option value="container">PHP &amp; Apache</option>
+                        </select>
+                        <button type="button" id="logRefresh">Refresh</button>
+                        <span id="logMeta" class="logs-meta"></span>
+                    </div>
+                    <pre id="logOut" class="term-out"></pre>
+                </div>
+            </section>
         </main>
     </div>
 
     <footer class="statusbar">
         <span id="sbSite">{{ $site->domain }}</span>
         <span id="sbMsg" role="status" aria-live="polite"></span>
-        <span class="right"><span id="sbPos"></span><span id="sbRev"></span></span>
+        <span class="right"><button type="button" id="sbPanel" class="sb-btn" title="Terminal and logs (Ctrl `)">⌨ Terminal</button><span id="sbPos"></span><span id="sbRev"></span></span>
     </footer>
 
     {{-- In-page dialog. Never alert/confirm/prompt: a native dialog freezes

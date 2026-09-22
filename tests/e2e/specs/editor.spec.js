@@ -202,6 +202,53 @@ test('a person and an agent can both edit a real site, without erasing each othe
     await page.getByRole('tab', { name: 'Files' }).click();
   });
 
+  await test.step('artisan runs in the site, and its output comes back', async () => {
+    const res = await page.evaluate(() => window.cic.run('artisan', ['make:model', 'Invoice', '--migration']));
+    expect(res.ok, res.result?.output).toBe(true);
+    expect(res.result.output).toContain('Invoice');
+    await expect(page.locator('#termOut')).toContainText('$ artisan make:model Invoice --migration');
+
+    const model = await page.evaluate(() => window.cic.read('/app/Models/Invoice.php'));
+    expect(model.content).toContain('class Invoice extends Model');
+
+    const migrated = await page.evaluate(() => window.cic.run('artisan', ['migrate']));
+    expect(migrated.ok, migrated.result?.output).toBe(true);
+    const tables = await page.evaluate(() => window.cic.db.tables());
+    expect(tables.tables.map((t) => t.name)).toContain('invoices');
+  });
+
+  await test.step('a destructive command runs nothing without confirm', async () => {
+    const refused = await page.evaluate(() => window.cic.run('artisan', ['migrate:fresh']));
+    expect(refused.status).toBe(409);
+    expect(refused.error).toBe('needs_confirm');
+    const still = await page.evaluate(() => window.cic.db.tables());
+    expect(still.tables.map((t) => t.name)).toContain('invoices');
+  });
+
+  await test.step('commands outside the allow-list are refused', async () => {
+    for (const [tool, args] of [['artisan', ['tinker']], ['artisan', ['migrate', '--env=testing']], ['composer', ['exec', 'bash']]]) {
+      const res = await page.evaluate(([t, a]) => window.cic.run(t, a), [tool, args]);
+      expect(res.ok, `${tool} ${args.join(' ')}`).toBe(false);
+      expect(res.result).toBeUndefined();
+    }
+  });
+
+  await test.step('composer require works inside the plan memory limit', async () => {
+    const res = await page.evaluate(() => window.cic.run('composer', ['require', 'spatie/array-to-xml']));
+    expect(res.ok, res.result?.output?.slice(-2000)).toBe(true);
+    const lock = await page.evaluate(() => window.cic.read('/composer.json'));
+    expect(lock.content).toContain('spatie/array-to-xml');
+  });
+
+  await test.step('the request log shows real requests', async () => {
+    const [address] = await waitForDns(`${siteName}.codeinchrome.com`);
+    await httpsGet(`${siteName}.codeinchrome.com`, '/?from=the-log-test', address);
+    await expect.poll(async () => {
+      const res = await page.evaluate(() => window.cic.logs('access', 50));
+      return res.log?.lines ?? '';
+    }, { intervals: [2_000], timeout: 30_000 }).toContain('/?from=the-log-test');
+  });
+
   await test.step('the change is live on the site itself', async () => {
     const [address] = await waitForDns(`${siteName}.codeinchrome.com`);
 

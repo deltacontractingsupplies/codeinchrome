@@ -9,7 +9,9 @@ package api
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 	"time"
 
@@ -273,6 +275,53 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			}
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"applied": applied}))
+	})
+
+	// ── Commands and logs ────────────────────────────────────────────────
+
+	mux.HandleFunc("POST /v1/sites/{id}/command", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Tool    string   `json:"tool"`
+			Args    []string `json:"args"`
+			Confirm bool     `json:"confirm"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {tool: artisan|composer, args: [...], confirm?}"))
+			return
+		}
+		res, err := mgr.RunCommand(r.Context(), r.PathValue("id"), body.Tool, body.Args, body.Confirm)
+		switch {
+		case errors.Is(err, sites.ErrNeedsConfirm):
+			writeJSON(w, http.StatusConflict, fail("needs_confirm",
+				"This command destroys data. Nothing was run. Send it again with confirm: true if that is intended."))
+		case errors.Is(err, sites.ErrBusy):
+			writeJSON(w, http.StatusConflict, fail("busy", "Another command is still running for this site."))
+		case err != nil:
+			writeJSON(w, http.StatusUnprocessableEntity, fail("command_refused", err.Error()))
+		default:
+			// ok is the verdict: a command that exited non-zero did not succeed.
+			body := resp{"result": res}
+			if res.ExitCode == 0 {
+				writeJSON(w, http.StatusOK, ok(body))
+			} else {
+				body["ok"], body["error"] = false, "command_failed"
+				body["hint"] = fmt.Sprintf("exited %d; see result.output", res.ExitCode)
+				if res.TimedOut {
+					body["error"], body["hint"] = "timed_out", "The command was stopped at its time limit."
+				}
+				writeJSON(w, http.StatusOK, body)
+			}
+		}
+	})
+
+	mux.HandleFunc("GET /v1/sites/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
+		n, _ := strconv.Atoi(r.URL.Query().Get("lines"))
+		res, err := mgr.Logs(r.Context(), r.PathValue("id"), r.URL.Query().Get("source"), n)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("logs_unavailable", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"log": res}))
 	})
 
 	// ── Database browser ─────────────────────────────────────────────────

@@ -95,6 +95,21 @@ class AgentClient
         ])['applied'] ?? [];
     }
 
+    /**
+     * Run one allow-listed artisan or composer command. A non-zero exit is
+     * returned as a result with ok=false, NOT thrown: the output is what the
+     * caller needs to see.
+     */
+    public function runCommand(string $id, string $tool, array $args, bool $confirm = false): array
+    {
+        return $this->sendRaw('post', "/v1/sites/$id/command", ['tool' => $tool, 'args' => array_values($args), 'confirm' => $confirm]);
+    }
+
+    public function logs(string $id, string $source, int $lines = 200): array
+    {
+        return $this->send('get', "/v1/sites/$id/logs", query: ['source' => $source, 'lines' => $lines])['log'] ?? [];
+    }
+
     /** Replace the site's verified custom domains; the agent rewrites the vhost. */
     public function setAliases(string $id, array $aliases): array
     {
@@ -203,6 +218,26 @@ class AgentClient
      * So: $query is always built into the url, $body is only ever sent for the
      * verbs that carry one, and the second argument is never `[]`.
      */
+    /**
+     * For endpoints whose ok:false still carries a result worth returning -
+     * a command that ran and failed. Refusals (4xx) still throw AgentRefused.
+     */
+    private function sendRaw(string $method, string $path, array $body = []): array
+    {
+        try {
+            $response = Http::timeout(max($this->timeout, 660))->acceptJson()->withToken($this->token)
+                ->{$method}($this->baseUrl . $path, $body);
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}]. Whether the command ran is UNKNOWN.", previous: $e);
+        }
+        $json = $response->json() ?? [];
+        if (isset($json['result'])) {
+            return $json;
+        }
+        throw new AgentRefused(sprintf('Agent on [%s] refused %s: %s (%s)', $this->host, $path,
+            $json['error'] ?? 'unknown_error', $json['hint'] ?? 'no hint given'), detail: $json);
+    }
+
     private function send(string $method, string $path, array $body = [], bool $authenticated = true, array $query = []): array
     {
         $request = Http::timeout($this->timeout)->acceptJson();

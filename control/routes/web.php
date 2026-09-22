@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\ConsoleController;
 use App\Http\Controllers\DatabaseController;
 use App\Http\Controllers\DomainController;
 use App\Http\Controllers\FileController;
@@ -41,6 +42,10 @@ Route::middleware('auth')->group(function () {
     Route::get('/sites/{site}/files', [FileController::class, 'index'])->name('files.index');
     Route::put('/sites/{site}/files', [FileController::class, 'store'])->name('files.store');
     Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->name('files.destroy');
+
+    // Commands can run for minutes and cost CPU on a shared host.
+    Route::post('/sites/{site}/command', [ConsoleController::class, 'run'])->middleware('throttle:20,1')->name('console.run');
+    Route::get('/sites/{site}/logs', [ConsoleController::class, 'logs'])->middleware('throttle:60,1')->name('console.logs');
 
     // The database browser. Queries are throttled harder than file reads:
     // each one opens a MySQL connection on a host shared with other tenants.

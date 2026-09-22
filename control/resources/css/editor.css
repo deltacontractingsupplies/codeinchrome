@@ -107,6 +107,25 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: #2b2b2b; padd
 .grid th, .grid td { border: 1px solid var(--border); padding: 3px 8px; white-space: pre; max-width: 420px; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
 .grid td.null { color: var(--desc); font-style: italic; }
 
+.panel { position: relative; height: 260px; flex: none; border-top: 1px solid var(--border); background: var(--chrome-bg); display: flex; flex-direction: column; z-index: 3; }
+.panel-tabs { display: flex; align-items: center; height: 30px; padding: 0 8px; gap: 4px; flex: none; }
+.panel-tabs button { font-size: 11px; letter-spacing: .04em; text-transform: uppercase; padding: 4px 8px; color: var(--desc); border-bottom: 1px solid transparent; }
+.panel-tabs button.on { color: var(--editor-fg); border-bottom-color: var(--accent); }
+.panel-spacer { flex: 1; }
+.panel-body { flex: 1; display: flex; flex-direction: column; min-height: 0; }
+.term-out { flex: 1; overflow: auto; margin: 0; padding: 6px 12px; font: 12px/1.45 var(--mono); white-space: pre-wrap; word-break: break-word; }
+.term-line { display: flex; gap: 6px; padding: 6px 10px; border-top: 1px solid var(--border); }
+.term-line select, .logs-bar select { background: #313131; color: var(--editor-fg); border: 1px solid #3c3c3c; border-radius: 3px; font: 12px var(--mono); padding: 2px 4px; }
+.term-line input { flex: 1; background: #181818; color: var(--editor-fg); border: 1px solid #3c3c3c; border-radius: 3px; font: 12px var(--mono); padding: 4px 8px; outline: none; }
+.term-line input:focus { border-color: var(--accent); }
+.term-line button, .logs-bar button { background: var(--accent); color: #fff; border-radius: 3px; padding: 2px 12px; font-size: 12px; }
+.logs-bar { display: flex; gap: 8px; align-items: center; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.logs-meta { color: var(--desc); font-size: 12px; }
+.t-cmd { color: #4ec9b0; } .t-err { color: var(--err); } .t-dim { color: var(--desc); }
+.a-b { font-weight: 700; } .a-30 { color: #555; } .a-31 { color: #f14c4c; } .a-32 { color: #23d18b; } .a-33 { color: #f5f543; }
+.a-34 { color: #3b8eea; } .a-35 { color: #d670d6; } .a-36 { color: #29b8db; } .a-37 { color: #e5e5e5; }
+.sb-btn { color: #fff; font-size: 12px; }
+
 @media (max-width: 760px) {
   .workbench { grid-template-columns: 1fr; grid-template-rows: 38% 1fr; }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
