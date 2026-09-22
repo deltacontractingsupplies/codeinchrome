@@ -462,44 +462,94 @@ func (m *Manager) ReloadProxy(ctx context.Context) error {
 	return nil
 }
 
-// Delete removes the container, the vhost and the data. It is deliberately
-// explicit about what it removed, because "deleted: true" with a container
-// still running is exactly the kind of claim this codebase refuses to make.
-func (m *Manager) Delete(ctx context.Context, id string) (map[string]bool, error) {
+// Delete removes the container, the vhost, the data, the log and the network.
+//
+// Each part reports what was OBSERVED, not what was attempted:
+//
+//	"removed" - it was there, and now it is not
+//	"absent"  - it was not there to begin with
+//	"failed"  - it was there, and it still is
+//
+// Booleans were not enough. `docker rm -f` exits 0 for a container that does
+// not exist, so a delete aimed at the wrong host reported `container: true`
+// and the caller read it as "removed" - a claim about work that never
+// happened. Distinguishing absent from removed costs one stat call and stops
+// the API asserting something it cannot see.
+func (m *Manager) Delete(ctx context.Context, id string) (map[string]string, error) {
 	if err := ValidID(id); err != nil {
 		return nil, err
 	}
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	done := map[string]bool{}
+	done := map[string]string{}
+
+	// Observe FIRST. After the removal there is no way to tell the two apart.
+	_, containerErr := run(ctx, 15*time.Second, "docker", "container", "inspect", m.container(id), "--format", "{{.Id}}")
+	hadContainer := containerErr == nil
+	_, dirErr := os.Stat(m.dir(id))
+	hadData := dirErr == nil
+	_, vhostErr := os.Stat(m.caddyFile(id))
+	hadVhost := vhostErr == nil
+	logPath := filepath.Join(caddyLogDir, id+".log")
+	_, logErr := os.Stat(logPath)
+	hadLog := logErr == nil
+	_, netErr := run(ctx, 15*time.Second, "docker", "network", "inspect", m.network(id), "--format", "{{.Id}}")
+	hadNetwork := netErr == nil
+
+	verdict := func(present bool, removeErr error, stillThere func() bool) string {
+		if !present {
+			return "absent"
+		}
+		if removeErr != nil && stillThere() {
+			return "failed"
+		}
+		if stillThere() {
+			return "failed"
+		}
+		return "removed"
+	}
+
 	_, err := run(ctx, 60*time.Second, "docker", "rm", "-f", m.container(id))
-	done["container"] = err == nil
+	done["container"] = verdict(hadContainer, err, func() bool {
+		_, e := run(ctx, 15*time.Second, "docker", "container", "inspect", m.container(id))
+		return e == nil
+	})
 
 	err = os.Remove(m.caddyFile(id))
-	done["vhost"] = err == nil || os.IsNotExist(err)
+	done["vhost"] = verdict(hadVhost, err, func() bool {
+		_, e := os.Stat(m.caddyFile(id))
+		return e == nil
+	})
 
 	err = os.RemoveAll(m.dir(id))
-	done["data"] = err == nil
+	done["data"] = verdict(hadData, err, func() bool {
+		_, e := os.Stat(m.dir(id))
+		return e == nil
+	})
 
-	// The access log is outside the site directory, so RemoveAll above misses
-	// it. Left behind, a re-created site with the same id silently appends to
-	// the previous tenant's log - which is a data leak between customers.
-	err = os.Remove(filepath.Join(caddyLogDir, id+".log"))
-	done["log"] = err == nil || os.IsNotExist(err)
+	// The access log sits outside the site directory, so RemoveAll misses it.
+	// Left behind, a re-created site with the same id appends to the previous
+	// tenant's log, which is a leak between customers.
+	err = os.Remove(logPath)
+	done["log"] = verdict(hadLog, err, func() bool {
+		_, e := os.Stat(logPath)
+		return e == nil
+	})
 
 	// Networks are not removed by `docker rm`. Left behind they exhaust the
-	// address pool, and a re-created site would silently rejoin a network the
-	// previous tenant's containers might still be attached to.
+	// address pool and a re-created site silently rejoins a network the
+	// previous tenant's containers may still be attached to.
 	_, err = run(ctx, 30*time.Second, "docker", "network", "rm", m.network(id))
-	done["network"] = err == nil || func() bool {
+	done["network"] = verdict(hadNetwork, err, func() bool {
 		_, e := run(ctx, 15*time.Second, "docker", "network", "inspect", m.network(id))
-		return e != nil // already gone is success
-	}()
+		return e == nil
+	})
 
-	if done["vhost"] {
+	if done["vhost"] == "removed" {
 		_ = m.ReloadProxy(ctx)
 	}
+
 	return done, nil
 }
 

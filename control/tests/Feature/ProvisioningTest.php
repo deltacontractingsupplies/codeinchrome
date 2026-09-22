@@ -42,7 +42,7 @@ class ProvisioningTest extends TestCase
 
     private array $deleteResponse = [
         'ok' => true,
-        'removed' => ['container' => true, 'vhost' => true, 'data' => true, 'log' => true, 'network' => true],
+        'parts' => ['container' => 'removed', 'vhost' => 'removed', 'data' => 'removed', 'log' => 'removed', 'network' => 'removed'],
     ];
 
     private int $deleteStatus = 200;
@@ -328,9 +328,30 @@ class ProvisioningTest extends TestCase
 
         $parts = Provisioner::make()->destroy($site->fresh());
 
-        $this->assertNotContains(false, $parts);
+        $this->assertNotContains('failed', $parts);
         $this->assertNull(Site::find($site->id));
         $this->assertSame([], $this->dnsRecords, 'The DNS record must go with the site.');
+    }
+
+    public function test_a_delete_that_found_nothing_does_not_claim_a_removal(): void
+    {
+        $this->fakeAgent();
+        $user = User::factory()->create(['plan' => 'starter']);
+        $site = Provisioner::make()->provision($user, 'not-here');
+
+        // What the agent reports when the site was never on this host.
+        // `docker rm -f` exits 0 for a container that does not exist, so
+        // without the absent/removed distinction this reads as success.
+        $this->deleteResponse = [
+            'ok' => true,
+            'parts' => ['container' => 'absent', 'vhost' => 'absent', 'data' => 'absent', 'log' => 'absent', 'network' => 'absent'],
+        ];
+
+        $parts = Provisioner::make()->destroy($site->fresh());
+
+        $this->assertSame('absent', $parts['container']);
+        $this->assertNotContains('removed', array_diff_key($parts, ['dns' => null]),
+            'Nothing was on the host, so nothing may be reported as removed.');
     }
 
     public function test_destroy_reports_per_part_and_keeps_the_row_when_something_survives(): void
@@ -341,7 +362,7 @@ class ProvisioningTest extends TestCase
 
         $this->deleteResponse = [
             'ok' => false, 'error' => 'partially_removed',
-            'removed' => ['container' => true, 'vhost' => true, 'data' => false, 'log' => true, 'network' => true],
+            'parts' => ['container' => 'removed', 'vhost' => 'removed', 'data' => 'failed', 'log' => 'removed', 'network' => 'removed'],
         ];
         $this->deleteStatus = 500;
 
@@ -350,8 +371,8 @@ class ProvisioningTest extends TestCase
             $this->assertTrue(false, 'The agent reported a partial removal; destroy must not report success.');
         } catch (\App\Fleet\AgentRefused $e) {
             $this->assertSame(
-                ['container' => true, 'vhost' => true, 'data' => false, 'log' => true, 'network' => true],
-                $e->detail['removed'],
+                ['container' => 'removed', 'vhost' => 'removed', 'data' => 'failed', 'log' => 'removed', 'network' => 'removed'],
+                $e->detail['parts'],
                 'The per-part breakdown must survive to the caller, not be flattened to a boolean.'
             );
         }

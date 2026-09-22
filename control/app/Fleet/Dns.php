@@ -60,7 +60,19 @@ class Dns
             return $id;
         }
 
-        return $this->request('post', "/zones/{$this->zoneId}/dns_records", $payload)['result']['id'];
+        $created = $this->request('post', "/zones/{$this->zoneId}/dns_records", $payload)['result'] ?? [];
+
+        // Not a blind ['result']['id']. A response in an unexpected shape used
+        // to surface as "Undefined array key \"id\"" attached to the customer's
+        // site name, which says nothing about what actually went wrong.
+        if (! is_array($created) || empty($created['id'])) {
+            throw new RuntimeException(
+                "Cloudflare accepted the record for $fqdn but returned no id, so it cannot be tracked. " .
+                'Response: ' . json_encode($created)
+            );
+        }
+
+        return (string) $created['id'];
     }
 
     /** Idempotent: a record that is already gone is a success, not an error. */

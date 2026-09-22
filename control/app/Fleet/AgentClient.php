@@ -82,12 +82,15 @@ class AgentClient
     }
 
     /**
-     * @return array<string, bool> per-part breakdown, e.g.
-     *                             ['container' => true, 'vhost' => true, 'data' => true, 'log' => true, 'network' => true]
+     * @return array<string, string> per part: "removed", "absent" or "failed".
+     *
+     * Three states rather than a boolean, because `docker rm -f` exits 0 for a
+     * container that never existed - so a delete aimed at the wrong host used
+     * to report success for work it had not done.
      */
     public function deleteSite(string $id): array
     {
-        return $this->send('delete', "/v1/sites/$id")['removed'] ?? [];
+        return $this->send('delete', "/v1/sites/$id")['parts'] ?? [];
     }
 
     public function reconcile(): array

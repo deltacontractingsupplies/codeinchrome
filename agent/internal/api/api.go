@@ -9,6 +9,7 @@ package api
 import (
 	"encoding/json"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/codeinchrome/agent/internal/sites"
@@ -126,15 +127,37 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			writeJSON(w, http.StatusUnprocessableEntity, fail("delete_failed", err.Error()))
 			return
 		}
-		all := done["container"] && done["vhost"] && done["data"] && done["log"] && done["network"]
-		body := resp{"removed": done}
-		if !all {
+
+		// Each part is "removed", "absent" or "failed". ok means NOTHING was
+		// left behind - which is not the same as "we removed everything",
+		// because a site that was never here leaves nothing behind either.
+		var failed []string
+		present := 0
+		for part, state := range done {
+			switch state {
+			case "failed":
+				failed = append(failed, part)
+			case "removed":
+				present++
+			}
+		}
+
+		body := resp{"parts": done, "basis": "each part observed before and after removal"}
+
+		if len(failed) > 0 {
 			body["ok"] = false
 			body["error"] = "partially_removed"
-			body["hint"] = "Some parts were not removed; see removed{}. Do not treat this site as gone."
+			body["hint"] = "Still present: " + strings.Join(failed, ", ") + ". Do not treat this site as gone."
 			writeJSON(w, http.StatusInternalServerError, body)
 			return
 		}
+
+		if present == 0 {
+			// Honest about doing nothing. The caller may well have aimed at
+			// the wrong host, and reporting a removal would hide that.
+			body["note"] = "Nothing was here to remove; every part was already absent."
+		}
+
 		writeJSON(w, http.StatusOK, ok(body))
 	})
 

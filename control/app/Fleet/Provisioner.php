@@ -148,29 +148,35 @@ class Provisioner
     /**
      * Remove a site completely, reporting per part.
      *
-     * Never claims success it cannot see: if the agent reports that the
-     * container went but the data did not, the row stays and says so.
+     * Each part is "removed", "absent" or "failed". The row is deleted only
+     * when nothing is left behind - and "absent" counts as nothing left
+     * behind, because a part that was never there leaves nothing either.
+     * Anything still present keeps the row, so a site whose data survived on
+     * the host is never quietly dropped from our records.
      */
     public function destroy(Site $site): array
     {
         $site->update(['status' => 'deleting']);
 
-        $removed = AgentClient::for($site->host)->deleteSite($site->site_id);
-        $dnsGone = false;
+        $parts = AgentClient::for($site->host)->deleteSite($site->site_id);
 
         try {
-            $dnsGone = $this->dns->delete($site->site_id);
+            $this->dns->delete($site->site_id);
+            $parts['dns'] = 'removed';
         } catch (\Throwable $e) {
             Log::error('could not remove DNS', ['site' => $site->site_id, 'error' => $e->getMessage()]);
+            $parts['dns'] = 'failed';
         }
 
-        $parts = $removed + ['dns' => $dnsGone];
+        $failed = array_keys(array_filter($parts, fn ($state) => $state === 'failed'));
 
-        if (! in_array(false, $parts, true)) {
+        if ($failed === []) {
             $site->delete();
         } else {
-            $failed = implode(', ', array_keys(array_filter($parts, fn ($ok) => ! $ok)));
-            $site->update(['status' => 'failed', 'last_error' => "Not fully removed: $failed"]);
+            $site->update([
+                'status' => 'failed',
+                'last_error' => 'Not fully removed: ' . implode(', ', $failed),
+            ]);
         }
 
         return $parts;
