@@ -1,0 +1,69 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  agent:
+    name: agent (go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: agent/go.mod
+          cache-dependency-path: agent/go.sum
+      - run: go vet ./...
+        working-directory: agent
+      - run: go test -race ./...
+        working-directory: agent
+      - name: gofmt
+        working-directory: agent
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "not gofmt'd:"; echo "$unformatted"; exit 1
+          fi
+
+  control:
+    name: control plane (laravel)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          # Must match the php that resolved composer.lock: Symfony 8.1
+          # requires >=8.4.1 and an older runtime fails `composer install`.
+          php-version: '8.4'
+          extensions: mbstring, xml, curl, sqlite3, zip, intl, bcmath
+          coverage: none
+      - run: composer install --prefer-dist --no-interaction --no-progress
+        working-directory: control
+      - run: cp .env.example .env && php artisan key:generate
+        working-directory: control
+      - name: Tests
+        working-directory: control
+        # PAO_DISABLE=1 is required: laravel/pao replaces the test printer when
+        # it detects an AI agent and discards the whole report on a long run.
+        run: PAO_DISABLE=1 php artisan test
+
+  shell:
+    name: infra scripts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: shellcheck
+        run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
+          shellcheck -S warning infra/*.sh
+      - name: no host may reference the production box
+        # 192.0.2.1 runs live sites of another business and is not part of this
+        # fleet. A script that learns its address is a script that can break it.
+        run: |
+          if grep -rn "157\.180\.115\.197" --include='*.sh' --include='*.php' --include='*.go' . \
+             | grep -v 'FORBIDDEN\|forbidden_ips\|NEVER TO BE'; then
+            echo "A script references the production host outside a guard."; exit 1
+          fi
+          echo "clean"
