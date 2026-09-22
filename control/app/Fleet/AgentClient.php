@@ -129,6 +129,23 @@ class AgentClient
         return (bool) ($this->send('delete', "/v1/sites/$id/files", query: ['path' => $path])['deleted'] ?? false);
     }
 
+    /** @return array{database: string, tables: array} */
+    public function dbTables(string $id): array
+    {
+        $r = $this->send('get', "/v1/sites/$id/db");
+
+        return ['database' => $r['database'] ?? '', 'tables' => $r['tables'] ?? []];
+    }
+
+    /**
+     * Runs as the site's own MySQL user. A statement that may change data is
+     * refused (AgentRefused, detail['error'] = 'needs_write') unless $write.
+     */
+    public function dbQuery(string $id, string $sql, bool $write = false): array
+    {
+        return $this->send('post', "/v1/sites/$id/db/query", ['sql' => $sql, 'write' => $write])['result'] ?? [];
+    }
+
     public function reconcile(): array
     {
         return $this->send('post', '/v1/reconcile')['changed'] ?? [];

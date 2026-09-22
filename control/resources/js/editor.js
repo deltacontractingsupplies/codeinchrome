@@ -23,6 +23,8 @@ const SITE = {
   domain: root.dataset.domain,
   url: root.dataset.url,
   filesUrl: root.dataset.files,
+  dbTablesUrl: root.dataset.dbTables,
+  dbQueryUrl: root.dataset.dbQuery,
 };
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
 const DRAFTS_KEY = `cic.drafts.${SITE.id}`;
@@ -43,8 +45,12 @@ const expanded = new Set(['/']);
 
 /* ───────────────────────── server ───────────────────────── */
 
-async function api(method, query = {}, body) {
-  const url = new URL(SITE.filesUrl, location.origin);
+function api(method, query = {}, body) {
+  return apiAt(SITE.filesUrl, method, query, body);
+}
+
+async function apiAt(base, method, query = {}, body) {
+  const url = new URL(base, location.origin);
   for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
 
   let response;
@@ -613,6 +619,149 @@ $('btnNew').addEventListener('click', async () => {
 $('btnTheirs').addEventListener('click', () => loadTheirs(active));
 $('btnMine').addEventListener('click', () => save(active, { overwrite: true }));
 
+
+/* ───────────────────────── database ───────────────────────── */
+
+let mode = 'files';
+let dbLoaded = false;
+
+function setMode(next) {
+  mode = next;
+  $('modeFiles').classList.toggle('on', next === 'files');
+  $('modeDb').classList.toggle('on', next === 'db');
+  $('tree').hidden = next !== 'files';
+  $('filesHead').hidden = next !== 'files';
+  document.querySelector('.side-site').hidden = next !== 'files';
+  $('dbSide').hidden = next !== 'db';
+  $('dbPanel').hidden = next !== 'db';
+  if (next === 'db') {
+    if (!dbLoaded) loadTables();
+    $('sql').focus();
+  } else {
+    ta.focus();
+  }
+}
+
+async function loadTables() {
+  const res = await apiAt(SITE.dbTablesUrl, 'GET');
+  const list = $('dbTables');
+  list.replaceChildren();
+  if (!res.ok) {
+    list.append(note(`Cannot read the database: ${res.hint}`, 0));
+    return res;
+  }
+  dbLoaded = true;
+  $('dbName').textContent = res.database.toUpperCase();
+  if (res.tables.length === 0) list.append(note('No tables yet', 0));
+  for (const t of res.tables) {
+    const row = document.createElement('div');
+    row.className = 'tbl';
+    row.tabIndex = 0;
+    const name = document.createElement('span');
+    name.textContent = t.name;
+    const rows = document.createElement('span');
+    rows.className = 'rows';
+    rows.textContent = `~${t.rowsEstimate}`;
+    row.title = `${t.name}: about ${t.rowsEstimate} rows (InnoDB estimate), ${t.engine}`;
+    row.append(name, rows);
+    const open = () => {
+      document.querySelectorAll('.tbl.active').forEach((n) => n.classList.remove('active'));
+      row.classList.add('active');
+      // Identifiers are quoted with backticks; a backtick inside a name is
+      // doubled, which is MySQL's own escaping rule.
+      $('sql').value = `SELECT * FROM \`${t.name.replace(/`/g, '``')}\` LIMIT 100`;
+      runSql($('sql').value);
+    };
+    row.addEventListener('click', open);
+    row.addEventListener('keydown', (e) => { if (e.key === 'Enter') open(); });
+    list.append(row);
+  }
+  return res;
+}
+
+function dbMeta(text, isError = false) {
+  $('dbMeta').textContent = text;
+  $('dbMeta').classList.toggle('error', isError);
+}
+
+function renderGrid(result) {
+  const grid = $('dbGrid');
+  grid.replaceChildren();
+  if (!result.columns.length) return;
+
+  const head = document.createElement('tr');
+  for (const c of result.columns) {
+    const th = document.createElement('th');
+    th.textContent = c;
+    head.append(th);
+  }
+  const thead = document.createElement('thead');
+  thead.append(head);
+
+  const tbody = document.createElement('tbody');
+  for (const r of result.rows) {
+    const tr = document.createElement('tr');
+    for (const v of r) {
+      const td = document.createElement('td');
+      // textContent only: a row can hold anything a visitor ever typed.
+      if (v === null) {
+        td.className = 'null';
+        td.textContent = 'NULL';
+      } else {
+        td.textContent = v;
+        td.title = v.length > 60 ? v.slice(0, 2000) : '';
+      }
+      tr.append(td);
+    }
+    tbody.append(tr);
+  }
+  grid.append(thead, tbody);
+}
+
+/**
+ * Run a statement. A person is asked in-page before anything that may change
+ * data; an agent calling cic.db.query gets the refusal and must resend with
+ * { write: true } itself - it is never auto-confirmed on its behalf.
+ */
+async function runSql(sql, { write = false, interactive = true } = {}) {
+  dbMeta('Running…');
+  let res = await apiAt(SITE.dbQueryUrl, 'POST', {}, { sql, write });
+
+  if (res.status === 409 && res.error === 'needs_write' && interactive) {
+    const yes = await ask(`This statement may change data in ${$('dbName').textContent.toLowerCase()}. Run it?`, { okLabel: 'Run it' });
+    if (!yes) {
+      dbMeta('Not run.');
+      return res;
+    }
+    res = await apiAt(SITE.dbQueryUrl, 'POST', {}, { sql, write: true });
+  }
+
+  if (!res.ok) {
+    dbMeta(res.hint || res.error, true);
+    $('dbGrid').replaceChildren();
+    return res;
+  }
+
+  const r = res.result;
+  renderGrid(r);
+  dbMeta(r.columns.length
+    ? `${r.rows.length} row(s)${r.truncated ? ' — showing the first 500' : ''} · ${r.elapsedMs} ms · ${r.mode}`
+    : `${r.rowsAffected} row(s) affected · ${r.elapsedMs} ms`);
+  if (r.mode === 'write') loadTables(); // the schema may have changed
+  return res;
+}
+
+$('modeFiles').addEventListener('click', () => setMode('files'));
+$('modeDb').addEventListener('click', () => setMode('db'));
+$('btnDbRefresh').addEventListener('click', loadTables);
+$('btnRun').addEventListener('click', () => runSql($('sql').value));
+$('sql').addEventListener('keydown', (e) => {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') {
+    e.preventDefault();
+    runSql($('sql').value);
+  }
+});
+
 /* ───────────────────────── agent API ───────────────────────── */
 
 const HELP = `window.cic — drive this editor from code. Every call returns the server's answer:
@@ -630,6 +779,14 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
   cic.rm(path)                 delete a file (not recursive)    -> { ok, deleted }
   cic.open(path)               open a file in the editor for the person watching
   cic.state()                  what is open, which tabs are unsaved or in conflict
+
+  cic.db.tables()              the site's tables, with InnoDB row estimates
+  cic.db.query(sql, { write }) run ONE statement as the site's own MySQL user
+                               -> { ok, result: { columns, rows, truncated, rowsAffected, mode } }
+                               Reads (SELECT/SHOW/DESCRIBE/EXPLAIN/WITH) run in a READ ONLY
+                               transaction. Anything else is refused with status 409 /
+                               error "needs_write" and NOTHING runs, unless you pass
+                               write: true. 500 rows and 10 s per read at most.
 
   Limits: text files only (binary files are refused rather than corrupted), 2 MB per file,
   paths are confined to this site. Anything outside it is refused with one vague message.`;
@@ -683,6 +840,18 @@ window.cic = Object.freeze({
   },
 
   rm: (path) => removeFile(path),
+
+  db: Object.freeze({
+    tables: () => loadTables(),
+    query: (sql, options = {}) => {
+      if (typeof sql !== 'string') return Promise.resolve({ ok: false, error: 'invalid', hint: 'sql must be a string' });
+      // Shown to the person watching, but never auto-confirmed: an agent must
+      // ask for write explicitly.
+      if (mode !== 'db') setMode('db');
+      $('sql').value = sql;
+      return runSql(sql, { write: options.write === true, interactive: false });
+    },
+  }),
   open: (path) => openFile(path),
 
   state() {

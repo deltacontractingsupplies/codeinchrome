@@ -87,6 +87,26 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: #2b2b2b; padd
 .modal-actions button { padding: 4px 12px; border-radius: 3px; border: 1px solid #454545; }
 .modal-actions .primary { background: var(--accent); border-color: var(--accent); color: #fff; }
 
+.side-modes { display: flex; border-bottom: 1px solid var(--border); flex: none; }
+.side-modes button { flex: 1; height: 30px; font-size: 12px; color: var(--desc); border-bottom: 1px solid transparent; }
+.side-modes button.on { color: var(--editor-fg); border-bottom-color: var(--accent); }
+.tbl { display: flex; justify-content: space-between; gap: 8px; padding: 3px 12px 3px 20px; cursor: pointer; font: 12px var(--mono); }
+.tbl:hover { background: var(--list-hover); }
+.tbl.active { background: var(--list-active); }
+.tbl .rows { color: var(--desc); }
+.dbpanel { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--editor-bg); z-index: 2; }
+.sqlbar { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }
+#sql { flex: 1; min-height: 72px; resize: vertical; background: #181818; border: 1px solid #3c3c3c; border-radius: 3px; color: var(--editor-fg); font: 13px/1.5 var(--mono); padding: 6px 8px; outline: none; }
+#sql:focus { border-color: var(--accent); }
+.run { align-self: flex-start; background: var(--accent); color: #fff; border-radius: 3px; padding: 6px 16px; }
+.dbmeta { padding: 6px 12px; color: var(--desc); font-size: 12px; border-bottom: 1px solid var(--border); }
+.dbmeta.error { color: var(--err); }
+.grid-wrap { flex: 1; overflow: auto; }
+.grid { border-collapse: collapse; font: 12px var(--mono); }
+.grid th { position: sticky; top: 0; background: #252526; text-align: left; font-weight: 600; }
+.grid th, .grid td { border: 1px solid var(--border); padding: 3px 8px; white-space: pre; max-width: 420px; overflow: hidden; text-overflow: ellipsis; vertical-align: top; }
+.grid td.null { color: var(--desc); font-style: italic; }
+
 @media (max-width: 760px) {
   .workbench { grid-template-columns: 1fr; grid-template-rows: 38% 1fr; }
   .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }

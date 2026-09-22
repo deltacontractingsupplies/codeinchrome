@@ -15,6 +15,8 @@
      data-domain="{{ $site->domain }}"
      data-url="{{ $site->url() }}"
      data-files="{{ route('files.index', $site) }}"
+     data-db-tables="{{ route('db.tables', $site) }}"
+     data-db-query="{{ route('db.query', $site) }}"
      data-back="{{ route('dashboard') }}">
 
     <header class="titlebar">
@@ -25,7 +27,11 @@
 
     <div class="workbench">
         <aside class="sidebar" aria-label="Explorer">
-            <div class="side-head">
+            <div class="side-modes" role="tablist">
+                <button type="button" id="modeFiles" class="on" role="tab">Files</button>
+                <button type="button" id="modeDb" role="tab">Database</button>
+            </div>
+            <div class="side-head" id="filesHead">
                 <span>EXPLORER</span>
                 <span class="side-actions">
                     <button type="button" id="btnNew" title="New file">＋</button>
@@ -34,6 +40,12 @@
             </div>
             <div class="side-site">{{ strtoupper($site->site_id) }}</div>
             <div id="tree" class="tree" role="tree"></div>
+            <div id="dbSide" class="tree" hidden>
+                <div class="side-head"><span id="dbName">DATABASE</span>
+                    <span class="side-actions"><button type="button" id="btnDbRefresh" title="Refresh">⟳</button></span>
+                </div>
+                <div id="dbTables"></div>
+            </div>
         </aside>
 
         <main class="editor-area">
@@ -52,6 +64,14 @@
                               aria-label="File contents" disabled></textarea>
                 </div>
             </div>
+            <section id="dbPanel" class="dbpanel" hidden>
+                <div class="sqlbar">
+                    <textarea id="sql" spellcheck="false" aria-label="SQL statement" placeholder="SELECT * FROM users LIMIT 100"></textarea>
+                    <button type="button" id="btnRun" class="run" title="Run (⌘/Ctrl Enter)">Run</button>
+                </div>
+                <div id="dbMeta" class="dbmeta">Runs as this site's own database user. Statements that change data ask first.</div>
+                <div class="grid-wrap"><table id="dbGrid" class="grid"></table></div>
+            </section>
             <div id="empty" class="empty">
                 <p>Open a file from the explorer.</p>
                 <p class="hint">Save with <kbd>⌘S</kbd> / <kbd>Ctrl S</kbd>. An AI agent can drive this page through <code>window.cic</code> — run <code>cic.help()</code> in the console.</p>

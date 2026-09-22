@@ -159,6 +159,49 @@ test('a person and an agent can both edit a real site, without erasing each othe
     expect(disk.content).not.toBe('clobbered');
   });
 
+  await test.step('the database browser shows the site database, as the site', async () => {
+    await page.getByRole('tab', { name: 'Database' }).click();
+    await expect(page.locator('#dbName')).toHaveText(`SITE_${siteName.replace(/-/g, '_').toUpperCase()}`);
+    await page.locator('.tbl', { hasText: 'users' }).first().click();
+    await expect(page.locator('#dbGrid th').first()).toHaveText('id');
+    await expect(page.locator('#dbMeta')).toContainText('· read');
+
+    // Another tenant's data, and MySQL's own tables, are out of reach.
+    const denied = await page.evaluate(() => window.cic.db.query('SELECT user FROM mysql.user'));
+    expect(denied.ok).toBe(false);
+    expect(denied.hint).toContain('denied');
+  });
+
+  await test.step('a statement that changes data asks a person first, and runs nothing until they agree', async () => {
+    await page.locator('#sql').fill('DELETE FROM users');
+    await page.getByRole('button', { name: 'Run', exact: true }).click();
+    await expect(page.locator('#modal')).toBeVisible();
+    await expect(page.locator('#modalText')).toContainText('may change data');
+    await page.getByRole('button', { name: 'Cancel' }).click();
+    await expect(page.locator('#dbMeta')).toHaveText('Not run.');
+  });
+
+  await test.step('an agent must ask for write explicitly; it is never confirmed for it', async () => {
+    const insert = "INSERT INTO users (name, email, password) VALUES ('<img src=x onerror=\"window.__dbpwned=1\">', 'x@example.test', 'x')";
+    const refused = await page.evaluate((q) => window.cic.db.query(q), insert);
+    expect(refused.status).toBe(409);
+    expect(refused.error).toBe('needs_write');
+    await expect(page.locator('#modal')).toBeHidden();
+
+    const written = await page.evaluate((q) => window.cic.db.query(q, { write: true }), insert);
+    expect(written.ok).toBe(true);
+    expect(written.result.rowsAffected).toBe(1);
+  });
+
+  await test.step('stored markup in a row is shown as text, never run', async () => {
+    const res = await page.evaluate(() => window.cic.db.query('SELECT name FROM users'));
+    expect(res.result.rows[0][0]).toContain('<img');
+    await expect(page.locator('#dbGrid td').first()).toContainText('<img src=x');
+    expect(await page.locator('#dbGrid img').count()).toBe(0);
+    expect(await page.evaluate(() => window.__dbpwned)).toBeUndefined();
+    await page.getByRole('tab', { name: 'Files' }).click();
+  });
+
   await test.step('the change is live on the site itself', async () => {
     const [address] = await waitForDns(`${siteName}.codeinchrome.com`);
 

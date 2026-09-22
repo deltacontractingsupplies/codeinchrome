@@ -22,7 +22,7 @@ code exists.
       site, privileges limited to its own database, unreachable from the
       internet and from other tenants; credentials written into the site's
       `.env`; dropped with the site
-- [ ] **Database browser** in the editor (tables, rows, queries as the site's
+- [x] **Database browser** in the editor (tables, rows, queries as the site's
       own user) instead of a public phpMyAdmin
 - [ ] **Disk quotas** per plan, enforced and reported
 - [ ] **Backups**: nightly files + database per site, off-host, restore tested

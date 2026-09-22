@@ -42,6 +42,9 @@ return Application::configure(basePath: dirname(__DIR__))
          */
         $middleware->trimStrings(except: [
             'content',
+            // SQL too: whitespace inside a string literal is part of the
+            // statement, and a trailing comment needs its newline.
+            'sql',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

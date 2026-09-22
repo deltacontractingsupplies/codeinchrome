@@ -225,6 +225,44 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"path": path, "deleted": true}))
 	})
 
+	// ── Database browser ─────────────────────────────────────────────────
+	// Runs as the site's own MySQL user; see sites/dbquery.go.
+
+	mux.HandleFunc("GET /v1/sites/{id}/db", func(w http.ResponseWriter, r *http.Request) {
+		tables, err := mgr.Tables(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("db_unavailable", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{
+			"database": sites.DBName(r.PathValue("id")),
+			"tables":   tables,
+			"basis":    "information_schema, queried as the site's own user; row counts are InnoDB estimates",
+		}))
+	})
+
+	mux.HandleFunc("POST /v1/sites/{id}/db/query", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			SQL   string `json:"sql"`
+			Write bool   `json:"write"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 256<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {sql, write?}"))
+			return
+		}
+		result, err := mgr.Query(r.Context(), r.PathValue("id"), body.SQL, body.Write)
+		if errors.Is(err, sites.ErrNeedsWrite) {
+			writeJSON(w, http.StatusUnprocessableEntity, fail("needs_write",
+				"This statement may change data. Nothing was run. Send it again with write: true if that is intended."))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("query_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"result": result}))
+	})
+
 	mux.HandleFunc("DELETE /v1/sites/{id}", func(w http.ResponseWriter, r *http.Request) {
 		done, err := mgr.Delete(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -268,7 +306,7 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, fail("no_such_route",
 			"GET /healthz, GET /v1/host, GET|POST /v1/sites, GET|DELETE /v1/sites/{id}, "+
-				"GET|PUT|DELETE /v1/sites/{id}/files, POST /v1/reconcile"))
+				"GET|PUT|DELETE /v1/sites/{id}/files, GET /v1/sites/{id}/db, POST /v1/sites/{id}/db/query, POST /v1/reconcile"))
 	})
 
 	return mux

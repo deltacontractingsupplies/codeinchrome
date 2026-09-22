@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\DatabaseController;
 use App\Http\Controllers\FileController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\WebhookController;
@@ -32,6 +33,11 @@ Route::middleware('auth')->group(function () {
     Route::get('/sites/{site}/files', [FileController::class, 'index'])->name('files.index');
     Route::put('/sites/{site}/files', [FileController::class, 'store'])->name('files.store');
     Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->name('files.destroy');
+
+    // The database browser. Queries are throttled harder than file reads:
+    // each one opens a MySQL connection on a host shared with other tenants.
+    Route::get('/sites/{site}/db', [DatabaseController::class, 'tables'])->name('db.tables');
+    Route::post('/sites/{site}/db/query', [DatabaseController::class, 'query'])->middleware('throttle:60,1')->name('db.query');
 });
 
 /*
