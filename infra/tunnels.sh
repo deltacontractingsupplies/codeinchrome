@@ -16,8 +16,19 @@
 # deploy. See config/fleet.php.
 
 set -Eeuo pipefail
-cd "$(dirname "$0")/.."
-. infra/hosts.env
+
+# Runs both from the repo (infra/tunnels.sh) and from the control host, where
+# it is deployed next to hosts.env rather than inside an infra/ directory.
+# Hardcoding one layout broke the deploy at the last step.
+here=$(cd "$(dirname "$0")" && pwd)
+for candidate in "$here/hosts.env" "$here/../infra/hosts.env" "$here/infra/hosts.env"; do
+  if [[ -f "$candidate" ]]; then
+    # shellcheck disable=SC1090
+    . "$candidate"
+    break
+  fi
+done
+[[ -n "${CIC_HOSTS:-}" ]] || { echo "cannot find hosts.env (looked beside $here)" >&2; exit 1; }
 
 action=${1:-check}
 
@@ -40,7 +51,7 @@ ExecStart=/usr/bin/ssh -NT \\
   -o ServerAliveInterval=15 \\
   -o ServerAliveCountMax=3 \\
   -o StrictHostKeyChecking=accept-new \\
-  -L 127.0.0.1:$port:127.0.0.1:9440 root@$ip
+  -L 127.0.0.1:$port:127.0.0.1:9440 ${CIC_TUNNEL_USER:-cictunnel}@$ip
 Restart=always
 RestartSec=5
 User=root
@@ -64,7 +75,7 @@ up_foreground() {
     fi
     ssh -fNT -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 \
         -o StrictHostKeyChecking=accept-new \
-        -L "127.0.0.1:$port:127.0.0.1:9440" "root@$ip"
+        -L "127.0.0.1:$port:127.0.0.1:9440" "${CIC_TUNNEL_USER:-root}@$ip"
     echo "  $name: tunnel up on $port"
   done
 }

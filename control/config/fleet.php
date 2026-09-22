@@ -21,9 +21,18 @@ return [
      *
      * See infra/tunnels.sh for the systemd units that hold the tunnels open.
      */
+    /*
+     * Customer hosts ONLY.
+     *
+     * h2 is deliberately absent: it runs this control plane, which holds every
+     * host's agent token and the Cloudflare API key. Those are the keys to the
+     * entire fleet, and they have no business sitting on a machine that also
+     * runs customer containers. Container isolation here is real and tested
+     * (infra/verify-isolation.sh), but a single escape should not also be a
+     * total compromise, and separating the two costs one machine.
+     */
     'hosts' => [
         'h1' => ['ip' => '203.0.113.105',   'tunnel_port' => 9441, 'capacity' => 60],
-        'h2' => ['ip' => '203.0.113.104',  'tunnel_port' => 9442, 'capacity' => 30],
         'h3' => ['ip' => '203.0.113.102',  'tunnel_port' => 9443, 'capacity' => 60],
         'h4' => ['ip' => '203.0.113.103',  'tunnel_port' => 9444, 'capacity' => 60],
     ],
@@ -40,7 +49,6 @@ return [
      */
     'tokens' => [
         'h1' => env('CIC_TOKEN_H1'),
-        'h2' => env('CIC_TOKEN_H2'),
         'h3' => env('CIC_TOKEN_H3'),
         'h4' => env('CIC_TOKEN_H4'),
     ],
