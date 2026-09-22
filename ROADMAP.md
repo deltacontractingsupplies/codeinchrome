@@ -36,7 +36,7 @@ code exists.
       billing portal link comes from the webhook
 - [ ] **Billing products** (blocked on a human: products can only be created
       in the Lemon Squeezy dashboard, ideally in a codeinchrome store rather
-      than that other store; then set LS_VARIANT_STARTER/PRO/STUDIO and the webhook secret)
+      than that other store - the API key sees only that other store; then set LS_VARIANT_STARTER/PRO/STUDIO and the webhook secret)
 - [x] **Artisan / composer from the editor**: a fixed allow-list, run in the
       site's container as www-data; destructive commands need confirm
 - [x] **Logs**: Laravel log, request log and PHP/Apache output in the editor
@@ -59,4 +59,6 @@ code exists.
 - [x] **Security headers and a strict Content-Security-Policy** on the control plane
 - [x] **Dependency vulnerability scanning** in CI, weekly as well as on push
       (composer audit, npm audit, govulncheck with the toolchain pinned)
-- [ ] **Public repository** (blocked on `gh auth login`)
+- [ ] **Public repository** (blocked on `gh auth login`; then
+      `infra/publish-repo.sh --publish OWNER/NAME` pushes a history-cleaned
+      copy and refuses if any .env secret, private key or artifact is in it)

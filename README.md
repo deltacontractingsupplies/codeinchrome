@@ -123,7 +123,9 @@ Blocked on the owner, not on code:
 - **Billing products** - Lemon Squeezy products are dashboard-only; the
   configured store belongs to another business. Checkout is built and was
   validated against the live API.
-- **Publishing this repository** - needs `gh auth login`.
+- **Publishing this repository** - needs `gh auth login`, then
+  `infra/publish-repo.sh --publish OWNER/NAME` (a history-cleaned copy,
+  scanned for secrets; this working repository is never rewritten).
 
 ## Licence
 
