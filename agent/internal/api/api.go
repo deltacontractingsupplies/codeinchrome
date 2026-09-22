@@ -121,6 +121,75 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"site": site}))
 	})
 
+	// ── Files ────────────────────────────────────────────────────────────
+	//
+	// The panel drives these, so every path here is attacker-controlled. The
+	// containment guarantee lives in sites.resolve, which compares the path
+	// AFTER symlinks are resolved against the site's own app directory - a
+	// string check alone catches neither an encoded traversal nor a symlink.
+	// Errors are deliberately vague: telling a caller whether /etc/shadow
+	// exists is itself information.
+
+	mux.HandleFunc("GET /v1/sites/{id}/files", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			path = "/"
+		}
+
+		if r.URL.Query().Get("read") == "1" {
+			content, err := mgr.ReadFile(r.Context(), r.PathValue("id"), path)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, fail("cannot_read", err.Error()))
+				return
+			}
+			writeJSON(w, http.StatusOK, ok(resp{"path": path, "content": content}))
+			return
+		}
+
+		listing, err := mgr.ListFiles(r.Context(), r.PathValue("id"), path)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_list", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"listing": listing}))
+	})
+
+	mux.HandleFunc("PUT /v1/sites/{id}/files", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Path    string `json:"path"`
+			Content string `json:"content"`
+		}
+		// Bounded at twice the file limit so the envelope and JSON escaping
+		// have room, and no further: an unbounded body is a memory exhaustion
+		// primitive on a host shared by every other customer.
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*sites.MaxFileSize)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {path, content}"))
+			return
+		}
+		if err := mgr.WriteFile(r.Context(), r.PathValue("id"), body.Path, body.Content); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_write", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{
+			"path":  body.Path,
+			"bytes": len(body.Content),
+			"basis": "written to a temporary file in the same directory and renamed",
+		}))
+	})
+
+	mux.HandleFunc("DELETE /v1/sites/{id}/files", func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Query().Get("path")
+		if path == "" {
+			writeJSON(w, http.StatusBadRequest, fail("no_path", "pass ?path="))
+			return
+		}
+		if err := mgr.DeleteFile(r.Context(), r.PathValue("id"), path); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_delete", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"path": path, "deleted": true}))
+	})
+
 	mux.HandleFunc("DELETE /v1/sites/{id}", func(w http.ResponseWriter, r *http.Request) {
 		done, err := mgr.Delete(r.Context(), r.PathValue("id"))
 		if err != nil {
@@ -163,7 +232,8 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, fail("no_such_route",
-			"GET /healthz, GET /v1/host, GET|POST /v1/sites, GET|DELETE /v1/sites/{id}, POST /v1/reconcile"))
+			"GET /healthz, GET /v1/host, GET|POST /v1/sites, GET|DELETE /v1/sites/{id}, "+
+				"GET|PUT|DELETE /v1/sites/{id}/files, POST /v1/reconcile"))
 	})
 
 	return mux
