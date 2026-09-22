@@ -33,7 +33,7 @@ class SiteProvision extends Command
         // Deliberately not "your site is live". The container is running and
         // the vhost is written, but the certificate is issued by Caddy on the
         // FIRST request, so TLS is not yet proven at this moment.
-        $this->line('The certificate is issued on the first request, so allow a few seconds before it answers over HTTPS.');
+        $this->line('The certificate is issued on the first request. The name usually resolves within a minute, but some resolvers take several (a carrier resolver took 382s when measured).');
 
         return self::SUCCESS;
     }

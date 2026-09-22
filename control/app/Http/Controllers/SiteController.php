@@ -38,9 +38,16 @@ class SiteController extends Controller
 
         return redirect()->route('dashboard')->with(
             'status',
-            // Not "your site is live": the certificate is issued on the first
-            // request, so it is not proven at this moment.
-            "{$site->domain} is building. The certificate is issued on the first request, so give it a few seconds."
+            // Not "your site is live", and not "a few seconds" either.
+            //
+            // The certificate is issued on the first request, so TLS is not
+            // proven at this moment. And a brand-new address reaches different
+            // networks at very different speeds: measured on 2026-09-22, a new
+            // record was answered by 8.8.8.8 within 5 seconds, by 1.1.1.1 after
+            // 31, and by a mobile carrier's resolver after 382 - over six
+            // minutes. Promising seconds would be true for some customers and
+            // plainly false for others.
+            "{$site->domain} is building. It is usually reachable within a minute, but on some networks a brand-new address can take a few minutes to appear."
         );
     }
 

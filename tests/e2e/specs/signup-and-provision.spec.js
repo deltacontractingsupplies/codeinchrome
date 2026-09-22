@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test';
-import { waitForDns } from '../helpers/dns.js';
+import { waitForDns, waitForDnsGone } from '../helpers/dns.js';
+import { httpsGet } from '../helpers/https.js';
 import { destroySite } from '../helpers/cleanup.js';
 
 /**
@@ -26,7 +27,7 @@ test.describe.configure({ mode: 'serial' });
 // abandoned containers and DNS records on two hosts.
 test.afterAll(() => destroySite(siteName));
 
-test('a visitor can sign up, provision a site, and see it live', async ({ page, request }) => {
+test('a visitor can sign up, provision a site, and see it live', async ({ page }) => {
   await test.step('the landing page is there', async () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toContainText('Laravel hosting');
@@ -55,41 +56,44 @@ test('a visitor can sign up, provision a site, and see it live', async ({ page, 
     await expect(page.getByRole('link', { name: `${siteName}.codeinchrome.com` })).toBeVisible();
   });
 
-  await test.step('the name resolves before anything asks the OS for it', async () => {
-    // MUST come before any request below. See helpers/dns.js: one lookup made
-    // too early negatively caches in the OS resolver for ~30 minutes and makes
-    // a perfectly healthy site look dead for the rest of the run.
+  let address;
+
+  await test.step('the record is published by the zone', async () => {
+    // Asked of the authoritative nameservers - see helpers/dns.js for why no
+    // recursive resolver, and certainly not this machine's, gets a vote.
     const addresses = await waitForDns(`${siteName}.codeinchrome.com`);
     expect(addresses.length).toBeGreaterThan(0);
+    address = addresses[0];
   });
+
+  const get = (path) => httpsGet(`${siteName}.codeinchrome.com`, path, address);
 
   await test.step('the site actually serves Laravel over HTTPS', async () => {
     // Polled rather than slept: the certificate is issued on first contact and
-    // how long that takes is not ours to predict.
+    // how long that takes is not ours to predict. Certificate verification is
+    // fully on - a self-signed or wrong-name certificate fails here.
+    let last;
     await expect.poll(async () => {
-      try {
-        const response = await request.get(siteUrl, { timeout: 20_000, ignoreHTTPSErrors: false });
-        return response.status();
-      } catch {
-        return 0; // TLS not ready yet
-      }
+      last = await get('/');
+      return last.status;
     }, {
-      message: `${siteUrl} never answered 200`,
+      message: `${siteUrl} never answered 200 (last: ${JSON.stringify(last?.error ?? last?.status)})`,
       intervals: [5_000],
       timeout: 150_000,
     }).toBe(200);
 
-    const response = await request.get(siteUrl);
-    expect(await response.text()).toContain('Laravel');
+    expect(last.body).toContain('Laravel');
   });
 
   await test.step('nothing that must stay private is reachable', async () => {
     for (const path of ['/.env', '/composer.lock', '/artisan', '/storage/logs/laravel.log', '/vendor/autoload.php', '/.git/config']) {
-      const response = await request.get(`${siteUrl}${path}`, { failOnStatusCode: false });
-      expect(response.status(), `${path} must not be served`).not.toBe(200);
+      const response = await get(path);
 
-      const body = await response.text().catch(() => '');
-      expect(body, `${path} leaked an application key`).not.toContain('APP_KEY=base64:');
+      // A connection failure is NOT a pass here. The site answered 200 a
+      // moment ago, so status 0 would mean the probe proved nothing.
+      expect(response.status, `${path}: no answer at all, so this probe proved nothing`).not.toBe(0);
+      expect(response.status, `${path} must not be served`).not.toBe(200);
+      expect(response.body, `${path} leaked an application key`).not.toContain('APP_KEY=base64:');
     }
   });
 
@@ -100,14 +104,20 @@ test('a visitor can sign up, provision a site, and see it live', async ({ page, 
     await expect(page.getByText(/was removed/)).toBeVisible();
     await expect(page.getByText('No sites yet')).toBeVisible();
 
-    // Observed, not assumed: the domain must stop answering.
-    await expect.poll(async () => {
-      try {
-        const response = await request.get(siteUrl, { timeout: 10_000 });
-        return response.status();
-      } catch {
-        return 0;
-      }
-    }, { message: 'the deleted site still answers', intervals: [3_000], timeout: 60_000 }).not.toBe(200);
+    // Two separate facts, each observed rather than inferred.
+    //
+    // The HOST stops serving it. Asked of the old address directly: the
+    // previous version of this check went through the OS resolver, so a name
+    // that merely failed to resolve came back as status 0, which is "not 200",
+    // and the assertion passed without proving the host had stopped serving
+    // anything at all.
+    await expect.poll(async () => (await get('/')).status, {
+      message: 'the host still serves the deleted site',
+      intervals: [3_000],
+      timeout: 60_000,
+    }).not.toBe(200);
+
+    // And the zone stops publishing it.
+    await waitForDnsGone(`${siteName}.codeinchrome.com`);
   });
 });

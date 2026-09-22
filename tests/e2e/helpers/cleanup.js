@@ -1,26 +1,62 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 
-const CONTROL = fileURLToPath(new URL('../../../control', import.meta.url));
+const LOCAL_CONTROL = fileURLToPath(new URL('../../../control', import.meta.url));
 
 /**
- * Remove a site through the control plane, whatever state the test left it in.
+ * Remove a site through THE CONTROL PLANE THE TEST ACTUALLY USED.
  *
- * Tests that provision against a real fleet must clean up even when they fail,
- * or every failed run abandons a container, a DNS record and a held name. An
- * earlier version of the config CLAIMED every spec cleaned up in a finally and
- * no spec actually did - two abandoned sites on two hosts were the proof.
+ * This used to always run `artisan site:reap` locally, even when the suite was
+ * pointed at production. Against production that was actively wrong: the local
+ * database has no row for the site, so reap fell through to sweeping every
+ * host and withdrawing the DNS record - which worked - while production kept
+ * a row saying the site was `live`. Five sites ended up marked live in
+ * production with no container and no DNS behind them, and fleet:audit was the
+ * only thing that knew.
+ *
+ * So the cleanup follows the base url: local runs reap locally, and a run
+ * against app.codeinchrome.com reaps ON the control host, over ssh.
  */
+function controlTarget() {
+  const base = process.env.CIC_BASE_URL || 'http://127.0.0.1:8123';
+
+  if (/127\.0\.0\.1|localhost/.test(base)) {
+    return { kind: 'local' };
+  }
+
+  return {
+    kind: 'remote',
+    host: process.env.CIC_CONTROL_SSH || 'root@203.0.113.104',
+    path: process.env.CIC_CONTROL_PATH || '/srv/control',
+  };
+}
+
 export function destroySite(siteId) {
+  const target = controlTarget();
+
   try {
-    execFileSync('php', ['artisan', 'site:reap', siteId], {
-      cwd: CONTROL,
-      stdio: 'pipe',
-      timeout: 120_000,
-    });
+    if (target.kind === 'local') {
+      execFileSync('php', ['artisan', 'site:reap', siteId], {
+        cwd: LOCAL_CONTROL,
+        stdio: 'pipe',
+        timeout: 180_000,
+      });
+    } else {
+      execFileSync(
+        'ssh',
+        [
+          '-o', 'ConnectTimeout=20',
+          '-o', 'StrictHostKeyChecking=accept-new',
+          target.host,
+          `cd ${target.path} && sudo -u codeinchrome php8.4 artisan site:reap ${JSON.stringify(siteId)}`,
+        ],
+        { stdio: 'pipe', timeout: 180_000 },
+      );
+    }
   } catch (error) {
     // Reported, never thrown: a cleanup failure must not mask the real result
     // of the test, but it must not be silent either.
-    console.warn(`[cleanup] could not remove ${siteId}: ${error.stdout?.toString() || error.message}`);
+    const detail = error.stdout?.toString() || error.stderr?.toString() || error.message;
+    console.warn(`[cleanup] could not remove ${siteId} via ${target.kind} control plane: ${detail}`);
   }
 }

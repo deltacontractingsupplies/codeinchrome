@@ -96,12 +96,12 @@ class AgentClient
     /** @return array{path: string, entries: array, truncated: bool} */
     public function listFiles(string $id, string $path = '/'): array
     {
-        return $this->send('get', "/v1/sites/$id/files", ['path' => $path])['listing'] ?? [];
+        return $this->send('get', "/v1/sites/$id/files", query: ['path' => $path])['listing'] ?? [];
     }
 
     public function readFile(string $id, string $path): string
     {
-        return $this->send('get', "/v1/sites/$id/files", ['read' => 1, 'path' => $path])['content'] ?? '';
+        return $this->send('get', "/v1/sites/$id/files", query: ['read' => 1, 'path' => $path])['content'] ?? '';
     }
 
     public function writeFile(string $id, string $path, string $content): array
@@ -111,7 +111,7 @@ class AgentClient
 
     public function deleteFile(string $id, string $path): bool
     {
-        return (bool) ($this->send('delete', "/v1/sites/$id/files", ['path' => $path])['deleted'] ?? false);
+        return (bool) ($this->send('delete', "/v1/sites/$id/files", query: ['path' => $path])['deleted'] ?? false);
     }
 
     public function reconcile(): array
@@ -125,23 +125,45 @@ class AgentClient
      *                           "nothing happened"
      * @throws AgentRefused      the agent answered and said no, with a reason
      */
-    private function send(string $method, string $path, array $body = [], bool $authenticated = true): array
+    /**
+     * Query parameters and request bodies are kept STRICTLY separate here,
+     * because Laravel's HTTP client gives the same second argument three
+     * different meanings depending on the verb:
+     *
+     *   get($url, $array)     - REPLACES the url's query string, even when the
+     *                           array is empty
+     *   delete($url, $array)  - sends the array as the request BODY, and the
+     *                           url's query survives
+     *   put($url, $array)     - sends the array as the JSON body
+     *
+     * Passing `[]` uniformly produced two separate silent failures: every file
+     * READ came back as a directory listing because `?read=1&path=...` was
+     * wiped off the url, and every file DELETE was refused with `no_path`
+     * because the path went into a body the agent does not read. Both survived
+     * the live checks, which used curl directly rather than this class.
+     *
+     * So: $query is always built into the url, $body is only ever sent for the
+     * verbs that carry one, and the second argument is never `[]`.
+     */
+    private function send(string $method, string $path, array $body = [], bool $authenticated = true, array $query = []): array
     {
         $request = Http::timeout($this->timeout)->acceptJson();
         if ($authenticated) {
             $request = $request->withToken($this->token);
         }
 
-        // $body must be passed as the ARRAY, never baked into the url.
-        //
-        // Laravel treats the second argument of get()/delete() as the query
-        // and REPLACES whatever the url already had - including with an empty
-        // array. Building "?read=1&path=..." into the string therefore sent
-        // the agent a bare `/files` with no query at all, so every read
-        // returned a directory listing and every path resolved to the site
-        // root. It went unnoticed because the live checks used curl directly.
+        $url = $this->baseUrl . $path;
+        if ($query !== []) {
+            $url .= '?' . http_build_query($query);
+        }
+
         try {
-            $response = $request->{$method}($this->baseUrl . $path, $body);
+            $response = match (strtolower($method)) {
+                // null, not []: an empty array would replace the query we just built.
+                'get' => $request->get($url),
+                'delete' => $request->delete($url),
+                default => $request->{$method}($url, $body),
+            };
         } catch (ConnectionException $e) {
             throw new AgentUnreachable(
                 "Cannot reach the agent on [{$this->host}] at {$this->baseUrl}. " .

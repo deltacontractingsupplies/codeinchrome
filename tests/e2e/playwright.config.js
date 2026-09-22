@@ -27,5 +27,25 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
-  projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
+  projects: [
+    {
+      name: 'chromium',
+      use: {
+        ...devices['Desktop Chrome'],
+        launchOptions: {
+          args: [
+            // Chrome speculatively resolves every link it renders. The
+            // dashboard shows a link to the site the instant it is created,
+            // so the prefetch fires BEFORE the DNS record has propagated,
+            // gets NXDOMAIN, and that negative answer lands in the shared
+            // macOS resolver cache for the zone's SOA minimum - roughly half
+            // an hour. Node then inherits it, and a site that is live and
+            // serving looks dead for the rest of the run. The spec passed in
+            // isolation and failed in a full run for exactly this reason.
+            '--dns-prefetch-disable',
+          ],
+        },
+      },
+    },
+  ],
 });

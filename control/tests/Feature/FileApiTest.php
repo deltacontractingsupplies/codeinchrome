@@ -85,6 +85,40 @@ class FileApiTest extends TestCase
             ->assertOk()->assertJsonPath('deleted', true);
     }
 
+    /**
+     * Asserts the URL the agent ACTUALLY receives.
+     *
+     * Two bugs hid here, both silent: a read whose query was wiped came back
+     * as a directory listing, and a delete whose path went into the body was
+     * refused as `no_path`. Both passed every assertion about the response
+     * shape, because the fake answered the same either way.
+     */
+    public function test_the_agent_receives_the_path_in_the_query_string(): void
+    {
+        $this->actingAs($this->owner)
+            ->getJson(route('files.index', ['site' => $this->site, 'read' => 1, 'path' => '/routes/web.php']))
+            ->assertOk();
+
+        Http::assertSent(fn ($r) => $r->method() === 'GET'
+            && str_contains($r->url(), 'read=1')
+            && str_contains(urldecode($r->url()), 'path=/routes/web.php'));
+
+        $this->actingAs($this->owner)
+            ->deleteJson(route('files.destroy', ['site' => $this->site, 'path' => '/app/X.php']))
+            ->assertOk();
+
+        Http::assertSent(fn ($r) => $r->method() === 'DELETE'
+            && str_contains(urldecode($r->url()), 'path=/app/X.php'));
+
+        $this->actingAs($this->owner)
+            ->getJson(route('files.index', ['site' => $this->site, 'path' => '/config']))
+            ->assertOk();
+
+        Http::assertSent(fn ($r) => $r->method() === 'GET'
+            && str_contains(urldecode($r->url()), 'path=/config')
+            && ! str_contains($r->url(), 'read=1'));
+    }
+
     public function test_a_stranger_gets_404_not_403(): void
     {
         $stranger = User::factory()->create(['plan' => 'pro']);
