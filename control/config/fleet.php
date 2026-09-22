@@ -75,9 +75,10 @@ return [
 
     /*
      * The zone every free subdomain is created under, and the hosts that are
-     * off limits. 192.0.2.1 is a production mail server with live
-     * sites of another business on it and is not part of this fleet.
+     * off limits. The excluded address below [fleet-guard-ok] belongs to a
+     * production mail server with live sites of another business on it, which is not
+     * part of this fleet and must never be provisioned onto.
      */
     'zone' => env('CIC_ZONE', 'codeinchrome.com'),
-    'forbidden_ips' => ['192.0.2.1'],
+    'forbidden_ips' => ['192.0.2.1'], // [fleet-guard-ok]
 ];

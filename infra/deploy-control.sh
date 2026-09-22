@@ -144,6 +144,10 @@ control_key=$(ssh_ 'cat /root/.ssh/id_ed25519.pub')
 
 for entry in $CIC_HOSTS; do
   h=${entry%%:*}; hip=${entry##*:}
+  # Unquoted heredoc ON PURPOSE: $control_key must expand HERE, on the client,
+  # because the remote host has no way to know the control host's public key.
+  # Everything that must NOT expand locally is escaped below.
+  # shellcheck disable=SC2087
   ssh -o StrictHostKeyChecking=accept-new "root@$hip" "bash -s" <<REMOTE
 set -Eeuo pipefail
 id -u cictunnel >/dev/null 2>&1 || useradd -r -m -d /home/cictunnel -s /usr/sbin/nologin cictunnel

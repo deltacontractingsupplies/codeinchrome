@@ -18,15 +18,25 @@ ok()   { printf '\033[32m  ok\033[0m %s\n' "$*"; }
 warn() { printf '\033[33m  !!\033[0m %s\n' "$*"; }
 die()  { printf '\033[31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
 
+# --verify runs ONLY the post-condition checks and changes nothing. It used to
+# be accepted and silently ignored, so anyone running it expecting a read-only
+# check got a full bootstrap - which restarts docker and rewrites configs on a
+# live host. shellcheck found the dead variable; the flag was the bug.
 VERIFY_ONLY=0
 [[ "${1:-}" == "--verify" ]] && VERIFY_ONLY=1
 
+# Preconditions and constants stay OUTSIDE the mutating block: both paths need
+# them, and the verification summary reads CIC_ROOT and PRETTY_NAME. Putting
+# them inside meant `--verify` died on "unbound variable" after printing every
+# check correctly.
 [[ $EUID -eq 0 ]] || die "run as root"
 . /etc/os-release
 [[ "${ID:-}" == "ubuntu" ]] || die "expected Ubuntu, found ${PRETTY_NAME:-unknown}"
 
 CIC_ROOT=/opt/codeinchrome
 CUSTOMER_ROOT=/srv/customers
+
+if [[ $VERIFY_ONLY -eq 0 ]]; then
 
 # ─────────────────────────────────────────────────────────────────────────────
 log "packages"
@@ -222,6 +232,10 @@ ok "swap active: $(free -h --si | awk '/^Swap:/{print $2}')"
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Post-conditions. Every one is observed, never inferred from "the step ran".
+else
+  log "verify only: changing nothing"
+fi
+
 log "verifying"
 fails=0
 # `cmd | grep -q` is unsafe under `set -o pipefail`: grep -q exits on the first

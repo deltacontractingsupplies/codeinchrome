@@ -17,24 +17,24 @@ func TestValidID(t *testing.T) {
 	}
 
 	invalid := map[string]string{
-		"":                       "empty",
-		"ab":                     "too short",
+		"":   "empty",
+		"ab": "too short",
 		"a2345678901234567890123456789012345678901": "41 chars, over the ceiling",
-		"-lead":                  "leading hyphen breaks DNS labels",
-		"trail-":                 "trailing hyphen breaks DNS labels",
-		"Upper":                  "uppercase is not valid in a DNS label",
-		"under_score":            "underscore is not valid in a DNS label",
-		"dot.ted":                "a dot would create a subdomain level",
-		"../etc/passwd":          "path traversal",
-		"a/b":                    "path separator",
-		`a\b`:                    "windows path separator",
-		"a b":                    "space",
-		"a--b":                   "consecutive hyphens collide with punycode",
-		"site;rm -rf /":          "shell metacharacters",
-		"site$(whoami)":          "command substitution",
-		"site\nnewline":          "newline could split a config file",
-		"site\x00null":           "null byte",
-		"--flag":                 "could be read as a docker flag",
+		"-lead":         "leading hyphen breaks DNS labels",
+		"trail-":        "trailing hyphen breaks DNS labels",
+		"Upper":         "uppercase is not valid in a DNS label",
+		"under_score":   "underscore is not valid in a DNS label",
+		"dot.ted":       "a dot would create a subdomain level",
+		"../etc/passwd": "path traversal",
+		"a/b":           "path separator",
+		`a\b`:           "windows path separator",
+		"a b":           "space",
+		"a--b":          "consecutive hyphens collide with punycode",
+		"site;rm -rf /": "shell metacharacters",
+		"site$(whoami)": "command substitution",
+		"site\nnewline": "newline could split a config file",
+		"site\x00null":  "null byte",
+		"--flag":        "could be read as a docker flag",
 	}
 	for id, why := range invalid {
 		if err := ValidID(id); err == nil {
@@ -54,13 +54,13 @@ func TestValidDomain(t *testing.T) {
 	}
 
 	invalid := map[string]string{
-		"":                        "empty",
-		"localhost":               "no dot, not a real public domain",
+		"":                         "empty",
+		"localhost":                "no dot, not a real public domain",
 		"evil.com {\n}\nother.com": "braces and newlines could close the Caddy block",
-		"a.com\nb.com":            "newline could inject a second site block",
-		`a.com"`:                  "quote could break out of a quoted value",
-		"a.com\\":                 "backslash escape",
-		"has space.com":           "space",
+		"a.com\nb.com":             "newline could inject a second site block",
+		`a.com"`:                   "quote could break out of a quoted value",
+		"a.com\\":                  "backslash escape",
+		"has space.com":            "space",
 	}
 	for d, why := range invalid {
 		if err := validDomain(d); err == nil {

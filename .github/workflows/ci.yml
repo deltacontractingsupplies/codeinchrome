@@ -58,12 +58,21 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -S warning infra/*.sh
-      - name: no host may reference the production box
+      - name: no code may target the production box
         # 192.0.2.1 runs live sites of another business and is not part of this
-        # fleet. A script that learns its address is a script that can break it.
+        # fleet. Code that learns its address is code that can break it.
+        #
+        # A mention is allowed ONLY on a line carrying the literal marker
+        # [fleet-guard-ok], which a person has to add deliberately. Matching on
+        # nearby words like "forbidden" instead would let any comment through,
+        # which is how the first version of this check passed on a line that
+        # simply described the host.
         run: |
-          if grep -rn "157\.180\.115\.197" --include='*.sh' --include='*.php' --include='*.go' . \
-             | grep -v 'FORBIDDEN\|forbidden_ips\|NEVER TO BE'; then
-            echo "A script references the production host outside a guard."; exit 1
+          if grep -rn "157\.180\.115\.197" \
+               --include='*.sh' --include='*.php' --include='*.go' --include='*.js' . \
+             | grep -v '\[fleet-guard-ok\]'; then
+            echo
+            echo "The production host is referenced without a [fleet-guard-ok] marker."
+            exit 1
           fi
           echo "clean"
