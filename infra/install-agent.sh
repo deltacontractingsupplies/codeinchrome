@@ -142,14 +142,18 @@ check "container cannot reach admin API" \
 # read the directory that caddy cannot, so it passes while production fails.
 check "caddy user can read vhost dir" 'sudo -u caddy test -r '"$CIC"'/caddy/sites'
 check "caddy user CANNOT read agent token" '! sudo -u caddy test -r '"$CIC"'/etc/agent.env'
-check "no unmatched import glob"      '! journalctl -u caddy --since "-60s" -o cat | grep -q "No files matching import"'
-# With at least one vhost present caddy must actually be bound to 443. Binding
-# nothing is the exact shape this outage took.
+# These three only mean anything once a vhost exists. On a fresh host the
+# import glob CORRECTLY matches nothing and caddy CORRECTLY binds no port, so
+# asserting otherwise fails every new host for doing the right thing - which is
+# what the first version of this did, on two hosts out of three. The third
+# passed only because the journal window happened to miss the warning, so the
+# check was flaky as well as wrong.
 if compgen -G "$CIC/caddy/sites/*.caddy" >/dev/null; then
+  check "no unmatched import glob"           '! has "No files matching import" journalctl -u caddy --since "-60s" -o cat'
   check "caddy bound to :443 (vhosts exist)" 'has ":443" ss -ltn'
   check "caddy bound to :80 (vhosts exist)"  'has ":80" ss -ltn'
 else
-  ok "no vhosts yet, so no listener expected"
+  ok "no sites yet: empty import glob and no listener are both correct here"
 fi
 
 (( fails )) && die "$fails check(s) failed - agent is NOT ready"
