@@ -134,4 +134,21 @@ class MonitoringTest extends TestCase
         $this->actingAs(User::factory()->create(['email' => 'OPS@codeinchrome.com']))->get('/status')
             ->assertOk()->assertSee('site shop.codeinchrome.com');
     }
+
+    public function test_a_deleted_sites_incident_is_closed_not_left_open_forever(): void
+    {
+        $this->siteDown = true;
+        $this->tick();
+        $this->tick();
+        $this->assertSame(1, Incident::whereNull('resolved_at')->count());
+
+        Site::where('site_id', 'shop')->delete();
+        $this->tick();
+
+        $this->assertSame(0, Incident::whereNull('resolved_at')->count());
+        $this->assertStringContainsString('site was deleted', Incident::first()->detail);
+        $this->assertNull(Monitor::where('key', 'site:shop')->first());
+        // Host monitors are untouched.
+        $this->assertNotNull(Monitor::where('key', 'host:h1')->first());
+    }
 }

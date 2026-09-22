@@ -41,6 +41,8 @@ class Monitoring
             $this->record($key, $label, $up, $detail, $latency);
         }
 
+        $this->retireGone(array_keys($results));
+
         return $results;
     }
 
@@ -108,6 +110,30 @@ class Monitoring
         }
 
         return $out;
+    }
+
+    /**
+     * A site that no longer exists is never checked again, so its monitor and
+     * any open incident would otherwise stay as they were forever - an
+     * incident that can never close, which teaches whoever reads the status
+     * page to ignore it. Found on production: a deleted test site had been
+     * "down" for hours.
+     *
+     * Only SITE monitors are retired, and only when the site's row is gone. A
+     * host missing from this run is unreachable, not deleted, and keeps its
+     * state.
+     */
+    private function retireGone(array $checkedKeys): void
+    {
+        $live = Site::pluck('site_id')->map(fn ($id) => "site:$id")->all();
+        $gone = Monitor::where('key', 'like', 'site:%')->whereNotIn('key', $live)->pluck('key');
+
+        foreach ($gone as $key) {
+            Incident::where('monitor_key', $key)->whereNull('resolved_at')->get()->each(function ($i) {
+                $i->update(['resolved_at' => now(), 'detail' => $i->detail . ' [closed: the site was deleted]']);
+            });
+            Monitor::where('key', $key)->delete();
+        }
     }
 
     private function record(string $key, string $label, bool $up, string $detail, ?int $latency): void
