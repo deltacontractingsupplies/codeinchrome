@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Audit\Audit;
 use App\Fleet\AgentClient;
 use App\Fleet\DomainVerifier;
 use App\Models\Site;
@@ -54,6 +55,7 @@ class DomainController extends Controller
         }
 
         $site->domains()->create(['domain' => $domain, 'token' => bin2hex(random_bytes(20))]);
+        Audit::record('domain.added', site: $site, detail: ['domain' => $domain]);
 
         return redirect()->route('domains.index', $site)->with('status', "Add the two DNS records below for $domain, then press Verify.");
     }
@@ -81,6 +83,8 @@ class DomainController extends Controller
             return back()->with('error', "{$domain->domain} was verified but could not be attached: {$e->getMessage()}");
         }
 
+        Audit::record('domain.verified', site: $site, detail: ['domain' => $domain->domain]);
+
         return back()->with('status', "{$domain->domain} is attached. Its certificate is issued on the first visit.");
     }
 
@@ -90,6 +94,7 @@ class DomainController extends Controller
 
         $wasVerified = (bool) $domain->verified_at;
         DB::transaction(fn () => $domain->delete());
+        Audit::record('domain.removed', site: $site, detail: ['domain' => $domain->domain]);
 
         if ($wasVerified) {
             try {

@@ -526,8 +526,16 @@ func (m *Manager) ReloadProxy(ctx context.Context) error {
 	if _, err := run(ctx, 30*time.Second, "caddy", "validate", "--config", "/etc/caddy/Caddyfile"); err != nil {
 		return fmt.Errorf("caddy config invalid, NOT reloaded: %w", err)
 	}
-	if _, err := run(ctx, 30*time.Second, "systemctl", "reload", "caddy"); err != nil {
-		return fmt.Errorf("caddy reload: %w", err)
+	_, err := run(ctx, 30*time.Second, "systemctl", "reload", "caddy")
+	if err != nil {
+		// One retry after the grace period. A reload can fail transiently
+		// while an old server is still draining its last connections; the
+		// config itself was already validated above, so a second attempt is
+		// safe and does not mask a real configuration error.
+		time.Sleep(11 * time.Second)
+		if _, err2 := run(ctx, 30*time.Second, "systemctl", "reload", "caddy"); err2 != nil {
+			return fmt.Errorf("caddy reload (after one retry): %w", err2)
+		}
 	}
 	return nil
 }

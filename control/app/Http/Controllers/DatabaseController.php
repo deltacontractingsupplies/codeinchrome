@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Audit\Audit;
 use App\Fleet\AgentClient;
 use App\Fleet\AgentRefused;
 use App\Fleet\AgentUnreachable;
@@ -34,9 +35,17 @@ class DatabaseController extends Controller
             'write' => ['sometimes', 'boolean'],
         ]);
 
-        return $this->attempt(fn () => [
-            'result' => AgentClient::for($site->host)->dbQuery($site->site_id, $data['sql'], (bool) ($data['write'] ?? false)),
-        ]);
+        return $this->attempt(function () use ($site, $data) {
+            $result = AgentClient::for($site->host)->dbQuery($site->site_id, $data['sql'], (bool) ($data['write'] ?? false));
+            // Writes only: reads are not an event anyone needs to reconstruct.
+            if (($result['mode'] ?? '') === 'write') {
+                Audit::record('db.write', site: $site, detail: [
+                    'sql' => mb_substr($data['sql'], 0, 500), 'rows' => $result['rowsAffected'] ?? null,
+                ]);
+            }
+
+            return ['result' => $result];
+        });
     }
 
     private function authorizeSite(Request $request, Site $site): void

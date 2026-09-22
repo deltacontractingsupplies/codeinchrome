@@ -69,6 +69,12 @@ cat > /etc/caddy/Caddyfile <<'CADDY'
 	on_demand_tls {
 		ask http://127.0.0.1:9440/tls-ask
 	}
+
+	# Old servers finish in-flight requests for at most this long after a
+	# reload. Unbounded, one lingering keep-alive connection (an internet
+	# scanner, say) held port 80 open and the next reload failed with
+	# "bind: address already in use".
+	grace_period 10s
 	servers {
 		trusted_proxies static private_ranges
 	}
@@ -82,6 +88,23 @@ cat > /etc/caddy/Caddyfile <<'CADDY'
 import /opt/codeinchrome/caddy/sites/*.caddy
 CADDY
 ok "Caddyfile written (managed)"
+
+# The host's own site, permanently. With it, Caddy's HTTP and HTTPS servers
+# exist even when the host has no customer sites, so a reload always REUSES
+# the listeners on :80 and :443 instead of tearing them down and binding them
+# again. A host that went from one site to zero and back failed exactly there.
+# Named with a leading underscore so it never collides with a site id.
+if [[ -n ${CIC_HOST_NAME:-} ]]; then
+  cat > "$CIC/caddy/sites/_host.caddy" <<HOSTSITE
+# This host's own address - keeps the proxy's listeners alive. Managed.
+${CIC_HOST_NAME}.codeinchrome.com {
+	respond "codeinchrome host ${CIC_HOST_NAME}" 200
+}
+HOSTSITE
+  ok "permanent host site ${CIC_HOST_NAME}.codeinchrome.com"
+else
+  warn "CIC_HOST_NAME not set: no permanent host site (run through deploy-host.sh)"
+fi
 caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || die "Caddyfile invalid"
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
 ok "caddy reloaded"
@@ -196,6 +219,17 @@ check "caddy user CANNOT read agent token" '! sudo -u caddy test -r '"$CIC"'/etc
 # check was flaky as well as wrong.
 if compgen -G "$CIC/caddy/sites/*.caddy" >/dev/null; then
   check "no unmatched import glob"           '! has "No files matching import" journalctl -u caddy --since "-60s" -o cat'
+  # Polled: its certificate is obtained in the background after a reload, and
+  # the first check ran in the seconds before it existed.
+  host_site_answers() {
+    for _ in $(seq 1 30); do
+      has "codeinchrome host" curl -s --max-time 10 --resolve "${CIC_HOST_NAME:-none}.codeinchrome.com:443:127.0.0.1" \
+        "https://${CIC_HOST_NAME:-none}.codeinchrome.com/" && return 0
+      sleep 3
+    done
+    return 1
+  }
+  check "host site answers (valid certificate)" 'host_site_answers'
   check "caddy bound to :443 (vhosts exist)" 'has ":443" ss -ltn'
   check "caddy bound to :80 (vhosts exist)"  'has ":80" ss -ltn'
 else

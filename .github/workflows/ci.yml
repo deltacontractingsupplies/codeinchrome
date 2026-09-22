@@ -4,6 +4,10 @@ on:
   push:
     branches: [main]
   pull_request:
+  # Weekly, on unchanged code: new advisories are published against
+  # dependencies that were clean when they were last scanned.
+  schedule:
+    - cron: '17 6 * * 1'
 
 jobs:
   agent:
@@ -19,6 +23,15 @@ jobs:
         working-directory: agent
       - run: go test -race ./...
         working-directory: agent
+      - name: govulncheck
+        # go.mod pins the toolchain, so this scans the Go that production
+        # binaries are actually built with. It once found six reachable
+        # standard-library vulnerabilities in the deployed agent (built with
+        # 1.26.3; fixed in 1.26.6+).
+        working-directory: agent
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
       - name: gofmt
         working-directory: agent
         run: |
@@ -43,6 +56,12 @@ jobs:
         working-directory: control
       - run: cp .env.example .env && php artisan key:generate
         working-directory: control
+      - name: composer audit
+        working-directory: control
+        run: composer audit --no-interaction
+      - name: npm audit
+        working-directory: control
+        run: npm ci --no-audit --no-fund && npm audit --audit-level=high
       - name: Tests
         working-directory: control
         # PAO_DISABLE=1 is required: laravel/pao replaces the test printer when

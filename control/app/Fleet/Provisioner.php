@@ -2,6 +2,7 @@
 
 namespace App\Fleet;
 
+use App\Audit\Audit;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Support\Facades\Log;
@@ -92,10 +93,12 @@ class Provisioner
                 'provisioned_at' => now(),
                 'last_error' => null,
             ]);
+            Audit::record('site.created', $user, $site, ['host' => $host, 'plan' => $user->plan]);
         } catch (\Throwable $e) {
             // Record WHY before cleaning up, so a failure that repeats is
             // diagnosable from the row rather than only from the log.
             $site->update(['status' => 'failed', 'last_error' => $e->getMessage()]);
+            Audit::record('site.create_failed', $user, $site, ['host' => $host, 'error' => mb_substr($e->getMessage(), 0, 500)]);
             Log::error('provisioning failed', ['site' => $siteId, 'host' => $host, 'error' => $e->getMessage()]);
 
             $this->rollback($site, $e);
@@ -172,8 +175,10 @@ class Provisioner
         $failed = array_keys(array_filter($parts, fn ($state) => $state === 'failed'));
 
         if ($failed === []) {
+            Audit::record('site.deleted', $site->user, $site, ['parts' => $parts]);
             $site->delete();
         } else {
+            Audit::record('site.delete_incomplete', $site->user, $site, ['parts' => $parts]);
             $site->update([
                 'status' => 'failed',
                 'last_error' => 'Not fully removed: ' . implode(', ', $failed),

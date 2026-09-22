@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Audit\Audit;
 use App\Fleet\Provisioner;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -17,6 +18,13 @@ class AccountController extends Controller
         return view('account', ['user' => $request->user()]);
     }
 
+    public function activity(Request $request): View
+    {
+        return view('activity', [
+            'events' => \App\Models\AuditEvent::where('account_id', $request->user()->id)->latest('id')->limit(200)->get(),
+        ]);
+    }
+
     public function password(Request $request): RedirectResponse
     {
         $data = $request->validate([
@@ -30,6 +38,7 @@ class AccountController extends Controller
         // password change after a suspected compromise must actually lock the
         // intruder out, not just change what the next login needs.
         Auth::logoutOtherDevices($data['password']);
+        Audit::record('password.changed');
         $request->session()->regenerate();
 
         return back()->with('status', 'Password changed. Every other session has been signed out.');
@@ -68,6 +77,8 @@ class AccountController extends Controller
             }
         }
 
+        // Recorded BEFORE the row goes: the history outlives the account.
+        Audit::record('account.deleted', $user, actor: $user, detail: ['email_sha256' => hash('sha256', strtolower($user->email))]);
         Auth::logout();
         $user->delete();
         $request->session()->invalidate();

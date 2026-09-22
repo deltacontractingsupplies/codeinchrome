@@ -7,3 +7,4 @@ use Illuminate\Support\Facades\Schedule;
 Schedule::command('fleet:sync-usage')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('fleet:apply-limits')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('fleet:monitor')->everyMinute()->withoutOverlapping();
+Schedule::command('audit:prune')->dailyAt('04:00');

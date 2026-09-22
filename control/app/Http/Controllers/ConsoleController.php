@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Audit\Audit;
 use App\Fleet\AgentClient;
 use App\Fleet\AgentRefused;
 use App\Fleet\AgentUnreachable;
@@ -23,8 +24,14 @@ class ConsoleController extends Controller
         ]);
 
         try {
-            return response()->json(AgentClient::for($site->host)
-                ->runCommand($site->site_id, $data['tool'], $data['args'], (bool) ($data['confirm'] ?? false)));
+            $result = AgentClient::for($site->host)
+                ->runCommand($site->site_id, $data['tool'], $data['args'], (bool) ($data['confirm'] ?? false));
+            Audit::record('command.run', site: $site, detail: [
+                'tool' => $data['tool'], 'args' => $data['args'], 'confirmed' => (bool) ($data['confirm'] ?? false),
+                'exit' => $result['result']['exitCode'] ?? null,
+            ]);
+
+            return response()->json($result);
         } catch (AgentRefused $e) {
             $error = $e->detail['error'] ?? 'refused';
 

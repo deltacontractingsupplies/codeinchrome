@@ -2,7 +2,7 @@
 @section('title', 'Account')
 @section('content')
 <h1 class="text-2xl font-semibold text-white">Account</h1>
-<p class="mt-1 text-sm text-neutral-400">{{ $user->email }}</p>
+<p class="mt-1 text-sm text-neutral-400">{{ $user->email }} · <a href="{{ route('account.activity') }}" class="text-teal-400">Activity</a></p>
 
 <section class="mt-10 max-w-md">
     <h2 class="text-lg font-medium text-white">Two-factor authentication</h2>

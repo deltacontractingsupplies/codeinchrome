@@ -107,6 +107,24 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}))
 	})
 
+	mux.HandleFunc("GET /v1/images", func(w http.ResponseWriter, r *http.Request) {
+		st, err := mgr.ImageStatuses(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, fail("images_unreadable", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"sites": st, "basis": "each container's image id compared with the base image's, read at call time"}))
+	})
+
+	mux.HandleFunc("POST /v1/sites/{id}/recreate", func(w http.ResponseWriter, r *http.Request) {
+		outcome, err := mgr.Recreate(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, fail("recreate_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"outcome": outcome}))
+	})
+
 	mux.HandleFunc("GET /v1/host/stats", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ok(resp{
 			"stats": mgr.Stats(r.Context()),

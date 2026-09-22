@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Audit\Audit;
 use App\Models\User;
 use App\Security\Totp;
 use BaconQrCode\Renderer\Image\SvgImageBackEnd;
@@ -58,6 +59,7 @@ class TwoFactorController extends Controller
             'two_factor_last_step' => $step,
         ])->save();
         $request->session()->forget('two_factor.pending');
+        Audit::record('2fa.enabled');
 
         // Shown exactly once. Only their hashes are kept.
         return view('two-factor.recovery', ['codes' => $codes]);
@@ -70,6 +72,8 @@ class TwoFactorController extends Controller
             'two_factor_secret' => null, 'two_factor_recovery_codes' => null,
             'two_factor_confirmed_at' => null, 'two_factor_last_step' => null,
         ])->save();
+
+        Audit::record('2fa.disabled');
 
         return back()->with('status', 'Two-factor authentication is off.');
     }
@@ -141,6 +145,7 @@ class TwoFactorController extends Controller
         $remember = (bool) $request->session()->pull('login.remember');
         $request->session()->forget(['login.id', 'login.at']);
         Auth::login($user, $remember);
+        Audit::record('auth.login', $user, actor: $user, detail: ['two_factor' => $code !== '' ? 'code' : 'recovery_code']);
         $request->session()->regenerate();
 
         return redirect()->intended(route('dashboard'));

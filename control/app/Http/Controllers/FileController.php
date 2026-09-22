@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Audit\Audit;
 use App\Fleet\AgentClient;
 use App\Fleet\AgentRefused;
 use App\Fleet\AgentUnreachable;
@@ -66,9 +67,14 @@ class FileController extends Controller
             return response()->json(['ok' => false, 'error' => 'no_path', 'hint' => 'pass ?path='], 422);
         }
 
-        return $this->attempt(fn () => [
-            'deleted' => AgentClient::for($site->host)->deleteFile($site->site_id, $path),
-        ]);
+        return $this->attempt(function () use ($site, $path) {
+            $deleted = AgentClient::for($site->host)->deleteFile($site->site_id, $path);
+            // Deletes are recorded; saves are not (every keystroke-save would
+            // bury everything else).
+            Audit::record('file.deleted', site: $site, detail: ['path' => $path]);
+
+            return ['deleted' => $deleted];
+        });
     }
 
     /**

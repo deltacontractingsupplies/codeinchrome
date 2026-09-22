@@ -59,9 +59,14 @@
                              The database lives outside the site's disk, so it is
                              counted here rather than silently left out. --}}
                         <div class="mt-2 w-64">
-                            <div class="h-1.5 rounded bg-neutral-800">
-                                <div class="h-1.5 rounded {{ $pct >= 90 ? 'bg-red-500' : ($pct >= 75 ? 'bg-amber-400' : 'bg-teal-500') }}" style="width: {{ $pct }}%"></div>
-                            </div>
+                            {{-- An SVG rather than a div with an inline width style: the width is
+                                 an attribute, so the Content-Security-Policy can
+                                 forbid inline styles entirely. --}}
+                            <svg class="block h-1.5 w-64 rounded" viewBox="0 0 100 1" preserveAspectRatio="none" role="img"
+                                 aria-label="{{ $pct }}% of the disk used">
+                                <rect width="100" height="1" class="fill-neutral-800"/>
+                                <rect width="{{ $pct }}" height="1" class="{{ $pct >= 90 ? 'fill-red-500' : ($pct >= 75 ? 'fill-amber-400' : 'fill-teal-500') }}"/>
+                            </svg>
                             <p class="mt-1 text-xs text-neutral-500" title="Measured {{ $site->usage_at->diffForHumans() }}">
                                 {{ $mb($site->totalBytes()) }} of {{ $site->disk_gb }} GB
                                 &middot; files {{ $mb((int) $site->disk_used_bytes) }}, database {{ $mb((int) $site->database_bytes) }}

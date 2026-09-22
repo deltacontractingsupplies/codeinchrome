@@ -27,6 +27,8 @@ return Application::configure(basePath: dirname(__DIR__))
          * Authenticity is established by the HMAC signature instead; see
          * WebhookController, which refuses outright when no secret is set.
          */
+        $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+
         $middleware->validateCsrfTokens(except: [
             'webhooks/*',
         ]);

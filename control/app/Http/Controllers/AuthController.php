@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Audit\Audit;
 use App\Models\User;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -38,6 +39,7 @@ class AuthController extends Controller
 
         Auth::login($user);
         $request->session()->regenerate();
+        Audit::record('account.created', $user, actor: $user);
 
         return redirect()->route('dashboard')->with('status', 'Welcome. Create your first site below.');
     }
@@ -57,6 +59,11 @@ class AuthController extends Controller
         // Validate first, sign in second: an account with two-factor on must
         // not be signed in by the password alone, even for one request.
         if (! Auth::validate($credentials)) {
+            // Recorded against the account if it exists - visible only to
+            // that account's owner, so it reveals nothing to the attacker.
+            if ($target = \App\Models\User::where('email', $credentials['email'])->first()) {
+                Audit::record('auth.login_failed', $target, actor: $target);
+            }
             // One message for both a wrong password and an unknown address.
             // Distinguishing them tells an attacker which emails have accounts.
             return back()
@@ -73,6 +80,7 @@ class AuthController extends Controller
         }
 
         Auth::login($user, true);
+        Audit::record('auth.login', $user, actor: $user);
 
         // Without this, a session id captured before sign-in stays valid after
         // it - which is session fixation.

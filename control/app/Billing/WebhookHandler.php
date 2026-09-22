@@ -2,6 +2,7 @@
 
 namespace App\Billing;
 
+use App\Audit\Audit;
 use App\Fleet\PlanLimits;
 use App\Models\Subscription;
 use App\Models\User;
@@ -120,6 +121,7 @@ class WebhookHandler
         // payment we have already recorded. Sites it could not reach are
         // marked limits_pending and fleet:apply-limits finishes the job.
         if ($user->plan !== $before) {
+            Audit::record('billing.plan_changed', $user, detail: ['from' => $before, 'to' => $user->plan, 'status' => $status]);
             DB::afterCommit(fn () => app(PlanLimits::class)->applyTo($user->fresh()));
         }
 
