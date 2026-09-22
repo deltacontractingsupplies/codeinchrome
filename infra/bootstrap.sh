@@ -98,6 +98,18 @@ fi
 log "layout"
 mkdir -p "$CIC_ROOT"/{bin,etc,var,caddy/sites} "$CUSTOMER_ROOT"
 chmod 0750 "$CIC_ROOT" "$CUSTOMER_ROOT"
+# Caddy runs as its own unprivileged user and must TRAVERSE $CIC_ROOT to reach
+# the per-site vhosts it imports. With 0750 root:root it silently could not:
+# Caddy logged `No files matching import glob pattern`, which is a WARNING, so
+# `caddy validate` passed, `systemctl reload` passed, every check reported
+# success - and Caddy served nothing at all, binding neither 80 nor 443.
+# Group-owning the root by caddy grants exactly that traversal and nothing else.
+chgrp caddy "$CIC_ROOT" 2>/dev/null || true
+chmod 0750 "$CIC_ROOT"/caddy "$CIC_ROOT"/caddy/sites
+chgrp -R caddy "$CIC_ROOT"/caddy 2>/dev/null || true
+# The agent token lives here. Keep it unreadable to the caddy user even though
+# the directory above it is now traversable.
+chmod 0700 "$CIC_ROOT"/etc
 if [[ ! -f "$CIC_ROOT/etc/host.id" ]]; then
   # Stable identity for this host, used by the control plane.
   printf 'host_%s\n' "$(head -c 8 /dev/urandom | od -An -tx1 | tr -d ' \n')" > "$CIC_ROOT/etc/host.id"

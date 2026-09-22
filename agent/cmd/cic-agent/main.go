@@ -1,0 +1,124 @@
+// cic-agent runs on every codeinchrome host.
+//
+// It is the only thing on the box that creates sites, and it is deliberately
+// small: one static binary, no runtime to patch, no framework. Everything a
+// customer can do passes through here, so the surface is kept narrow enough to
+// read in one sitting.
+//
+// The rule this codebase is built around applies hardest here: a response must
+// never claim more than the mechanism behind it can support. Where this agent
+// cannot prove something, it says so in the payload rather than implying it.
+package main
+
+import (
+	"context"
+	"crypto/subtle"
+	"encoding/json"
+	"errors"
+	"flag"
+	"fmt"
+	"log/slog"
+	"net/http"
+	"os"
+	"os/signal"
+	"strings"
+	"syscall"
+	"time"
+
+	"github.com/codeinchrome/agent/internal/api"
+	"github.com/codeinchrome/agent/internal/sites"
+)
+
+var version = "dev"
+
+func main() {
+	var (
+		addr     = flag.String("addr", "127.0.0.1:9440", "listen address")
+		root     = flag.String("root", "/srv/customers", "customer data root")
+		caddyDir = flag.String("caddy", "/opt/codeinchrome/caddy/sites", "per-site Caddy config directory")
+		hostFile = flag.String("host-id", "/opt/codeinchrome/etc/host.id", "file holding this host's id")
+	)
+	flag.Parse()
+
+	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelInfo}))
+	slog.SetDefault(logger)
+
+	token := os.Getenv("CIC_AGENT_TOKEN")
+	if len(token) < 32 {
+		fatal("CIC_AGENT_TOKEN must be set and at least 32 characters; refusing to start without authentication")
+	}
+
+	hostID, err := os.ReadFile(*hostFile)
+	if err != nil {
+		fatal("cannot read host id from %s: %v (run infra/bootstrap.sh first)", *hostFile, err)
+	}
+
+	mgr, err := sites.New(sites.Config{
+		Root:     *root,
+		CaddyDir: *caddyDir,
+		HostID:   strings.TrimSpace(string(hostID)),
+	})
+	if err != nil {
+		fatal("cannot start site manager: %v", err)
+	}
+
+	srv := &http.Server{
+		Addr:              *addr,
+		Handler:           authenticated(token, api.Routes(mgr, version)),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       2 * time.Minute,
+		WriteTimeout:      5 * time.Minute, // container builds are slow
+		IdleTimeout:       2 * time.Minute,
+	}
+
+	go func() {
+		slog.Info("listening", "addr", *addr, "host", mgr.HostID(), "version", version)
+		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+			fatal("listen: %v", err)
+		}
+	}()
+
+	stop := make(chan os.Signal, 1)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
+	<-stop
+
+	slog.Info("shutting down")
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	if err := srv.Shutdown(ctx); err != nil {
+		slog.Error("shutdown", "err", err)
+	}
+}
+
+// authenticated gates every route on a constant-time bearer comparison.
+//
+// The agent listens on loopback and the control plane reaches it over an SSH
+// tunnel, so this is defence in depth rather than the only lock — but an agent
+// that would serve an unauthenticated request is one misconfigured firewall
+// away from serving every customer's source code to the internet.
+func authenticated(token string, next http.Handler) http.Handler {
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/healthz" { // liveness must not require a secret
+			next.ServeHTTP(w, r)
+			return
+		}
+		got := []byte(r.Header.Get("Authorization"))
+		if subtle.ConstantTimeCompare(got, want) != 1 {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusUnauthorized)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":    false,
+				"error": "unauthorized",
+				"hint":  "send Authorization: Bearer <CIC_AGENT_TOKEN>",
+			})
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+func fatal(format string, a ...any) {
+	fmt.Fprintf(os.Stderr, "cic-agent: "+format+"\n", a...)
+	os.Exit(1)
+}
