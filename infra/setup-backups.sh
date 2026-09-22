@@ -209,6 +209,7 @@ forward_probe='timeout 10 ssh -o BatchMode=yes -N -L 127.0.0.1:19999:127.0.0.1:2
 # broken and "cannot forward" below would mean nothing.
 # A free port chosen by the OS, not a fixed one: two hosts set up in parallel
 # both took 19998 and one positive control failed for that reason alone.
+# shellcheck disable=SC2034 # used inside the eval'd check string
 probe_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
 check "positive control: the probe sees a working forward" '[[ "$(probe_banner "root@$target_ip" "$probe_port")" == SSH-* ]]'
 check "backup account cannot forward"    '[[ "$(src "$forward_probe")" != SSH-* ]]'
