@@ -157,29 +157,41 @@ log "egress policy"
 # Spam is how a hosting account gets suspended, and the account holder is liable
 # for everything a customer does. Mail goes out through an API, never from a
 # container. DOCKER-USER is the chain Docker leaves for exactly this.
-install_egress_rule() {
-  local proto=$1 port=$2
-  iptables -C DOCKER-USER -p "$proto" --dport "$port" -j REJECT 2>/dev/null \
-    || iptables -I DOCKER-USER -p "$proto" --dport "$port" -j REJECT
-}
-iptables -L DOCKER-USER >/dev/null 2>&1 || iptables -N DOCKER-USER 2>/dev/null || true
-for port in 25 465 587 2525; do install_egress_rule tcp "$port"; done
-# Common mining pool ports. Not a complete list and not meant to be — the real
-# control is the CPU ceiling; this just removes the lazy path.
-for port in 3333 4444 5555 7777 8333 14444 45700; do install_egress_rule tcp "$port"; done
-mkdir -p /etc/iptables
-iptables-save > /etc/iptables/rules.v4
+#
+# The rules are applied by a script at every boot, NOT restored from an
+# iptables-save snapshot. The first version saved the ENTIRE ruleset and
+# restored it after UFW at boot - and restoring a declared chain flushes it,
+# so every firewall change made after bootstrap was silently reverted on the
+# next reboot, along with any Docker rules added since. It surfaced when a
+# rebooted host lost the rule letting containers reach MySQL. This script
+# touches DOCKER-USER and nothing else.
+mkdir -p /opt/codeinchrome/bin
+cat > /opt/codeinchrome/bin/cic-egress <<'EGRESS'
+#!/usr/bin/env bash
+# Reject outbound mail and common mining-pool ports from containers.
+# Idempotent: each rule is added only if it is not already present.
+set -Eeuo pipefail
+iptables -L DOCKER-USER >/dev/null 2>&1 || iptables -N DOCKER-USER
+for port in 25 465 587 2525 3333 4444 5555 7777 8333 14444 45700; do
+  iptables -C DOCKER-USER -p tcp --dport "$port" -j REJECT 2>/dev/null \
+    || iptables -I DOCKER-USER -p tcp --dport "$port" -j REJECT
+done
+EGRESS
+chmod 0750 /opt/codeinchrome/bin/cic-egress
+/opt/codeinchrome/bin/cic-egress
+# The old snapshot must not linger where something might restore it.
+rm -f /etc/iptables/rules.v4
 ok "outbound mail and common pool ports rejected from containers"
 
-# Survive reboot.
+# Survive reboot: re-applied after docker creates its chains.
 cat > /etc/systemd/system/cic-egress.service <<'UNIT'
 [Unit]
 Description=codeinchrome container egress policy
-After=docker.service
+After=docker.service ufw.service
 Requires=docker.service
 [Service]
 Type=oneshot
-ExecStart=/sbin/iptables-restore --noflush /etc/iptables/rules.v4
+ExecStart=/opt/codeinchrome/bin/cic-egress
 RemainAfterExit=yes
 [Install]
 WantedBy=multi-user.target
@@ -250,6 +262,7 @@ check "docker no-new-privileges" 'jq -e ".\"no-new-privileges\" == true" /etc/do
 check "caddy installed"          'command -v caddy'
 check "ufw active"               'has "Status: active" ufw status'
 check "only 22/80/443 inbound"   '[[ $(ufw status | grep -c "ALLOW IN") -le 6 ]]'
+check "no iptables snapshot to restore" '[[ ! -e /etc/iptables/rules.v4 ]]'
 check "smtp 25 rejected"         'iptables -C DOCKER-USER -p tcp --dport 25 -j REJECT'
 check "smtp 465 rejected"        'iptables -C DOCKER-USER -p tcp --dport 465 -j REJECT'
 check "smtp 587 rejected"        'iptables -C DOCKER-USER -p tcp --dport 587 -j REJECT'
@@ -270,7 +283,7 @@ if (( fails )); then
 fi
 
 echo
-printf '\033[32mhost ready\033[0m  %s  %s  %sc/%sG  %s free  \033[2m(17/17 checks)\033[0m\n' \
+printf '\033[32mhost ready\033[0m  %s  %s  %sc/%sG  %s free  \033[2m(all checks)\033[0m\n' \
   "$(cat "$CIC_ROOT/etc/host.id")" "$PRETTY_NAME" \
   "$(nproc)" "$(free -g --si | awk '/^Mem:/{print $2}')" \
   "$(df -h / | tail -1 | awk '{print $4}')"

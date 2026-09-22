@@ -1,0 +1,101 @@
+#!/usr/bin/env bash
+#
+# Per-site disks: one sparse ext4 image per site, loop-mounted.
+#
+#   cic-mount mount  <site-id>
+#   cic-mount umount <site-id>
+#   cic-mount grow   <site-id> <gigabytes>
+#   cic-mount all                          # every site on this host (boot)
+#
+# Installed to /opt/codeinchrome/bin/cic-mount by install-agent.sh.
+#
+# Why images: the host's root filesystem is ext4 without the quota feature,
+# and enabling it means unmounting / - impossible on a live host. A
+# filesystem per site gives a limit the KERNEL enforces (a full disk is
+# ENOSPC, not a monitoring alert), costs no space until used (sparse), and
+# grows online when a customer upgrades.
+#
+# Why this runs through systemd-run and a boot unit rather than inside the
+# agent: the agent runs in its own mount namespace (a side effect of
+# ProtectSystem), so a mount it made itself would be invisible to Docker. And
+# at boot the disks must be mounted BEFORE docker starts containers, or a
+# restarted container binds an empty directory and serves nothing - or writes
+# into the directory underneath the mountpoint.
+
+set -Eeuo pipefail
+
+ROOT=/srv/customers
+ID_RE='^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$'
+
+die() { echo "cic-mount: $*" >&2; exit 1; }
+
+site_paths() {
+  local id=$1
+  [[ $id =~ $ID_RE && $id != *--* ]] || die "invalid site id: $id"
+  IMG=$ROOT/$id/disk.img
+  MNT=$ROOT/$id/vol
+}
+
+do_mount() {
+  site_paths "$1"
+  [[ -f $IMG ]] || die "$IMG does not exist"
+  mkdir -p "$MNT"
+  if mountpoint -q "$MNT"; then
+    return 0
+  fi
+  # Refuse a second mount of an image that is still attached somewhere. Two
+  # live ext4 mounts of one filesystem - say, a container still holding the
+  # old one after a manual umount - corrupt it. Better a site that stays down
+  # until someone looks than one whose files are silently destroyed.
+  if [[ -n $(losetup -j "$IMG") ]]; then
+    die "$IMG is still attached to a loop device but not mounted at $MNT; refusing a second mount ($(losetup -j "$IMG"))"
+  fi
+  # nodev, nosuid: a customer must not be able to plant a device node or a
+  # setuid binary on a filesystem that is mounted on the host. Customers get
+  # no shell, but a PHP upload is enough to create a file.
+  mount -o loop,nodev,nosuid,noatime "$IMG" "$MNT"
+  mountpoint -q "$MNT" || die "mount of $IMG did not take effect"
+}
+
+do_umount() {
+  site_paths "$1"
+  if mountpoint -q "$MNT"; then
+    umount "$MNT"
+  fi
+  ! mountpoint -q "$MNT" || die "$MNT is still mounted"
+}
+
+do_grow() {
+  site_paths "$1"
+  local gb=$2
+  [[ $gb =~ ^[0-9]+$ ]] && (( gb >= 1 && gb <= 2048 )) || die "invalid size: $gb"
+  local want=$(( gb * 1024 * 1024 * 1024 ))
+  local have
+  have=$(stat -c %s "$IMG")
+  (( want > have )) || die "refusing to shrink $IMG ($have bytes) to $want bytes"
+  local dev
+  dev=$(losetup -j "$IMG" | cut -d: -f1 | head -1)
+  truncate -s "$want" "$IMG"
+  if [[ -n $dev ]]; then
+    losetup -c "$dev"    # tell the loop device its backing file grew
+    resize2fs "$dev" >/dev/null 2>&1
+  else
+    resize2fs "$IMG" >/dev/null 2>&1
+  fi
+}
+
+case "${1:-}" in
+  mount)  do_mount "${2:?site id}" ;;
+  umount) do_umount "${2:?site id}" ;;
+  grow)   do_grow "${2:?site id}" "${3:?gigabytes}" ;;
+  all)
+    failed=0
+    for img in "$ROOT"/*/disk.img; do
+      [[ -e $img ]] || continue
+      id=$(basename "$(dirname "$img")")
+      do_mount "$id" || { echo "cic-mount: could not mount $id" >&2; failed=1; }
+    done
+    exit $failed
+    ;;
+  *) die "usage: cic-mount {mount|umount|grow|all} ..." ;;
+esac

@@ -60,6 +60,12 @@ type Site struct {
 	// beside site.json, readable by root only.
 	Database string `json:"database,omitempty"`
 	DBUser   string `json:"dbUser,omitempty"`
+
+	// DiskGB is the size of the site's own filesystem. The usage fields are
+	// read from that filesystem at call time and never stored.
+	DiskGB        int   `json:"diskGb"`
+	DiskUsedBytes int64 `json:"diskUsedBytes"`
+	DiskSizeBytes int64 `json:"diskSizeBytes"`
 }
 
 // A site id is used as a directory name, a container name and a DNS label, so
@@ -120,6 +126,7 @@ func (m *Manager) List(ctx context.Context) ([]Site, error) {
 		if running[m.container(s.ID)] {
 			s.State = "running"
 		}
+		s.DiskUsedBytes, s.DiskSizeBytes, _ = m.DiskUsage(s.ID)
 		out = append(out, s)
 	}
 	sort.Slice(out, func(i, j int) bool { return out[i].ID < out[j].ID })
@@ -142,6 +149,7 @@ func (m *Manager) Get(ctx context.Context, id string) (Site, error) {
 	if running[m.container(id)] {
 		s.State = "running"
 	}
+	s.DiskUsedBytes, s.DiskSizeBytes, _ = m.DiskUsage(id)
 	return s, nil
 }
 

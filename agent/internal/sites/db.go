@@ -8,6 +8,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"time"
@@ -208,7 +209,7 @@ func SetEnv(content, key, value string) string {
 // configureAppDatabase points the site's .env at its database and runs the
 // application's migrations, which is also the proof that the credentials work.
 func (m *Manager) configureAppDatabase(ctx context.Context, s Site, password string) error {
-	envPath := m.dir(s.ID) + "/app/.env"
+	envPath := filepath.Join(m.appDir(s.ID), ".env")
 	raw, err := os.ReadFile(envPath)
 	if err != nil {
 		return fmt.Errorf("read .env: %w", err)
@@ -233,7 +234,7 @@ func (m *Manager) configureAppDatabase(ctx context.Context, s Site, password str
 
 	// The skeleton's SQLite file holds the tables Laravel created at build
 	// time. Left behind, it looks like the site's data and is not.
-	_ = os.Remove(m.dir(s.ID) + "/app/database/database.sqlite")
+	_ = os.Remove(filepath.Join(m.appDir(s.ID), "database", "database.sqlite"))
 
 	if _, err := run(ctx, 2*time.Minute, "docker", "exec", "-u", "33:33", s.Container,
 		"php", "/var/www/html/artisan", "migrate", "--force", "--no-interaction",

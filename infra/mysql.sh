@@ -129,6 +129,13 @@ log "firewall"
 if ! ufw status | grep -q "3306.*$POOL"; then
   ufw allow from "$POOL" to "$GATEWAY" port 3306 proto tcp comment 'customer containers -> cic-mysql' >/dev/null
 fi
+# `ufw status` reads ufw's own config file, not the live firewall. After a boot
+# script restored an old iptables snapshot, status still listed this rule
+# while the kernel had no such rule and containers could not reach MySQL.
+# So the live chain is what is checked, and ufw is reloaded if they disagree.
+if ! iptables -S ufw-user-input 2>/dev/null | grep -q -- "--dport 3306"; then
+  ufw reload >/dev/null
+fi
 ok "3306 open to $POOL on $GATEWAY only"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -137,6 +144,7 @@ fails=0
 has()  { local pat=$1; shift; local out; out=$("$@" 2>/dev/null) || true; [[ "$out" == *"$pat"* ]]; }
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else warn "$1"; fails=$((fails+1)); fi; }
 
+check "firewall rule is LIVE, not just configured" 'iptables -S ufw-user-input | grep -q -- "--dport 3306"'
 check "listening on loopback"          'has "127.0.0.1:3306" ss -ltn'
 check "listening on the docker gateway" "has \"$GATEWAY:3306\" ss -ltn"
 # Exact matches on the local-address column. A substring test for "*:3306"

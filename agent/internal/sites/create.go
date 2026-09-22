@@ -18,6 +18,7 @@ type CreateOpts struct {
 	Domain   string `json:"domain"`
 	CPULimit string `json:"cpuLimit"` // docker --cpus, e.g. "0.5"
 	MemLimit string `json:"memLimit"` // docker --memory, e.g. "512m"
+	DiskGB   int    `json:"diskGb"`   // size of the site's own filesystem
 }
 
 const (
@@ -66,20 +67,35 @@ func (m *Manager) Create(ctx context.Context, o CreateOpts) (Site, error) {
 		return Site{}, fmt.Errorf("site %q already exists on this host", o.ID)
 	}
 
+	if err := os.MkdirAll(dir, 0o750); err != nil {
+		return Site{}, fmt.Errorf("mkdir %s: %w", dir, err)
+	}
+	if o.DiskGB == 0 {
+		o.DiskGB = defaultDisk
+	}
+	if err := m.createDisk(ctx, o.ID, o.DiskGB); err != nil {
+		_ = m.releaseDisk(context.Background(), o.ID)
+		_ = os.RemoveAll(dir)
+		return Site{}, err
+	}
+
 	// app/ holds the customer's code; public/ is the ONLY thing ever served.
 	// The document root cannot be moved above it, which is the whole point:
 	// the misconfiguration that exposes .env is not available here.
-	for _, sub := range []string{"app", "app/public"} {
-		path := filepath.Join(dir, sub)
+	for _, path := range []string{m.appDir(o.ID), filepath.Join(m.appDir(o.ID), "public")} {
 		if err := os.MkdirAll(path, 0o750); err != nil {
-			return Site{}, fmt.Errorf("mkdir %s: %w", sub, err)
+			_ = m.releaseDisk(context.Background(), o.ID)
+			_ = os.RemoveAll(dir)
+			return Site{}, fmt.Errorf("mkdir %s: %w", path, err)
 		}
 		// Apache runs as www-data (uid 33) inside the container. A root-owned
 		// 0750 volume is unreadable to it and every request 403s. Owning the
 		// tree as 33:33 keeps it unreadable to other host users while letting
 		// the one container that mounts it serve and write.
 		if err := os.Chown(path, wwwUID, wwwGID); err != nil {
-			return Site{}, fmt.Errorf("chown %s: %w", sub, err)
+			_ = m.releaseDisk(context.Background(), o.ID)
+			_ = os.RemoveAll(dir)
+			return Site{}, fmt.Errorf("chown %s: %w", path, err)
 		}
 	}
 
@@ -87,12 +103,17 @@ func (m *Manager) Create(ctx context.Context, o CreateOpts) (Site, error) {
 		_, _ = run(context.Background(), 30*time.Second, "docker", "rm", "-f", m.container(o.ID))
 		_, _ = run(context.Background(), 30*time.Second, "docker", "network", "rm", m.network(o.ID))
 		_ = os.RemoveAll(m.caddyFile(o.ID))
-		_ = os.RemoveAll(dir)
+		// Never RemoveAll through a live mount: that deletes the files on the
+		// image and then fails on the mountpoint. Unmount, and only if that
+		// held, remove the directory.
+		if m.releaseDisk(context.Background(), o.ID) == nil {
+			_ = os.RemoveAll(dir)
+		}
 	}
 
 	port, err := m.allocatePort(ctx)
 	if err != nil {
-		_ = os.RemoveAll(dir)
+		cleanup()
 		return Site{}, err
 	}
 
@@ -105,6 +126,7 @@ func (m *Manager) Create(ctx context.Context, o CreateOpts) (Site, error) {
 		CreatedAt: time.Now().UTC(),
 		CPULimit:  o.CPULimit,
 		MemLimit:  o.MemLimit,
+		DiskGB:    o.DiskGB,
 	}
 	if err := m.save(site); err != nil {
 		cleanup()
@@ -200,6 +222,22 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 
 	var changed []string
 	for _, s := range list {
+		// A container must never run without its disk. If the boot-time
+		// mount failed, docker has already started it on a bind mount of an
+		// EMPTY directory: it serves nothing, and anything it writes lands on
+		// the host's own disk, outside the quota. Try to mount; if that does
+		// not hold, stop the container and say so.
+		if _, err := os.Stat(m.diskImage(s.ID)); err == nil && !isMounted(m.volume(s.ID)) {
+			if err := m.mountOp(ctx, "mount", s.ID); err != nil || !isMounted(m.volume(s.ID)) {
+				_, _ = run(ctx, 60*time.Second, "docker", "stop", m.container(s.ID))
+				changed = append(changed, s.ID+": DISK NOT MOUNTED - container stopped")
+				continue
+			}
+			// Mounted now, but the running container still holds the empty
+			// directory from before. Restart it onto the real disk.
+			_, _ = run(ctx, 60*time.Second, "docker", "restart", m.container(s.ID))
+			changed = append(changed, s.ID+": disk was not mounted; mounted and container restarted")
+		}
 		if s.State != "running" {
 			continue
 		}
@@ -290,7 +328,7 @@ func (m *Manager) startContainer(ctx context.Context, s Site) error {
 		"--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
 		"--tmpfs", "/run:rw,noexec,nosuid,size=16m",
 
-		"-v", filepath.Join(s.Root, "app") + ":/var/www/html:rw",
+		"-v", m.appDir(s.ID) + ":/var/www/html:rw",
 		// The host's MySQL, which binds the docker gateway and nothing public.
 		"--add-host", dbHostForSites + ":host-gateway",
 		// Fixed, loopback-only. Not ephemeral: see Site.Port for the 502 that
@@ -551,11 +589,22 @@ func (m *Manager) Delete(ctx context.Context, id string) (map[string]string, err
 		return e == nil
 	})
 
-	err = os.RemoveAll(m.dir(id))
-	done["data"] = verdict(hadData, err, func() bool {
-		_, e := os.Stat(m.dir(id))
-		return e == nil
-	})
+	// Unmount the site's disk BEFORE removing anything: RemoveAll through a
+	// live mount deletes the files on the image and then fails on the
+	// mountpoint, leaving a half-deleted site that still has a disk.
+	switch {
+	case !hadData: // observed at the top, before anything was removed
+		done["data"] = "absent"
+	case m.releaseDisk(ctx, id) != nil:
+		done["data"] = "failed"
+	default:
+		_ = os.RemoveAll(m.dir(id))
+		if _, err := os.Stat(m.dir(id)); err == nil {
+			done["data"] = "failed"
+		} else {
+			done["data"] = "removed"
+		}
+	}
 
 	// The access log sits outside the site directory, so RemoveAll misses it.
 	// Left behind, a re-created site with the same id appends to the previous
@@ -612,4 +661,79 @@ func validDomain(d string) error {
 		return fmt.Errorf("invalid domain %q: needs at least one dot", d)
 	}
 	return nil
+}
+
+// Limits changes a running site's ceilings, for a plan change.
+//
+// CPU and memory apply immediately (docker update). The disk only ever GROWS:
+// shrinking a filesystem that holds a customer's files is not something to do
+// automatically on a billing event, and the downgrade rule elsewhere is the
+// same - a customer keeps what they have and cannot add more. The answer says
+// which parts were applied, so a refused shrink is never reported as done.
+type LimitsOpts struct {
+	CPULimit string `json:"cpuLimit"`
+	MemLimit string `json:"memLimit"`
+	DiskGB   int    `json:"diskGb"`
+}
+
+func (m *Manager) SetLimits(ctx context.Context, id string, o LimitsOpts) (map[string]string, error) {
+	if err := ValidID(id); err != nil {
+		return nil, err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	site, err := m.load(id)
+	if err != nil {
+		return nil, fmt.Errorf("no such site %q", id)
+	}
+	applied := map[string]string{}
+
+	if o.CPULimit != "" || o.MemLimit != "" {
+		args := []string{"update"}
+		if o.CPULimit != "" {
+			args = append(args, "--cpus", o.CPULimit)
+		}
+		if o.MemLimit != "" {
+			// --memory-swap equal to --memory: no swap escape hatch, as at creation.
+			args = append(args, "--memory", o.MemLimit, "--memory-swap", o.MemLimit)
+		}
+		args = append(args, m.container(id))
+		if _, err := run(ctx, 60*time.Second, "docker", args...); err != nil {
+			applied["cpuMemory"] = "failed: " + err.Error()
+		} else {
+			if o.CPULimit != "" {
+				site.CPULimit = o.CPULimit
+			}
+			if o.MemLimit != "" {
+				site.MemLimit = o.MemLimit
+			}
+			applied["cpuMemory"] = "applied"
+		}
+	}
+
+	if o.DiskGB > 0 {
+		current := site.DiskGB
+		if current == 0 {
+			current = defaultDisk
+		}
+		switch {
+		case o.DiskGB == current:
+			applied["disk"] = "unchanged"
+		case o.DiskGB < current:
+			applied["disk"] = fmt.Sprintf("kept at %d GB: disks are never shrunk automatically", current)
+		default:
+			if err := m.growDisk(ctx, id, o.DiskGB); err != nil {
+				applied["disk"] = "failed: " + err.Error()
+			} else {
+				site.DiskGB = o.DiskGB
+				applied["disk"] = "grown"
+			}
+		}
+	}
+
+	if err := m.save(site); err != nil {
+		return applied, err
+	}
+	return applied, nil
 }

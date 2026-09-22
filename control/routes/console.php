@@ -1,8 +1,8 @@
 <?php
 
-use Illuminate\Foundation\Inspiring;
-use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Schedule;
 
-Artisan::command('inspire', function () {
-    $this->comment(Inspiring::quote());
-})->purpose('Display an inspiring quote');
+// Driven by one cron line on the control host (see infra/deploy-control.sh).
+// withoutOverlapping: a slow or unreachable host must not stack up runs.
+Schedule::command('fleet:sync-usage')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('fleet:apply-limits')->everyFiveMinutes()->withoutOverlapping();

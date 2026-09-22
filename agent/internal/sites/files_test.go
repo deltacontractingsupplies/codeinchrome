@@ -18,7 +18,7 @@ func newTestManager(t *testing.T) (*Manager, string, string) {
 	root := filepath.Join(base, "customers")
 	caddy := filepath.Join(base, "caddy")
 
-	for _, d := range []string{filepath.Join(root, "demo", "app", "public"), caddy} {
+	for _, d := range []string{filepath.Join(root, "demo", "vol", "app", "public"), caddy} {
 		if err := os.MkdirAll(d, 0o750); err != nil {
 			t.Fatal(err)
 		}
@@ -30,10 +30,10 @@ func newTestManager(t *testing.T) (*Manager, string, string) {
 	if err := os.WriteFile(secret, []byte("THE-SECRET"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "demo", "app", "public", "index.php"), []byte("<?php echo 1;"), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "demo", "vol", "app", "public", "index.php"), []byte("<?php echo 1;"), 0o640); err != nil {
 		t.Fatal(err)
 	}
-	if err := os.WriteFile(filepath.Join(root, "demo", "app", ".env"), []byte("APP_KEY=base64:x"), 0o640); err != nil {
+	if err := os.WriteFile(filepath.Join(root, "demo", "vol", "app", ".env"), []byte("APP_KEY=base64:x"), 0o640); err != nil {
 		t.Fatal(err)
 	}
 
@@ -72,7 +72,7 @@ func TestResolveRefusesEveryEscape(t *testing.T) {
 			continue // refused, which is correct
 		}
 		// Anything that resolved must still be inside the site.
-		appRoot, _ := filepath.EvalSymlinks(filepath.Join(m.dir("demo"), "app"))
+		appRoot, _ := filepath.EvalSymlinks(m.appDir("demo"))
 		if !strings.HasPrefix(got, appRoot) {
 			t.Errorf("resolve(%q) ESCAPED to %q (%s)", path, got, why)
 		}
@@ -87,7 +87,7 @@ func TestResolveRefusesEveryEscape(t *testing.T) {
 func TestResolveRefusesASymlinkOutOfTheTree(t *testing.T) {
 	m, _, secret := newTestManager(t)
 
-	link := filepath.Join(m.dir("demo"), "app", "public", "escape.txt")
+	link := filepath.Join(m.appDir("demo"), "public", "escape.txt")
 	if err := os.Symlink(secret, link); err != nil {
 		t.Skipf("cannot create symlinks here: %v", err)
 	}
@@ -113,7 +113,7 @@ func TestResolveRefusesASymlinkedParentDirectory(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	link := filepath.Join(m.dir("demo"), "app", "out")
+	link := filepath.Join(m.appDir("demo"), "out")
 	if err := os.Symlink(outside, link); err != nil {
 		t.Skipf("cannot create symlinks here: %v", err)
 	}
@@ -146,7 +146,7 @@ func TestReadAndWriteStayInsideTheSite(t *testing.T) {
 	}
 
 	// The write must not have landed world-readable on the host.
-	info, err := os.Stat(filepath.Join(m.dir("demo"), "app", "app", "Models", "Thing.php"))
+	info, err := os.Stat(filepath.Join(m.appDir("demo"), "app", "Models", "Thing.php"))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -162,7 +162,7 @@ func TestWriteRefusesOversizedContent(t *testing.T) {
 	if err == nil {
 		t.Fatal("accepted content over the size limit")
 	}
-	if _, serr := os.Stat(filepath.Join(m.dir("demo"), "app", "big.txt")); serr == nil {
+	if _, serr := os.Stat(filepath.Join(m.appDir("demo"), "big.txt")); serr == nil {
 		t.Fatal("the rejected write still created a file")
 	}
 }
@@ -170,7 +170,7 @@ func TestWriteRefusesOversizedContent(t *testing.T) {
 func TestReadRefusesAnOversizedFile(t *testing.T) {
 	m, _, _ := newTestManager(t)
 
-	big := filepath.Join(m.dir("demo"), "app", "big.bin")
+	big := filepath.Join(m.appDir("demo"), "big.bin")
 	if err := os.WriteFile(big, make([]byte, MaxFileSize+10), 0o640); err != nil {
 		t.Fatal(err)
 	}
@@ -216,7 +216,7 @@ func TestDeleteIsNotRecursiveAndProtectsTheRoot(t *testing.T) {
 	if err := m.DeleteFile(ctx, "demo", "/"); err == nil {
 		t.Fatal("deleted the site root")
 	}
-	if _, err := os.Stat(filepath.Join(m.dir("demo"), "app")); err != nil {
+	if _, err := os.Stat(m.appDir("demo")); err != nil {
 		t.Fatal("the site root was removed")
 	}
 
@@ -224,7 +224,7 @@ func TestDeleteIsNotRecursiveAndProtectsTheRoot(t *testing.T) {
 	if err := m.DeleteFile(ctx, "demo", "public"); err == nil {
 		t.Fatal("deleted a non-empty directory")
 	}
-	if _, err := os.Stat(filepath.Join(m.dir("demo"), "app", "public", "index.php")); err != nil {
+	if _, err := os.Stat(filepath.Join(m.appDir("demo"), "public", "index.php")); err != nil {
 		t.Fatal("a file inside the directory was removed")
 	}
 
@@ -251,7 +251,7 @@ func TestFileApiRejectsABadSiteId(t *testing.T) {
 // replace its invalid bytes with U+FFFD, and saving it back would corrupt it.
 func TestReadRefusesBinaryFiles(t *testing.T) {
 	m, _, _ := newTestManager(t)
-	app := filepath.Join(m.dir("demo"), "app", "public")
+	app := filepath.Join(m.appDir("demo"), "public")
 
 	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0xff, 0xfe}
 	if err := os.WriteFile(filepath.Join(app, "logo.png"), png, 0o640); err != nil {

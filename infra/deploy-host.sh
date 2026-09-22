@@ -47,6 +47,8 @@ ssh_ 'cd /opt/codeinchrome/images/laravel-8.3 && docker build -q -t codeinchrome
 
 say "installing the agent"
 scp -q agent/bin/cic-agent-linux "root@$ip:/opt/codeinchrome/bin/cic-agent.new"
+scp -q infra/cic-mount "root@$ip:/opt/codeinchrome/bin/cic-mount"
+ssh_ 'chmod 0750 /opt/codeinchrome/bin/cic-mount' 
 ssh_ 'mv /opt/codeinchrome/bin/cic-agent.new /opt/codeinchrome/bin/cic-agent && chmod 0755 /opt/codeinchrome/bin/cic-agent'
 ssh_ 'bash -s' < infra/install-agent.sh
 

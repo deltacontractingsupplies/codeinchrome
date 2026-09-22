@@ -14,7 +14,7 @@ class Site extends Model
 
     protected function casts(): array
     {
-        return ['provisioned_at' => 'datetime'];
+        return ['provisioned_at' => 'datetime', 'usage_at' => 'datetime', 'limits_pending' => 'boolean'];
     }
 
     /**
@@ -30,6 +30,16 @@ class Site extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
+    }
+
+    /** Files plus database, in bytes, as last measured; null if never measured. */
+    public function totalBytes(): ?int
+    {
+        if ($this->usage_at === null) {
+            return null;
+        }
+
+        return (int) $this->disk_used_bytes + (int) $this->database_bytes;
     }
 
     public function url(): string

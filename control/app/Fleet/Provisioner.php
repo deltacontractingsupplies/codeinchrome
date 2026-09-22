@@ -77,13 +77,14 @@ class Provisioner
             'status' => 'provisioning',
             'cpu_limit' => $plan['cpu'],
             'memory_limit' => $plan['memory'],
+            'disk_gb' => (int) $plan['disk_gb'],
         ]);
 
         try {
             $this->requireCapableAgent($host);
             $this->dns->upsert($siteId, config("fleet.hosts.$host.ip"));
 
-            $created = AgentClient::for($host)->createSite($siteId, $domain, $plan['cpu'], $plan['memory']);
+            $created = AgentClient::for($host)->createSite($siteId, $domain, $plan['cpu'], $plan['memory'], (int) $plan['disk_gb']);
 
             $site->update([
                 'port' => $created['port'] ?? null,

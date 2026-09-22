@@ -105,6 +105,18 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}))
 	})
 
+	mux.HandleFunc("GET /v1/usage", func(w http.ResponseWriter, r *http.Request) {
+		usage, err := mgr.Usage(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, fail("usage_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{
+			"usage": usage,
+			"basis": "statfs on each site's mounted disk; information_schema sizes for each database (InnoDB estimates)",
+		}))
+	})
+
 	mux.HandleFunc("GET /v1/sites", func(w http.ResponseWriter, r *http.Request) {
 		list, err := mgr.List(r.Context())
 		if err != nil {
@@ -223,6 +235,28 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"path": path, "deleted": true}))
+	})
+
+	mux.HandleFunc("PUT /v1/sites/{id}/limits", func(w http.ResponseWriter, r *http.Request) {
+		var o sites.LimitsOpts
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&o); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {cpuLimit?, memLimit?, diskGb?}"))
+			return
+		}
+		applied, err := mgr.SetLimits(r.Context(), r.PathValue("id"), o)
+		if err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, fail("limits_failed", err.Error()))
+			return
+		}
+		for _, v := range applied {
+			if strings.HasPrefix(v, "failed") {
+				body := resp{"ok": false, "error": "partially_applied", "applied": applied,
+					"hint": "Some limits were not applied; see applied{}."}
+				writeJSON(w, http.StatusInternalServerError, body)
+				return
+			}
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"applied": applied}))
 	})
 
 	// ── Database browser ─────────────────────────────────────────────────

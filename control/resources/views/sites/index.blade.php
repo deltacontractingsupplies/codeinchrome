@@ -49,6 +49,28 @@
                         <a href="{{ $site->url() }}" target="_blank" rel="noopener"
                            class="font-medium text-neutral-100 hover:text-teal-300">{{ $site->domain }}</a>
                     </div>
+                    @php
+                        $mb = fn ($b) => $b >= 1073741824 ? number_format($b / 1073741824, 1).' GB' : number_format($b / 1048576).' MB';
+                        $quota = $site->disk_gb * 1073741824;
+                        $pct = $site->usage_at ? min(100, (int) round(100 * $site->totalBytes() / max(1, $quota))) : null;
+                    @endphp
+                    @if ($site->usage_at)
+                        {{-- Files and database together, against the plan's disk.
+                             The database lives outside the site's disk, so it is
+                             counted here rather than silently left out. --}}
+                        <div class="mt-2 w-64">
+                            <div class="h-1.5 rounded bg-neutral-800">
+                                <div class="h-1.5 rounded {{ $pct >= 90 ? 'bg-red-500' : ($pct >= 75 ? 'bg-amber-400' : 'bg-teal-500') }}" style="width: {{ $pct }}%"></div>
+                            </div>
+                            <p class="mt-1 text-xs text-neutral-500" title="Measured {{ $site->usage_at->diffForHumans() }}">
+                                {{ $mb($site->totalBytes()) }} of {{ $site->disk_gb }} GB
+                                &middot; files {{ $mb((int) $site->disk_used_bytes) }}, database {{ $mb((int) $site->database_bytes) }}
+                            </p>
+                        </div>
+                    @endif
+                    @if ($site->limits_pending)
+                        <p class="mt-1 text-xs text-amber-400">Your plan change is still being applied to this site.</p>
+                    @endif
                     <p class="mt-1 text-xs text-neutral-500">
                         {{ $site->status }} &middot; host {{ $site->host }}
                         @if ($site->provisioned_at) &middot; created {{ $site->provisioned_at->diffForHumans() }} @endif

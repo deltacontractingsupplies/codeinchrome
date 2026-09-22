@@ -2,6 +2,7 @@
 
 namespace App\Billing;
 
+use App\Fleet\PlanLimits;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Models\WebhookEvent;
@@ -106,10 +107,20 @@ class WebhookHandler
             return 'unknown_variant';
         }
 
+        $before = $user->plan;
         $user->update([
             'plan' => $subscription->entitled() ? $plan : 'free',
             'ls_customer_id' => (string) ($attributes['customer_id'] ?? $user->ls_customer_id),
         ]);
+
+        // Paid for, so applied - to the sites that already exist, not only to
+        // new ones. Runs AFTER the plan is committed (afterCommit), and never
+        // throws: a host being down must not make Lemon Squeezy retry a
+        // payment we have already recorded. Sites it could not reach are
+        // marked limits_pending and fleet:apply-limits finishes the job.
+        if ($user->plan !== $before) {
+            DB::afterCommit(fn () => app(PlanLimits::class)->applyTo($user->fresh()));
+        }
 
         // Downgrading does NOT delete sites that now exceed the new limit.
         // Deleting a paying-customer-turned-free customer's work on a webhook

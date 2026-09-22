@@ -24,7 +24,8 @@ code exists.
       `.env`; dropped with the site
 - [x] **Database browser** in the editor (tables, rows, queries as the site's
       own user) instead of a public phpMyAdmin
-- [ ] **Disk quotas** per plan, enforced and reported
+- [x] **Disk quotas** per plan, enforced by the kernel and reported; applied
+      to existing sites on plan change, retried if a host is down
 - [ ] **Backups**: nightly files + database per site, off-host, restore tested
 - [ ] **Custom domains**: ownership verified by DNS, certificate on demand
 - [ ] **Billing checkout**: plan upgrade through Lemon Squeezy checkout

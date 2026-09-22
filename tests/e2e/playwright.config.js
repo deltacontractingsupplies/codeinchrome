@@ -33,6 +33,7 @@ process.env.TMPDIR = localTmp;
  */
 export default defineConfig({
   testDir: './specs',
+  globalTeardown: './helpers/global-teardown.js',
   fullyParallel: false,
   workers: 1,
   retries: 0,

@@ -74,11 +74,31 @@ class AgentClient
         return $this->send('get', "/v1/sites/$id")['site'] ?? [];
     }
 
-    public function createSite(string $id, string $domain, string $cpu, string $memory): array
+    public function createSite(string $id, string $domain, string $cpu, string $memory, int $diskGb = 1): array
     {
         return $this->send('post', '/v1/sites', [
-            'id' => $id, 'domain' => $domain, 'cpuLimit' => $cpu, 'memLimit' => $memory,
+            'id' => $id, 'domain' => $domain, 'cpuLimit' => $cpu, 'memLimit' => $memory, 'diskGb' => $diskGb,
         ])['site'] ?? [];
+    }
+
+    /**
+     * Apply new ceilings to a running site. Returns what the host says it
+     * applied, per part: CPU and memory change immediately, and a disk only
+     * ever grows - a smaller plan leaves it as it is.
+     *
+     * @return array<string, string>
+     */
+    public function setLimits(string $id, string $cpu, string $memory, int $diskGb): array
+    {
+        return $this->send('put', "/v1/sites/$id/limits", [
+            'cpuLimit' => $cpu, 'memLimit' => $memory, 'diskGb' => $diskGb,
+        ])['applied'] ?? [];
+    }
+
+    /** @return array<int, array<string, mixed>> one entry per site on the host */
+    public function usage(): array
+    {
+        return $this->send('get', '/v1/usage')['usage'] ?? [];
     }
 
     /**

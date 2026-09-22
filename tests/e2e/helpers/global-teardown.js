@@ -1,0 +1,24 @@
+import { execFileSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+/**
+ * After the whole run: remove the test ACCOUNTS it created. Sites are reaped
+ * per spec; accounts were not, and 78 had accumulated in production before
+ * this existed. The command only touches @codeinchrome.test addresses and
+ * refuses any account that still owns a site.
+ */
+export default function globalTeardown() {
+  const base = process.env.CIC_BASE_URL || 'http://127.0.0.1:8123';
+  try {
+    if (/127\.0\.0\.1|localhost/.test(base)) {
+      execFileSync('php', ['artisan', 'accounts:purge-test'], {
+        cwd: fileURLToPath(new URL('../../../control', import.meta.url)), stdio: 'pipe', timeout: 60_000,
+      });
+    } else {
+      execFileSync('ssh', ['-o', 'ConnectTimeout=20', process.env.CIC_CONTROL_SSH || 'root@203.0.113.104',
+        'cd /srv/control && sudo -u codeinchrome php8.4 artisan accounts:purge-test'], { stdio: 'pipe', timeout: 60_000 });
+    }
+  } catch (error) {
+    console.warn(`[teardown] test accounts not purged: ${error.stderr?.toString() || error.message}`);
+  }
+}

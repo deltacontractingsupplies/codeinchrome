@@ -78,7 +78,7 @@ func (m *Manager) resolve(id, rel string) (string, error) {
 		return "", err
 	}
 
-	root := filepath.Join(m.dir(id), "app")
+	root := m.appDir(id)
 
 	// EvalSymlinks on the root as well: on macOS and in some container setups
 	// the root itself may be reached through a symlink, and comparing a
@@ -136,7 +136,7 @@ func (m *Manager) resolve(id, rel string) (string, error) {
 // relativeTo renders a resolved path back into the site-relative form the
 // panel uses, so nothing ever hands the host's real layout to the browser.
 func (m *Manager) relativeTo(id, abs string) string {
-	root := filepath.Join(m.dir(id), "app")
+	root := m.appDir(id)
 	if realRoot, err := filepath.EvalSymlinks(root); err == nil {
 		root = realRoot
 	}
@@ -378,7 +378,7 @@ func (m *Manager) DeleteFile(_ context.Context, id, rel string) error {
 		return err
 	}
 
-	root := filepath.Join(m.dir(id), "app")
+	root := m.appDir(id)
 	if realRoot, err := filepath.EvalSymlinks(root); err == nil {
 		root = realRoot
 	}

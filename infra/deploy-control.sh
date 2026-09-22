@@ -164,6 +164,17 @@ REMOTE
   ok "$h accepts the control key for forwarding to 127.0.0.1:9440 only"
 done
 
+say "scheduler"
+# One cron line drives every scheduled command (routes/console.php): usage
+# measurement and retrying plan limits a host could not accept at the time.
+# Runs as the app user, never root.
+ssh_ "cat > /etc/cron.d/codeinchrome <<CRON
+# Managed by codeinchrome infra/deploy-control.sh
+* * * * * codeinchrome cd /srv/control && php$PHP_VERSION artisan schedule:run >/dev/null 2>&1
+CRON
+chmod 0644 /etc/cron.d/codeinchrome"
+ok "scheduler installed"
+
 say "tunnels to every customer host"
 scp -q infra/hosts.env infra/tunnels.sh "root@$ip:/srv/control/"
 ssh_ 'cd /srv/control && bash tunnels.sh install'
@@ -274,6 +285,7 @@ check "app cannot read the agent tokens as caddy" "ssh root@$ip '! sudo -u caddy
 # and then failed when .env was correctly tightened to 600.
 check "env readable by its owner only" "ssh root@$ip '[ \"\$(stat -c %a /srv/control/.env)\" = 600 ]'"
 check "env owned by the app user"      "ssh root@$ip '[ \"\$(stat -c %U /srv/control/.env)\" = codeinchrome ]'"
+check "scheduler installed"    "ssh root@$ip 'grep -q schedule:run /etc/cron.d/codeinchrome'"
 check "config is cached"       "ssh root@$ip 'test -f /srv/control/bootstrap/cache/config.php'"
 check "answers over https"     "[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 25 https://$domain/)\" = 200 ]"
 check ".env not served"        "[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 15 https://$domain/.env)\" != 200 ]"

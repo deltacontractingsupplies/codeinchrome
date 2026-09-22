@@ -87,6 +87,36 @@ systemctl reload caddy 2>/dev/null || systemctl restart caddy
 ok "caddy reloaded"
 
 # ─────────────────────────────────────────────────────────────────────────────
+log "site disks"
+[[ -x $CIC/bin/cic-mount ]] || die "$CIC/bin/cic-mount missing - deploy-host.sh copies it"
+# Every site's disk image is mounted at boot BEFORE docker starts. Otherwise
+# restart=unless-stopped brings containers back onto bind mounts of EMPTY
+# directories: the site serves nothing, or writes land on the host's own disk
+# underneath the mountpoint and silently escape the quota.
+cat > /etc/systemd/system/cic-mounts.service <<UNIT
+[Unit]
+Description=codeinchrome: mount every site disk before docker starts
+DefaultDependencies=no
+After=local-fs.target
+Before=docker.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=$CIC/bin/cic-mount all
+
+# Ordered before docker, but not REQUIRED by it: one bad image must not stop
+# docker - and every other site on the host - from starting. The agent stops
+# any container whose disk is not mounted when it starts (Reconcile).
+[Install]
+WantedBy=multi-user.target
+UNIT
+systemctl daemon-reload
+systemctl enable cic-mounts.service >/dev/null 2>&1
+systemctl start cic-mounts.service
+ok "site disks mounted before docker at boot"
+
+# ─────────────────────────────────────────────────────────────────────────────
 log "service"
 cat > /etc/systemd/system/cic-agent.service <<UNIT
 [Unit]
@@ -143,6 +173,7 @@ check "caddy active"             'systemctl is-active caddy'
 check "base image present"       'docker image inspect codeinchrome/laravel:8.3'
 check "caddy reload works"       'systemctl reload caddy'
 check "admin api loopback only"  '! has "0.0.0.0:2019" ss -ltn'
+check "site disks mount before docker" 'systemctl is-enabled cic-mounts.service && systemctl show docker -p After --value | grep -q cic-mounts.service'
 check "tls gate refuses a stranger" '[[ "$(curl -s -o /dev/null -w %{http_code} "http://127.0.0.1:9440/tls-ask?domain=not-ours.example.com")" == "404" ]]'
 check "caddy has the tls gate"   'has "tls-ask" curl -s http://127.0.0.1:2019/config/apps/tls/automation'
 # The isolation claim that matters: a customer container must not be able to
