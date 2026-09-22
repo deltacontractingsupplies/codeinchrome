@@ -1,4 +1,22 @@
 import { defineConfig, devices } from '@playwright/test';
+import { mkdirSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+/*
+ * Temporary files stay beside the suite, not in the system temp directory.
+ *
+ * Every run launches Chromium with a throwaway profile, and node writes its
+ * own scratch files; by default both go to os.tmpdir(), which on macOS is
+ * /var/folders on the BOOT disk. Measured: about 3 MB per run. Small, but the
+ * machine this was built on has a soldered SSD that is deliberately spared,
+ * and there is no reason for any of it to land there. os.tmpdir() re-reads
+ * TMPDIR on every call, so setting it here - before any browser is launched -
+ * covers the runner and everything it spawns, however the suite is started.
+ * CIC_E2E_TMP overrides the location.
+ */
+const localTmp = process.env.CIC_E2E_TMP || fileURLToPath(new URL('./.tmp', import.meta.url));
+mkdirSync(localTmp, { recursive: true });
+process.env.TMPDIR = localTmp;
 
 /**
  * These tests drive the REAL control plane against the REAL fleet: signing up

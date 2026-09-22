@@ -3,9 +3,11 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "test": "playwright test",
-    "test:headed": "playwright test --headed",
-    "report": "playwright show-report"
+    "//": "TMPDIR is set BEFORE playwright starts: the CLI compiles the config into a transform cache in os.tmpdir() before the config can change anything. Run through these scripts, not bare npx, to keep every temp file beside the suite.",
+    "test": "mkdir -p \"$PWD/.tmp\" && TMPDIR=\"$PWD/.tmp\" PWTEST_CACHE_DIR=\"$PWD/.tmp/transform-cache\" playwright test",
+    "test:prod": "mkdir -p \"$PWD/.tmp\" && TMPDIR=\"$PWD/.tmp\" PWTEST_CACHE_DIR=\"$PWD/.tmp/transform-cache\" CIC_BASE_URL=https://app.codeinchrome.com playwright test",
+    "test:headed": "mkdir -p \"$PWD/.tmp\" && TMPDIR=\"$PWD/.tmp\" PWTEST_CACHE_DIR=\"$PWD/.tmp/transform-cache\" playwright test --headed",
+    "report": "playwright show-report report"
   },
   "devDependencies": {
     "@playwright/test": "^1.50.0"
