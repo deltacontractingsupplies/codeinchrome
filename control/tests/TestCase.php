@@ -58,6 +58,15 @@ abstract class TestCase extends BaseTestCase
         // monitoring test briefly tried to resolve a live customer domain.
         // Now an unmatched request fails the test that made it.
         \Illuminate\Support\Facades\Http::preventStrayRequests();
+
+        // Every credential check is held to at least 200 ms (Laravel's auth
+        // "timebox"), so a login for an unknown address costs the same as one
+        // for a real account - a timing side-channel defence that stays ON in
+        // production. Tests assert behaviour, not timing, and the rate-limit
+        // tests make dozens of login attempts: at 200 ms each they took eleven
+        // of the suite's fifteen seconds. Measured, then shortened here only.
+        config(['auth.timebox_duration' => 0]);
+        $this->app['auth']->forgetGuards();
     }
 
     private static function buildSchemaOnce(): string

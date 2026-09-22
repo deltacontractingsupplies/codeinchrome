@@ -58,6 +58,18 @@ class AgentClient
         return $this->send('get', '/healthz', authenticated: false);
     }
 
+    /** @return array<int, array{id: string, current: bool, image: string}> */
+    public function imageStatuses(): array
+    {
+        return $this->send('get', '/v1/images')['sites'] ?? [];
+    }
+
+    /** "recreated" or "current"; throws if the new container does not answer. */
+    public function recreate(string $id): string
+    {
+        return $this->send('post', "/v1/sites/$id/recreate")['outcome'] ?? '';
+    }
+
     public function hostStats(): array
     {
         return $this->send('get', '/v1/host/stats')['stats'] ?? [];

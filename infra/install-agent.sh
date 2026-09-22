@@ -140,6 +140,37 @@ systemctl start cic-mounts.service
 ok "site disks mounted before docker at boot"
 
 # ─────────────────────────────────────────────────────────────────────────────
+log "weekly base image rebuild"
+# --pull fetches the latest php:8.3-apache: this is how PHP and Apache security
+# fixes arrive. The Dockerfile asserts every extension loads, so a broken
+# upstream fails the build and the old image stays in place. Running sites
+# move onto the new image via the control plane's fleet:roll-image, one at a
+# time, each checked from outside.
+cat > /etc/systemd/system/cic-image-rebuild.service <<'UNIT'
+[Unit]
+Description=codeinchrome: rebuild the Laravel base image with upstream security fixes
+[Service]
+Type=oneshot
+WorkingDirectory=/opt/codeinchrome/images/laravel-8.3
+ExecStart=/usr/bin/docker build --pull -q -t codeinchrome/laravel:8.3 .
+ExecStartPost=/usr/bin/docker image prune -f
+Nice=10
+UNIT
+cat > /etc/systemd/system/cic-image-rebuild.timer <<'UNIT'
+[Unit]
+Description=codeinchrome weekly base image rebuild
+[Timer]
+OnCalendar=Sun *-*-* 03:30:00
+RandomizedDelaySec=30min
+Persistent=true
+[Install]
+WantedBy=timers.target
+UNIT
+systemctl daemon-reload
+systemctl enable --now cic-image-rebuild.timer >/dev/null 2>&1
+ok "base image rebuilt weekly"
+
+# ─────────────────────────────────────────────────────────────────────────────
 log "service"
 cat > /etc/systemd/system/cic-agent.service <<UNIT
 [Unit]
@@ -196,6 +227,7 @@ check "caddy active"             'systemctl is-active caddy'
 check "base image present"       'docker image inspect codeinchrome/laravel:8.3'
 check "caddy reload works"       'systemctl reload caddy'
 check "admin api loopback only"  '! has "0.0.0.0:2019" ss -ltn'
+check "weekly image rebuild scheduled" 'systemctl is-active cic-image-rebuild.timer'
 check "site disks mount before docker" 'systemctl is-enabled cic-mounts.service && systemctl show docker -p After --value | grep -q cic-mounts.service'
 check "tls gate refuses a stranger" '[[ "$(curl -s -o /dev/null -w %{http_code} "http://127.0.0.1:9440/tls-ask?domain=not-ours.example.com")" == "404" ]]'
 check "caddy has the tls gate"   'has "tls-ask" curl -s http://127.0.0.1:2019/config/apps/tls/automation'

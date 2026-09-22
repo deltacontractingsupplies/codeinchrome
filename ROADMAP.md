@@ -49,12 +49,12 @@ code exists.
       incidents after two failures; alerts to a webhook (needs `CIC_ALERT_WEBHOOK`)
 - [x] **Control plane backups**, and every backup replicated to a second host
       that refuses deletion; full recovery drilled from the replica
-- [ ] **Audit log**: who did what to which site, when - provisioning,
+- [x] **Audit log**: who did what to which site, when - provisioning,
       deletion, domains, commands, database writes, 2FA and password changes
-- [ ] **Security patches reach running sites**: rebuilding the base image does
-      not change containers already running it; roll them onto the new image
-      without losing their disk or database
-- [ ] **Security headers and a Content-Security-Policy** on the control plane
+- [x] **Security patches reach running sites**: rebuilding the base image does
+      not change running containers, so hosts rebuild weekly with --pull and
+      fleet:roll-image moves sites one at a time, checked from outside
+- [x] **Security headers and a strict Content-Security-Policy** on the control plane
 - [x] **Dependency vulnerability scanning** in CI, weekly as well as on push
       (composer audit, npm audit, govulncheck with the toolchain pinned)
 - [ ] **Public repository** (blocked on `gh auth login`)
