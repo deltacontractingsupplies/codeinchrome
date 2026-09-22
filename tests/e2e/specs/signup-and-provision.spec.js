@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { confirmSignup } from '../helpers/fixtures.js';
 import { waitForDns, waitForDnsGone } from '../helpers/dns.js';
 import { httpsGet } from '../helpers/https.js';
 import { destroySite } from '../helpers/cleanup.js';
@@ -41,8 +42,7 @@ test('a visitor can sign up, provision a site, and see it live', async ({ page }
     await page.getByLabel('Password', { exact: true }).fill(account.password);
     await page.getByLabel('Confirm password').fill(account.password);
     await page.getByRole('button', { name: 'Create account' }).click();
-
-    await expect(page).toHaveURL(/\/sites$/);
+    await confirmSignup(page, account.email);
     await expect(page.getByText('No sites yet')).toBeVisible();
   });
 

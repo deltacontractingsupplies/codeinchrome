@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { confirmSignup } from '../helpers/fixtures.js';
 import { waitForDns } from '../helpers/dns.js';
 import { destroySite } from '../helpers/cleanup.js';
 
@@ -30,7 +31,7 @@ test('the panel can browse and edit a real site through the control plane', asyn
     await page.getByLabel('Password', { exact: true }).fill(account.password);
     await page.getByLabel('Confirm password').fill(account.password);
     await page.getByRole('button', { name: 'Create account' }).click();
-    await expect(page).toHaveURL(/\/sites$/);
+    await confirmSignup(page, account.email);
 
     await page.getByPlaceholder('my-shop').fill(siteName);
     await page.getByRole('button', { name: 'Create' }).click();

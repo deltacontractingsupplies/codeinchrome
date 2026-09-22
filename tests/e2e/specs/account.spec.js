@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { confirmSignup } from '../helpers/fixtures.js';
 import { totp } from '../helpers/totp.js';
 
 const stamp = Date.now().toString(36);
@@ -16,6 +17,7 @@ test('two-factor: set up, then a password alone no longer signs in', async ({ pa
     await page.getByLabel('Password', { exact: true }).fill(password);
     await page.getByLabel('Confirm password').fill(password);
     await page.getByRole('button', { name: 'Create account' }).click();
+    await confirmSignup(page, email);
 
     await page.goto('/account');
     await page.getByRole('link', { name: 'Set up' }).click();

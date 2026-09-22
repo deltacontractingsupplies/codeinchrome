@@ -125,6 +125,22 @@ class MonitoringTest extends TestCase
         $this->assertFalse(Incident::first()->alerted, 'An incident claimed an alert that was never sent.');
     }
 
+    public function test_without_a_webhook_the_alert_goes_to_the_operators_by_email(): void
+    {
+        config(['fleet.alert_webhook' => null, 'fleet.mail_enabled' => true, 'fleet.admin_emails' => ['ops@codeinchrome.com']]);
+        $this->siteDown = true;
+        $this->tick();
+        $this->tick();
+
+        // The array mailer keeps what would have been sent (Mail::fake does
+        // not record Mail::raw).
+        $sent = app('mailer')->getSymfonyTransport()->messages();
+        $this->assertTrue(Incident::first()->alerted);
+        $this->assertCount(1, $sent);
+        $this->assertSame('ops@codeinchrome.com', $sent[0]->getEnvelope()->getRecipients()[0]->getAddress());
+        $this->assertSame([], $this->alerts, 'The webhook was used although none is configured.');
+    }
+
     public function test_the_status_page_is_for_operators_only(): void
     {
         $this->tick();

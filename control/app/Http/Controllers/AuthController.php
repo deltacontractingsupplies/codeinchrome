@@ -41,6 +41,12 @@ class AuthController extends Controller
         $request->session()->regenerate();
         Audit::record('account.created', $user, actor: $user);
 
+        if (config('fleet.mail_enabled')) {
+            $user->sendEmailVerificationNotification();
+
+            return redirect()->route('verification.notice');
+        }
+
         return redirect()->route('dashboard')->with('status', 'Welcome. Create your first site below.');
     }
 

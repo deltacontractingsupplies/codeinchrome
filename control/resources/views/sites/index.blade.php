@@ -1,6 +1,11 @@
 @extends('layout')
 @section('title', 'Your sites')
 @section('content')
+@if (config('fleet.mail_enabled') && ! auth()->user()->hasVerifiedEmail())
+    <div class="mb-6 rounded-md border border-amber-800 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
+        Confirm your email address to create sites. <a href="{{ route('verification.notice') }}" class="underline">Resend the link</a>.
+    </div>
+@endif
 <div class="flex flex-wrap items-end justify-between gap-4">
     <div>
         <h1 class="text-2xl font-semibold text-white">Your sites</h1>

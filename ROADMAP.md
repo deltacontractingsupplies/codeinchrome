@@ -43,10 +43,12 @@ code exists.
 - [x] **Account security**: TOTP two-factor (RFC-vector tested, replay-proof,
       per-account lockout), recovery codes, password change that signs out
       other sessions, account deletion that removes every site first
-- [ ] **Password reset and email verification** (built and tested; switch on
-      when a mail provider is configured - MAIL_MAILER other than log)
+- [x] **Password reset and email verification**, over the platform's own mail:
+      send-only Postfix on the control host (loopback only), every message
+      DKIM-signed, SPF/DKIM/DMARC published (`infra/setup-mail.sh`). Creating a
+      site, a domain or a subscription waits for a confirmed address
 - [x] **Monitoring**: every host and site checked each minute from outside;
-      incidents after two failures; alerts to a webhook (needs `CIC_ALERT_WEBHOOK`)
+      incidents after two failures; alerts to a webhook if `CIC_ALERT_WEBHOOK` is set, otherwise by email to the operators
 - [x] **Control plane backups**, and every backup replicated to a second host
       that refuses deletion; full recovery drilled from the replica
 - [x] **Audit log**: who did what to which site, when - provisioning,

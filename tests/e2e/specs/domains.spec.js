@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test';
 import { waitForDns } from '../helpers/dns.js';
 import { httpsGet } from '../helpers/https.js';
 import { destroySite } from '../helpers/cleanup.js';
-import { setPlan, dnsCreate, dnsDeleteUnder } from '../helpers/fixtures.js';
+import { setPlan, dnsCreate, dnsDeleteUnder, confirmSignup } from '../helpers/fixtures.js';
 
 /**
  * A real custom domain, end to end: claimed in the dashboard, proved with a
@@ -38,6 +38,7 @@ test('a customer can prove, attach, serve and remove their own domain', async ({
     await page.getByLabel('Password', { exact: true }).fill(password);
     await page.getByLabel('Confirm password').fill(password);
     await page.getByRole('button', { name: 'Create account' }).click();
+    await confirmSignup(page, email);
     setPlan(email, 'starter');
 
     await page.goto('/sites');

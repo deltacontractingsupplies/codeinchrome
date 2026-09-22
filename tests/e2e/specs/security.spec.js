@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { confirmSignup } from '../helpers/fixtures.js';
 
 /**
  * Boundaries that must hold in the control plane itself. Each of these is a
@@ -18,7 +19,7 @@ async function register(page, id) {
   await page.getByLabel('Password', { exact: true }).fill(account.password);
   await page.getByLabel('Confirm password').fill(account.password);
   await page.getByRole('button', { name: 'Create account' }).click();
-  await expect(page).toHaveURL(/\/sites$/);
+  await confirmSignup(page, account.email);
 
   return account;
 }

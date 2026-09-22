@@ -11,6 +11,8 @@ use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\StatusController;
 use App\Http\Controllers\TwoFactorController;
+use App\Http\Controllers\VerificationController;
+use App\Http\Middleware\VerifiedWhenMailEnabled;
 use App\Http\Controllers\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -40,6 +42,10 @@ Route::middleware('guest')->group(function () {
 // out every other session (AccountController::password).
 Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+
+    Route::get('/email/verify', [VerificationController::class, 'notice'])->name('verification.notice');
+    Route::get('/email/verify/{id}/{hash}', [VerificationController::class, 'verify'])->middleware('signed')->name('verification.verify');
+    Route::post('/email/verification-notification', [VerificationController::class, 'send'])->middleware('throttle:password-mail')->name('verification.send');
     Route::get('/status', StatusController::class)->name('status');
     Route::get('/account', [AccountController::class, 'show'])->name('account');
     Route::get('/account/activity', [AccountController::class, 'activity'])->name('account.activity');
@@ -49,12 +55,12 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::post('/account/two-factor', [TwoFactorController::class, 'confirm'])->middleware('throttle:account')->name('two-factor.confirm');
     Route::delete('/account/two-factor', [TwoFactorController::class, 'disable'])->name('two-factor.disable');
     Route::get('/billing', [BillingController::class, 'index'])->name('billing');
-    Route::post('/billing/checkout', [BillingController::class, 'checkout'])->middleware('throttle:billing')->name('billing.checkout');
+    Route::post('/billing/checkout', [BillingController::class, 'checkout'])->middleware(['throttle:billing', VerifiedWhenMailEnabled::class])->name('billing.checkout');
     Route::get('/billing/return', [BillingController::class, 'return'])->name('billing.return');
     Route::get('/sites', [SiteController::class, 'index'])->name('dashboard');
     // Provisioning creates a container and a DNS record, so it is throttled
     // separately and much harder than a page view.
-    Route::post('/sites', [SiteController::class, 'store'])->middleware('throttle:provision')->name('sites.store');
+    Route::post('/sites', [SiteController::class, 'store'])->middleware(['throttle:provision', VerifiedWhenMailEnabled::class])->name('sites.store');
     Route::delete('/sites/{site}', [SiteController::class, 'destroy'])->name('sites.destroy');
 
     // The panel's file operations. Session-authenticated like the rest of the
@@ -63,7 +69,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::get('/sites/{site}/edit', [SiteController::class, 'edit'])->name('sites.edit');
 
     Route::get('/sites/{site}/domains', [DomainController::class, 'index'])->name('domains.index');
-    Route::post('/sites/{site}/domains', [DomainController::class, 'store'])->middleware('throttle:domains')->name('domains.store');
+    Route::post('/sites/{site}/domains', [DomainController::class, 'store'])->middleware(['throttle:domains', VerifiedWhenMailEnabled::class])->name('domains.store');
     // Verification queries public DNS; throttled so it cannot be used to make
     // us hammer resolvers.
     Route::post('/sites/{site}/domains/{domain}/verify', [DomainController::class, 'verify'])->middleware('throttle:domains')->name('domains.verify');

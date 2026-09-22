@@ -24,6 +24,29 @@ export function setPlan(email, plan) {
   onControl(['tinker', `--execute=App\\Models\\User::where('email', '${email}')->update(['plan' => '${plan}']);`]);
 }
 
+/**
+ * Mark a TEST account's email as confirmed. Test addresses are under the
+ * reserved .test TLD and cannot receive the real confirmation mail, so the
+ * suite does what clicking the link would do - for @codeinchrome.test only.
+ */
+export function markVerified(email) {
+  if (!email.endsWith('@codeinchrome.test')) throw new Error('markVerified is for test accounts only');
+  onControl(['tinker', `--execute=App\\Models\\User::where('email', '${email}')->update(['email_verified_at' => now()]);`]);
+}
+
+/**
+ * After clicking "Create account": the confirmation screen appears when the
+ * platform sends mail, then the account is confirmed and the dashboard opened.
+ */
+export async function confirmSignup(page, email) {
+  await page.waitForURL(/\/(sites|email\/verify)$/);
+  if (page.url().endsWith('/email/verify')) {
+    await page.getByText('Confirm your email').waitFor();
+    markVerified(email);
+  }
+  await page.goto('/sites');
+}
+
 /** Cloudflare, for records under the test-only cdtest subdomain. */
 function cf() {
   const env = Object.fromEntries(readFileSync(`${REPO}/.env`, 'utf8').split('\n')

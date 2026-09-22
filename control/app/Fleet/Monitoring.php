@@ -167,7 +167,22 @@ class Monitoring
 
         $url = config('fleet.alert_webhook');
         if (! $url) {
-            return false;
+            // No webhook: email the operators, if mail really goes out.
+            $to = config('fleet.admin_emails');
+            if (! config('fleet.mail_enabled') || ! $to) {
+                return false;
+            }
+            try {
+                \Illuminate\Support\Facades\Mail::raw($text . "\n\nhttps://app.codeinchrome.com/status", function ($m) use ($to, $text) {
+                    $m->to($to)->subject('[codeinchrome] ' . mb_substr($text, 0, 120));
+                });
+
+                return true;
+            } catch (\Throwable $e) {
+                Log::error('alert email failed', ['error' => $e->getMessage()]);
+
+                return false;
+            }
         }
         try {
             // {"text": ...} is accepted by Slack incoming webhooks and by

@@ -115,17 +115,14 @@ revision-checked saves, a database browser, a terminal for allow-listed
 artisan/composer commands and logs, custom domains proved by DNS, nightly
 append-only encrypted backups with restore and full disaster recovery drilled,
 monitoring with incidents, weekly security-patch rollout, two-factor sign-in,
-an append-only audit log, a strict CSP, and dependency scanning in CI.
+an append-only audit log, a strict CSP, email verification and password
+reset over the platform's own DKIM-signed mail, and dependency scanning in CI.
 
 Blocked on the owner, not on code:
 
 - **Billing products** - Lemon Squeezy products are dashboard-only; the
   configured store belongs to another business. Checkout is built and was
   validated against the live API.
-- **Outgoing mail** - password reset and email verification are built and
-  tested, and switch on when `MAIL_MAILER` is set to a real provider.
-- **Alert delivery** - set `CIC_ALERT_WEBHOOK`; until then incidents are
-  logged and shown on `/status`, and each records that no alert was sent.
 - **Publishing this repository** - needs `gh auth login`.
 
 ## Licence

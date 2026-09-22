@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { confirmSignup } from '../helpers/fixtures.js';
 import { waitForDns } from '../helpers/dns.js';
 import { httpsGet } from '../helpers/https.js';
 import { destroySite } from '../helpers/cleanup.js';
@@ -36,6 +37,7 @@ test('a person and an agent can both edit a real site, without erasing each othe
     await page.getByLabel('Password', { exact: true }).fill(password);
     await page.getByLabel('Confirm password').fill(password);
     await page.getByRole('button', { name: 'Create account' }).click();
+    await confirmSignup(page, `ed-${stamp}@codeinchrome.test`);
 
     await page.getByPlaceholder('my-shop').fill(siteName);
     await page.getByRole('button', { name: 'Create' }).click();
