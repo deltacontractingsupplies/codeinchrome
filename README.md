@@ -107,16 +107,26 @@ them, because disagreement is the interesting case.
 
 ## Status
 
-Working end to end: signup, provisioning, DNS, TLS, the dashboard, the
-in-browser editor (with conflict detection between a person and an agent
-editing the same file), tenant isolation, host bootstrap, and the e2e suite
-against production.
+See [ROADMAP.md](ROADMAP.md). Built, deployed and verified against production:
+signup, provisioning, DNS, on-demand TLS, per-site containers, networks,
+disks (kernel-enforced quotas) and MySQL databases, tenant isolation (files,
+network and database, each with positive controls), the in-browser editor with
+revision-checked saves, a database browser, a terminal for allow-listed
+artisan/composer commands and logs, custom domains proved by DNS, nightly
+append-only encrypted backups with restore and full disaster recovery drilled,
+monitoring with incidents, weekly security-patch rollout, two-factor sign-in,
+an append-only audit log, a strict CSP, and dependency scanning in CI.
 
-Not finished: Lemon Squeezy products cannot be created over their API
-(`POST /v1/products` returns 405, they are dashboard-only), so the plan catalog
-ships with variant ids blank and everything downstream of one is built and
-tested without it. See [BILLING.md](BILLING.md), which also records that the
-currently configured store belongs to a different business.
+Blocked on the owner, not on code:
+
+- **Billing products** - Lemon Squeezy products are dashboard-only; the
+  configured store belongs to another business. Checkout is built and was
+  validated against the live API.
+- **Outgoing mail** - password reset and email verification are built and
+  tested, and switch on when `MAIL_MAILER` is set to a real provider.
+- **Alert delivery** - set `CIC_ALERT_WEBHOOK`; until then incidents are
+  logged and shown on `/status`, and each records that no alert was sent.
+- **Publishing this repository** - needs `gh auth login`.
 
 ## Licence
 
