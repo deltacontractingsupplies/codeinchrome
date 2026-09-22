@@ -47,9 +47,35 @@ class ProvisioningTest extends TestCase
 
     private int $deleteStatus = 200;
 
+    private string $agentVersion = '0.2.0';
+
+    private ?array $createResponse = null;
+
+    private int $createStatus = 201;
+
+    /**
+     * Configure the fake by SETTING these, never by calling Http::fake() a
+     * second time - stubs merge and the first match wins, so a later fake is
+     * silently ignored and the test asserts against the earlier response.
+     */
+    private function failCreate(string $hint): void
+    {
+        $this->createResponse = ['ok' => false, 'error' => 'create_failed', 'hint' => $hint];
+        $this->createStatus = 422;
+    }
+
+    private function succeedCreate(): void
+    {
+        $this->createResponse = null;
+        $this->createStatus = 201;
+    }
+
     private function fakeAgent(array $overrides = []): void
     {
         $this->dnsRecords = [];
+        $this->createResponse = null;
+        $this->createStatus = 201;
+        $this->agentVersion = '0.2.0';
 
         Http::fake(array_merge([
             // STATEFUL on purpose. A stateless fake whose GET always returned
@@ -85,14 +111,22 @@ class ProvisioningTest extends TestCase
             // A test that re-faked the DELETE this way silently received the
             // original create response instead, asserted on it, and passed
             // without ever exercising the delete path.
+            // A CLOSURE, not Http::response(...). Http::response() is built
+            // when the fake is registered, so it would capture whatever
+            // $agentVersion was at setup time and ignore a test that changes
+            // it afterwards - the stub would answer 0.2.0 forever.
+            '127.0.0.1:944*/v1/host' => fn () => Http::response(
+                ['ok' => true, 'version' => $this->agentVersion, 'sites' => 0, 'running' => 0]
+            ),
             '127.0.0.1:944*/v1/sites*' => function ($request) {
                 if ($request->method() === 'DELETE') {
                     return Http::response($this->deleteResponse, $this->deleteStatus);
                 }
 
-                return Http::response(['ok' => true, 'site' => [
-                    'id' => 'shop', 'port' => 20000, 'state' => 'running',
-                ]], 201);
+                return Http::response(
+                    $this->createResponse ?? ['ok' => true, 'site' => ['id' => 'shop', 'port' => 20000, 'state' => 'running']],
+                    $this->createStatus,
+                );
             },
         ], $overrides));
     }
@@ -151,21 +185,24 @@ class ProvisioningTest extends TestCase
         $user = User::factory()->create(['plan' => 'starter']);
 
         foreach (['www', 'admin', 'api', 'h1', 'app', 'panel'] as $reserved) {
+            $message = null;
             try {
                 Provisioner::make()->provision($user, $reserved);
-                $this->fail("Provisioned the reserved name \"$reserved\".");
             } catch (\RuntimeException $e) {
-                $this->assertStringContainsString('reserved', $e->getMessage());
+                $message = $e->getMessage();
             }
+            $this->assertNotNull($message, "Provisioned the reserved name \"$reserved\".");
+            $this->assertStringContainsString('reserved', $message);
         }
 
         foreach (['../etc', 'Upper', 'a', 'ends-', '-starts', 'has--double', 'has_underscore', 'has.dot'] as $bad) {
+            $message = null;
             try {
                 Provisioner::make()->provision($user, $bad);
-                $this->fail("Provisioned the malformed name \"$bad\".");
             } catch (\RuntimeException $e) {
-                $this->assertNotEmpty($e->getMessage());
+                $message = $e->getMessage();
             }
+            $this->assertNotNull($message, "Provisioned the malformed name \"$bad\".");
         }
 
         $this->assertSame(0, Site::count(), 'A rejected name must leave no row behind.');
@@ -173,11 +210,8 @@ class ProvisioningTest extends TestCase
 
     public function test_a_failed_agent_call_leaves_nothing_serving(): void
     {
-        $this->fakeAgent([
-            '127.0.0.1:944*/v1/sites*' => Http::response(
-                ['ok' => false, 'error' => 'create_failed', 'hint' => 'no disk space'], 422
-            ),
-        ]);
+        $this->fakeAgent();
+        $this->failCreate('no disk space');
         $user = User::factory()->create(['plan' => 'starter']);
 
         try {
@@ -199,6 +233,52 @@ class ProvisioningTest extends TestCase
         Http::assertSent(fn ($r) => $r->method() === 'DELETE' && str_contains($r->url(), 'cloudflare'));
     }
 
+    public function test_a_cleanly_failed_name_can_be_retried(): void
+    {
+        $this->fakeAgent();
+        $this->failCreate('transient');
+        $user = User::factory()->create(['plan' => 'starter']);
+
+        try {
+            Provisioner::make()->provision($user, 'retry-me');
+        } catch (\RuntimeException) {
+            // expected
+        }
+        $this->assertSame('failed', Site::where('site_id', 'retry-me')->first()->status);
+
+        // Nothing exists anywhere, so the customer must be able to try again
+        // with the name they chose.
+        $this->succeedCreate();
+        $site = Provisioner::make()->provision($user, 'retry-me');
+
+        $this->assertSame('live', $site->status);
+        $this->assertSame(1, Site::where('site_id', 'retry-me')->count(), 'The stale failed row must not linger.');
+    }
+
+    public function test_it_refuses_to_provision_onto_an_agent_too_old_to_build_the_site(): void
+    {
+        $this->fakeAgent();
+        $this->agentVersion = '0.1.0';
+        $user = User::factory()->create(['plan' => 'starter']);
+
+        // Not a try/catch with fail() inside it: PHPUnit's fail() throws an
+        // AssertionFailedError, which extends RuntimeException, so a
+        // `catch (RuntimeException)` swallows the very failure it is meant to
+        // report and the test passes while proving nothing.
+        $message = null;
+        try {
+            Provisioner::make()->provision($user, 'stale-host');
+        } catch (\RuntimeException $e) {
+            $message = $e->getMessage();
+        }
+
+        $this->assertNotNull($message, 'Provisioned onto an agent that cannot seed an app or generate a key.');
+        $this->assertStringContainsString('0.1.0', $message);
+        $this->assertStringContainsString('deploy-host.sh', $message, 'The error must say how to fix it.');
+
+        $this->assertSame([], $this->dnsRecords, 'No DNS record for a site that was never built.');
+    }
+
     public function test_an_unreachable_agent_is_recorded_as_unknown_not_as_clean_failure(): void
     {
         $this->fakeAgent([
@@ -214,8 +294,13 @@ class ProvisioningTest extends TestCase
 
         $site = Site::where('site_id', 'unknown-state')->first();
         $this->assertNotNull($site, 'The row must survive: it is the only record a container may exist.');
-        $this->assertSame('failed', $site->status);
+        $this->assertSame('orphaned', $site->status, 'Unknown host state is not the same as a clean failure.');
         $this->assertStringContainsString('UNKNOWN', $site->last_error);
+
+        // And the name must stay held, or another customer could be given a
+        // name a still-running container of this one is serving.
+        $this->expectExceptionMessage('is taken');
+        Provisioner::make()->provision(User::factory()->create(['plan' => 'starter']), 'unknown-state');
     }
 
     public function test_it_packs_hosts_and_refuses_to_overflow_a_full_fleet(): void
@@ -262,7 +347,7 @@ class ProvisioningTest extends TestCase
 
         try {
             Provisioner::make()->destroy($site->fresh());
-            $this->fail('The agent reported a partial removal; destroy must not report success.');
+            $this->assertTrue(false, 'The agent reported a partial removal; destroy must not report success.');
         } catch (\App\Fleet\AgentRefused $e) {
             $this->assertSame(
                 ['container' => true, 'vhost' => true, 'data' => false, 'log' => true, 'network' => true],

@@ -23,9 +23,16 @@ done
 say() { printf '\n\033[1;36m[%s]\033[0m %s\n' "$name" "$*"; }
 ssh_() { ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "root@$ip" "$@"; }
 
-say "building the agent"
+# ONE source of truth for the agent version. It used to be hardcoded here as
+# well as in the ad-hoc build command, and they drifted: hosts deployed by this
+# script reported 0.1.0 while running 0.2.0 code. Since the control plane
+# refuses to provision onto an agent below a minimum version, a wrong label is
+# not cosmetic - it makes a correctly deployed host look unusable.
+version=$(cat agent/VERSION)
+
+say "building the agent $version"
 ( cd agent && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-    go build -ldflags="-s -w -X main.version=0.1.0" -o bin/cic-agent-linux ./cmd/cic-agent )
+    go build -ldflags="-s -w -X main.version=$version" -o bin/cic-agent-linux ./cmd/cic-agent )
 
 say "hardening the host"
 ssh_ 'bash -s' < infra/bootstrap.sh

@@ -29,7 +29,7 @@ import (
 	"github.com/codeinchrome/agent/internal/sites"
 )
 
-var version = "dev"
+var version = "dev" // overwritten at build time from agent/VERSION; "dev" means an unstamped build
 
 func main() {
 	var (

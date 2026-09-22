@@ -119,6 +119,10 @@ func (m *Manager) Create(ctx context.Context, o CreateOpts) (Site, error) {
 		cleanup()
 		return Site{}, err
 	}
+	if err := m.seedApp(ctx, site); err != nil {
+		cleanup()
+		return Site{}, err
+	}
 	if err := m.writeCaddy(ctx, site); err != nil {
 		cleanup()
 		return Site{}, err
@@ -273,6 +277,61 @@ func (m *Manager) startContainer(ctx context.Context, s Site) error {
 	if _, err := run(ctx, 2*time.Minute, "docker", args...); err != nil {
 		return fmt.Errorf("start container for %s: %w", s.ID, err)
 	}
+	return nil
+}
+
+// seedApp copies the baked-in Laravel skeleton into the new site and gives it
+// an application key of its own.
+//
+// Copied from the image rather than installed per site: `composer
+// create-project` is ninety seconds and several hundred network requests, and
+// it fails when packagist does. This is a local copy of a directory that is
+// already on disk.
+//
+// The key is generated PER SITE. A key shared across the platform would let
+// anyone holding it forge session cookies and decrypt encrypted columns for
+// every other customer, so this is the one thing here that must not be baked
+// into the image.
+func (m *Manager) seedApp(ctx context.Context, s Site) error {
+	// Copied AS www-data, not as root.
+	//
+	// Root inside these containers has every capability dropped, including
+	// CAP_DAC_OVERRIDE - the one that lets root ignore file permissions. So
+	// uid 0 could not read into the 33:33-owned volume at all and the copy
+	// failed with `cannot stat '/var/www/html/.': Permission denied`. Running
+	// as the user that owns the destination needs no capability, and the
+	// skeleton in the image is world-readable. Copying as root would have
+	// meant handing these containers back a capability, which is a far worse
+	// trade than changing a uid.
+	if _, err := run(ctx, 3*time.Minute, "docker", "exec", "-u", "33:33", s.Container,
+		"sh", "-c", "cp -a /opt/cic-skeleton/. /var/www/html/",
+	); err != nil {
+		return fmt.Errorf("seed the app for %s: %w", s.ID, err)
+	}
+
+	if _, err := run(ctx, 60*time.Second, "docker", "exec", "-u", "33:33", s.Container,
+		"sh", "-c", "cd /var/www/html && cp .env.example .env && php artisan key:generate --force --no-interaction",
+	); err != nil {
+		return fmt.Errorf("generate an app key for %s: %w", s.ID, err)
+	}
+
+	// Production posture from the first request. APP_DEBUG=true would put a
+	// stack trace with paths, queries and sometimes credentials in front of
+	// anyone who can trigger a 500.
+	if _, err := run(ctx, 30*time.Second, "docker", "exec", "-u", "33:33", s.Container,
+		"sh", "-c", `cd /var/www/html && sed -i 's/^APP_ENV=.*/APP_ENV=production/; s/^APP_DEBUG=.*/APP_DEBUG=false/' .env`,
+	); err != nil {
+		return fmt.Errorf("set production defaults for %s: %w", s.ID, err)
+	}
+
+	// Observed, not assumed: a key that did not land means every session on
+	// this site is unsigned, and that must fail creation rather than ship.
+	out, err := run(ctx, 30*time.Second, "docker", "exec", "-u", "33:33", s.Container,
+		"sh", "-c", "grep -c '^APP_KEY=base64:' /var/www/html/.env")
+	if err != nil || strings.TrimSpace(out) != "1" {
+		return fmt.Errorf("site %s has no application key after seeding; refusing to serve it", s.ID)
+	}
+
 	return nil
 }
 

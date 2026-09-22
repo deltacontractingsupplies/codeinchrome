@@ -72,6 +72,26 @@ RUN set -eux; \
     composer --version > /dev/null                              || { echo "FATAL: composer broken"; exit 1; }; \
     echo "verified: every declared extension is loaded and usable"
 
+# A ready-to-serve Laravel skeleton, baked in ONCE.
+#
+# Every new site is a copy of this directory rather than a `composer
+# create-project`. The difference is 90 seconds and a few hundred network
+# requests per site versus a few hundred milliseconds and none - and it means
+# provisioning does not fail because packagist is having a bad afternoon.
+#
+# The skeleton carries NO application key. One is generated per site at
+# creation, because a key shared across every customer on the platform would
+# make every session cookie and every encrypted column forgeable across
+# tenants.
+RUN set -eux; \
+    COMPOSER_ALLOW_SUPERUSER=1 composer create-project laravel/laravel /opt/cic-skeleton \
+        --no-interaction --prefer-dist --no-progress --quiet; \
+    rm -f /opt/cic-skeleton/.env; \
+    rm -rf /opt/cic-skeleton/.git /root/.composer /tmp/*; \
+    php /opt/cic-skeleton/artisan --version; \
+    test -f /opt/cic-skeleton/public/index.php; \
+    test ! -f /opt/cic-skeleton/.env
+
 # The document root is /var/www/html/public and there is no supported way to
 # move it above that. The exposure this prevents is not hypothetical: on a live
 # aaPanel box we measured 31 mutually readable .env files, and one vhost whose

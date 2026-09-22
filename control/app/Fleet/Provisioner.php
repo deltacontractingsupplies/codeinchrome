@@ -52,9 +52,19 @@ class Provisioner
 
         // Unique across the fleet: the subdomain is shared space, so two
         // customers cannot both hold `shop`.
-        if (Site::where('site_id', $siteId)->exists()) {
+        //
+        // A `failed` row is the exception. It means provisioning rolled back
+        // CLEANLY - nothing exists on any host and no DNS record resolves - so
+        // holding the name against it would punish the customer for our
+        // failure and leave the name dead for good. An `orphaned` row is the
+        // opposite: the host was unreachable mid-flight, something may well be
+        // running there, and the name must stay held until fleet:audit says
+        // otherwise.
+        $existing = Site::where('site_id', $siteId)->first();
+        if ($existing && $existing->status !== 'failed') {
             throw new RuntimeException("The name \"$siteId\" is taken. Try another.");
         }
+        $existing?->delete();
 
         $host = $this->pickHost();
         $domain = $siteId . '.' . config('fleet.zone');
@@ -70,6 +80,7 @@ class Provisioner
         ]);
 
         try {
+            $this->requireCapableAgent($host);
             $this->dns->upsert($siteId, config("fleet.hosts.$host.ip"));
 
             $created = AgentClient::for($host)->createSite($siteId, $domain, $plan['cpu'], $plan['memory']);
@@ -113,7 +124,13 @@ class Provisioner
         }
 
         if ($cause instanceof AgentUnreachable) {
-            $site->update(['last_error' => $site->last_error . ' | Host state UNKNOWN; a container may exist. Run fleet:audit.']);
+            // NOT `failed`. We do not know that nothing exists, and a status
+            // that frees the name would hand it to another customer while a
+            // container of the first one's may still be serving on it.
+            $site->update([
+                'status' => 'orphaned',
+                'last_error' => $site->last_error . ' | Host state UNKNOWN; a container may exist. Run fleet:audit.',
+            ]);
 
             return;
         }
@@ -196,6 +213,27 @@ class Provisioner
         }
 
         return $best;
+    }
+
+    /**
+     * Refuse to create a site on an agent too old to build it properly.
+     *
+     * Checked at provision time rather than trusted from a deployment record,
+     * because the only thing that proves what a host is running is asking it.
+     */
+    private function requireCapableAgent(string $host): void
+    {
+        $version = AgentClient::for($host)->hostInfo()['version'] ?? '0.0.0';
+        $minimum = config('fleet.min_agent_version');
+
+        if (version_compare($version, $minimum, '<')) {
+            throw new RuntimeException(
+                "Host [$host] runs agent $version and this needs at least $minimum. " .
+                'An older agent creates a site with no application skeleton and no application key, ' .
+                "and reports success while doing it. Run: infra/deploy-host.sh $host " .
+                config("fleet.hosts.$host.ip")
+            );
+        }
     }
 
     private function planFor(User $user): array

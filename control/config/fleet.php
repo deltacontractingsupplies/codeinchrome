@@ -54,6 +54,18 @@ return [
     'timeout' => 120,
 
     /*
+     * The oldest agent a site may be provisioned onto.
+     *
+     * A mixed-version fleet does not fail loudly, it produces DIFFERENT SITES:
+     * during this build, h1 ran 0.2.0 (which seeds a Laravel skeleton and
+     * generates a per-site application key) while h2 still ran 0.1.0 (which
+     * does neither). A provision routed to h2 reported success and created an
+     * empty site with no application key. Reads and status calls are fine
+     * against any version; creating is not.
+     */
+    'min_agent_version' => '0.2.0',
+
+    /*
      * The zone every free subdomain is created under, and the hosts that are
      * off limits. 192.0.2.1 is a production mail server with live
      * sites of another business on it and is not part of this fleet.
