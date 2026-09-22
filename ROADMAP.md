@@ -32,8 +32,11 @@ code exists.
       delete one; retention runs only on the control host
 - [x] **Custom domains**: ownership proved by a DNS TXT record, A record
       checked, certificate on first visit; verified end to end with a real domain
-- [ ] **Billing checkout**: plan upgrade through Lemon Squeezy checkout
-      (blocked on products existing - dashboard-only)
+- [x] **Billing checkout** built and validated against the live API; the
+      billing portal link comes from the webhook
+- [ ] **Billing products** (blocked on a human: products can only be created
+      in the Lemon Squeezy dashboard, ideally in a codeinchrome store rather
+      than that other store; then set LS_VARIANT_STARTER/PRO/STUDIO and the webhook secret)
 - [x] **Artisan / composer from the editor**: a fixed allow-list, run in the
       site's container as www-data; destructive commands need confirm
 - [x] **Logs**: Laravel log, request log and PHP/Apache output in the editor

@@ -93,6 +93,7 @@ class WebhookHandler
                 'status' => $status,
                 'renews_at' => $attributes['renews_at'] ?? null,
                 'ends_at' => $attributes['ends_at'] ?? null,
+                'portal_url' => $attributes['urls']['customer_portal'] ?? null,
             ],
         );
 

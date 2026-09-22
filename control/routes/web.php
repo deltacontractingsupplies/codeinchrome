@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ConsoleController;
 use App\Http\Controllers\DatabaseController;
 use App\Http\Controllers\DomainController;
@@ -24,6 +25,9 @@ Route::middleware('guest')->group(function () {
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/status', StatusController::class)->name('status');
+    Route::get('/billing', [BillingController::class, 'index'])->name('billing');
+    Route::post('/billing/checkout', [BillingController::class, 'checkout'])->middleware('throttle:10,1')->name('billing.checkout');
+    Route::get('/billing/return', [BillingController::class, 'return'])->name('billing.return');
     Route::get('/sites', [SiteController::class, 'index'])->name('dashboard');
     // Provisioning creates a container and a DNS record, so it is throttled
     // separately and much harder than a page view.

@@ -1,0 +1,44 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Billing\Checkout;
+use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\Request;
+use Illuminate\View\View;
+
+class BillingController extends Controller
+{
+    public function index(Request $request): View
+    {
+        $user = $request->user();
+
+        return view('billing', [
+            'current' => $user->plan,
+            'plans' => config('billing.plans'),
+            'subscription' => $user->subscriptions()->latest()->first(),
+        ]);
+    }
+
+    public function checkout(Request $request, Checkout $checkout): RedirectResponse
+    {
+        $request->validate(['plan' => ['required', 'string']]);
+
+        try {
+            return redirect()->away($checkout->urlFor($request->user(), $request->input('plan')));
+        } catch (\RuntimeException $e) {
+            return back()->with('error', $e->getMessage());
+        }
+    }
+
+    /**
+     * Where Lemon Squeezy sends the customer after paying. It proves nothing:
+     * the plan changes only when the SIGNED webhook arrives, so this page says
+     * the payment is being confirmed rather than that the upgrade happened.
+     */
+    public function return(): RedirectResponse
+    {
+        return redirect()->route('billing')->with('status',
+            'Thanks. Your payment is being confirmed; your plan updates here as soon as it is.');
+    }
+}
