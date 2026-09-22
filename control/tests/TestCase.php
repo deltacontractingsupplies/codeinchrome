@@ -34,6 +34,12 @@ abstract class TestCase extends BaseTestCase
      * step to forget. The file holds schema and nothing else, because every
      * test's data is rolled back, so it stays a couple of hundred kilobytes
      * and is written once rather than once per test.
+     *
+     * It lives under the REPOSITORY, not in sys_get_temp_dir(). On macOS the
+     * temp directory is /var/folders, which is on the boot disk - and on this
+     * machine the boot disk is a soldered SSD being deliberately spared. The
+     * repository is wherever the developer put it, which is the one location
+     * they have actually chosen. CIC_TEST_SCHEMA_DIR overrides it.
      */
     private static ?string $schemaPath = null;
 
@@ -56,7 +62,11 @@ abstract class TestCase extends BaseTestCase
             ->map(fn ($f) => basename($f) . ':' . md5_file($f))
             ->implode('|');
 
-        $path = sys_get_temp_dir() . '/cic-test-schema-' . substr(sha1($fingerprint), 0, 12) . '.sqlite';
+        $dir = getenv('CIC_TEST_SCHEMA_DIR') ?: $root . '/storage/framework/testing';
+        if (! is_dir($dir)) {
+            mkdir($dir, 0o755, true);
+        }
+        $path = $dir . '/schema-' . substr(sha1($fingerprint), 0, 12) . '.sqlite';
 
         if (! file_exists($path)) {
             touch($path);

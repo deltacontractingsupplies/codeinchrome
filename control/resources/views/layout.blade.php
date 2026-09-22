@@ -3,6 +3,10 @@
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    {{-- The panel's fetch calls read this. Session auth with a CSRF token
+         means the browser needs no second credential and there is no
+         long-lived API token to leak. --}}
+    <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'codeinchrome')</title>
     <meta name="description" content="Laravel hosting where the AI does the work and the code stays yours.">
     @vite(['resources/css/app.css', 'resources/js/app.js'])

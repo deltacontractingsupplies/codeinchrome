@@ -1,6 +1,7 @@
 <?php
 
 use App\Http\Controllers\AuthController;
+use App\Http\Controllers\FileController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\WebhookController;
 use Illuminate\Support\Facades\Route;
@@ -23,6 +24,13 @@ Route::middleware('auth')->group(function () {
     // separately and much harder than a page view.
     Route::post('/sites', [SiteController::class, 'store'])->middleware('throttle:10,1')->name('sites.store');
     Route::delete('/sites/{site}', [SiteController::class, 'destroy'])->name('sites.destroy');
+
+    // The panel's file operations. Session-authenticated like the rest of the
+    // dashboard, so the browser needs no second credential and there is no
+    // long-lived token to leak.
+    Route::get('/sites/{site}/files', [FileController::class, 'index'])->name('files.index');
+    Route::put('/sites/{site}/files', [FileController::class, 'store'])->name('files.store');
+    Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->name('files.destroy');
 });
 
 /*

@@ -93,6 +93,27 @@ class AgentClient
         return $this->send('delete', "/v1/sites/$id")['parts'] ?? [];
     }
 
+    /** @return array{path: string, entries: array, truncated: bool} */
+    public function listFiles(string $id, string $path = '/'): array
+    {
+        return $this->send('get', "/v1/sites/$id/files", ['path' => $path])['listing'] ?? [];
+    }
+
+    public function readFile(string $id, string $path): string
+    {
+        return $this->send('get', "/v1/sites/$id/files", ['read' => 1, 'path' => $path])['content'] ?? '';
+    }
+
+    public function writeFile(string $id, string $path, string $content): array
+    {
+        return $this->send('put', "/v1/sites/$id/files", ['path' => $path, 'content' => $content]);
+    }
+
+    public function deleteFile(string $id, string $path): bool
+    {
+        return (bool) ($this->send('delete', "/v1/sites/$id/files", ['path' => $path])['deleted'] ?? false);
+    }
+
     public function reconcile(): array
     {
         return $this->send('post', '/v1/reconcile')['changed'] ?? [];
@@ -111,6 +132,14 @@ class AgentClient
             $request = $request->withToken($this->token);
         }
 
+        // $body must be passed as the ARRAY, never baked into the url.
+        //
+        // Laravel treats the second argument of get()/delete() as the query
+        // and REPLACES whatever the url already had - including with an empty
+        // array. Building "?read=1&path=..." into the string therefore sent
+        // the agent a bare `/files` with no query at all, so every read
+        // returned a directory listing and every path resolved to the site
+        // root. It went unnoticed because the live checks used curl directly.
         try {
             $response = $request->{$method}($this->baseUrl . $path, $body);
         } catch (ConnectionException $e) {

@@ -17,6 +17,16 @@ class Site extends Model
         return ['provisioned_at' => 'datetime'];
     }
 
+    /**
+     * Bound by name, not id. The panel and every URL a customer sees use the
+     * site name they chose; exposing sequential ids would also hand out a
+     * count of how many sites the platform has ever created.
+     */
+    public function getRouteKeyName(): string
+    {
+        return 'site_id';
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
