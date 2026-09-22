@@ -32,3 +32,6 @@ playwright-report/
 !/control/.env.example
 /control/database/*.sqlite
 .predeploy-tests.log
+
+# infra/publish-repo.sh builds the cleaned public copy here.
+/.publish/
