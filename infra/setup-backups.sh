@@ -207,7 +207,10 @@ forward_probe='timeout 10 ssh -o BatchMode=yes -N -L 127.0.0.1:19999:127.0.0.1:2
 # Positive control first, from THIS machine, where root forwarding to the
 # target is allowed: if the banner does not come through here, the probe is
 # broken and "cannot forward" below would mean nothing.
-check "positive control: the probe sees a working forward" '[[ "$(probe_banner "root@$target_ip" 19998)" == SSH-* ]]'
+# A free port chosen by the OS, not a fixed one: two hosts set up in parallel
+# both took 19998 and one positive control failed for that reason alone.
+probe_port=$(python3 -c 'import socket; s=socket.socket(); s.bind(("127.0.0.1",0)); print(s.getsockname()[1])')
+check "positive control: the probe sees a working forward" '[[ "$(probe_banner "root@$target_ip" "$probe_port")" == SSH-* ]]'
 check "backup account cannot forward"    '[[ "$(src "$forward_probe")" != SSH-* ]]'
 check "password escrowed"                "target 'test -s /opt/codeinchrome/escrow/$name.env'"
 # The point of the escrow: the control host alone can open this repository.
