@@ -69,7 +69,8 @@ git reflog expire --expire=now --all
 git gc -q --prune=now --aggressive
 
 for i in "${!note_keys[@]}"; do
-  new=$(git log --format='%H%x09%ad%x09%s' --date=raw | awk -F'\t' -v k="${note_keys[$i]}" '$2"\t"$3==k {print $1; exit}')
+  # No early exit in awk: it would SIGPIPE git log, and pipefail would end the script.
+  new=$(git log --format='%H%x09%ad%x09%s' --date=raw | awk -F'\t' -v k="${note_keys[$i]}" '$2"\t"$3==k && !found++ {print $1}')
   [[ -n $new ]] || die "could not re-attach a git note (commit: ${note_keys[$i]})"
   git notes add -f -F "${note_files[$i]}" "$new"
 done
