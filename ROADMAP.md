@@ -39,5 +39,6 @@ code exists.
 - [ ] **Logs**: the site's Laravel log and access log readable in the editor
 - [ ] **Account security**: email verification, password reset, rate limits
 - [ ] **Monitoring**: host health and per-site availability, alerting
-- [ ] **Control plane database backups**
+- [x] **Control plane backups**, and every backup replicated to a second host
+      that refuses deletion; full recovery drilled from the replica
 - [ ] **Public repository** (blocked on `gh auth login`)
