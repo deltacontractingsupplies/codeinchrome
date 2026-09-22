@@ -8,7 +8,7 @@
 #   cic-backup check                   verify the repository's integrity
 #
 # Installed to /opt/codeinchrome/bin/cic-backup by infra/setup-backups.sh.
-# Reads RESTIC_REPOSITORY and RESTIC_PASSWORD from
+# Reads RESTIC_REPOSITORY, RESTIC_PASSWORD and RESTIC_REST_USERNAME/PASSWORD from
 # /opt/codeinchrome/etc/backup.env, and CIC_MYSQL_ROOT_PASSWORD from mysql.env.
 #
 # Each site gets two snapshots per run, tagged site:<id> and kind:files or
@@ -29,7 +29,7 @@ die() { echo "cic-backup: $*" >&2; exit 1; }
 . "$CIC/etc/backup.env"
 # shellcheck disable=SC1091
 . "$CIC/etc/mysql.env"
-export RESTIC_REPOSITORY RESTIC_PASSWORD
+export RESTIC_REPOSITORY RESTIC_PASSWORD RESTIC_REST_USERNAME RESTIC_REST_PASSWORD
 HOST_ID=$(cat "$CIC/etc/host.id")
 
 valid_id() { [[ $1 =~ $ID_RE && $1 != *--* ]] || die "invalid site id: $1"; }
@@ -59,9 +59,6 @@ backup_site() {
       --no-tablespaces --databases "$(db_name "$id")" \
     | restic backup --quiet --host "$HOST_ID" --tag "site:$id" --tag kind:db \
       --stdin --stdin-filename "$id.sql"
-
-  restic forget --quiet --host "$HOST_ID" --tag "site:$id" --group-by host,tags \
-    --keep-daily 7 --keep-weekly 4 --keep-monthly 3 >/dev/null
 }
 
 cmd_run() {
@@ -79,26 +76,9 @@ cmd_run() {
       failed=1
     fi
   done
-  # Sites deleted from this host: their snapshots are kept for 30 days after
-  # the last one was taken - long enough to undo a regretted delete - and then
-  # forgotten. Without this, a deleted customer's data would sit in the
-  # repository forever, which is both a storage leak and a promise broken.
-  local tag gone
-  while read -r tag; do
-    gone=${tag#site:}
-    [[ -e $ROOT/$gone/disk.img ]] && continue
-    valid_id "$gone"
-    restic forget --quiet --host "$HOST_ID" --tag "site:$gone" --keep-within 30d >/dev/null \
-      && echo "retention: $gone is deleted; keeping only its last 30 days of snapshots"
-  done < <(restic snapshots --host "$HOST_ID" --json | python3 -c '
-import json, sys
-tags = {t for s in json.load(sys.stdin) for t in s.get("tags", []) if t.startswith("site:")}
-print("\n".join(sorted(tags)))')
-
-  # Pruning rewrites pack files and is the expensive part; once a week.
-  if [[ $(date +%u) == 7 && ${CIC_BACKUP_PRUNE:-auto} != never ]]; then
-    restic prune --quiet
-  fi
+  # No forget and no prune here. The repository is append-only: this host can
+  # add snapshots and never remove one, so a compromised host cannot destroy
+  # its own backups. Retention runs on the control host (cic-backup-maintain).
   exit $failed
 }
 

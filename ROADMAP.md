@@ -28,8 +28,8 @@ code exists.
       to existing sites on plan change, retried if a host is down
 - [x] **Backups**: nightly files + database per site, off-host, encrypted,
       restore and control-host-only recovery drilled
-- [ ] **Append-only backup storage** (a compromised customer host can
-      currently delete its own host's backups)
+- [x] **Append-only backup storage**: hosts can add snapshots but never
+      delete one; retention runs only on the control host
 - [ ] **Custom domains**: ownership verified by DNS, certificate on demand
 - [ ] **Billing checkout**: plan upgrade through Lemon Squeezy checkout
       (blocked on products existing - dashboard-only)

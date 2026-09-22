@@ -1,0 +1,75 @@
+#!/usr/bin/env bash
+#
+# Backup retention, run ONLY on the control host.
+#
+# Customer hosts write to append-only repositories and cannot forget or prune
+# anything. This is the one place that can, reading each repository straight
+# from disk with the password escrowed for it.
+#
+#   - live sites: 7 daily, 4 weekly, 3 monthly
+#   - sites no longer on their host: only snapshots from the last 30 days, so
+#     a regretted delete can be undone and then the data really goes
+#   - prune once a week
+#
+# "No longer on their host" is asked of the host's agent. If the agent cannot
+# be reached, deleted-site retention is SKIPPED for that host: an unreachable
+# host is not evidence that its sites are gone, and treating it as such would
+# start the clock on deleting a live customer's backups.
+
+set -Eeuo pipefail
+
+REPOS=/srv/backups-rest
+ESCROW=/opt/codeinchrome/escrow
+CONTROL_ENV=/srv/control/.env
+
+token_for() { grep "^CIC_TOKEN_${1^^}=" "$CONTROL_ENV" | cut -d= -f2-; }
+port_for()  { echo $(( 9440 + ${1#h} )); }
+
+as_repo_owner() {
+  # The repository files belong to rest-server's user. Running restic as root
+  # would leave root-owned files it cannot read, and break the server. setpriv
+  # keeps HOME=/root, which that user cannot write, so the cache is pointed at
+  # a directory of its own.
+  RESTIC_CACHE_DIR=/var/cache/cic-restic setpriv --reuid=restserver --regid=restserver --init-groups -- "$@"
+}
+install -d -m 0700 -o restserver -g restserver /var/cache/cic-restic
+
+failed=0
+for repo in "$REPOS"/h*; do
+  [[ -d $repo ]] || continue
+  host=$(basename "$repo")
+  [[ -s $ESCROW/$host.env ]] || { echo "$host: no escrowed password; skipping" >&2; failed=1; continue; }
+
+  # shellcheck disable=SC1090
+  RESTIC_PASSWORD=$(. "$ESCROW/$host.env"; echo "$RESTIC_PASSWORD")
+  export RESTIC_PASSWORD RESTIC_REPOSITORY=$repo
+
+  # The setup check adds an "append-probe" snapshot each time it proves the
+  # host cannot delete. Keep the latest one; it is a few bytes.
+  as_repo_owner restic forget --quiet --tag append-probe --keep-last 1 >/dev/null || true
+
+  as_repo_owner restic forget --quiet --group-by host,tags \
+    --keep-daily 7 --keep-weekly 4 --keep-monthly 3 >/dev/null || { echo "$host: forget failed" >&2; failed=1; }
+
+  live=$(curl -fsS --max-time 20 -H "Authorization: Bearer $(token_for "$host")" \
+      "http://127.0.0.1:$(port_for "$host")/v1/sites" 2>/dev/null \
+    | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["ok"]; print("\n".join(s["id"] for s in d["sites"]))') \
+    || { echo "$host: agent unreachable; deleted-site retention skipped" >&2; failed=1; live=__unknown__; }
+
+  if [[ $live != __unknown__ ]]; then
+    while read -r tag; do
+      [[ -z $tag ]] && continue
+      id=${tag#site:}
+      grep -qx -- "$id" <<<"$live" && continue
+      as_repo_owner restic forget --quiet --tag "$tag" --keep-within 30d >/dev/null \
+        && echo "$host: $id is deleted; kept only its last 30 days of snapshots"
+    done < <(as_repo_owner restic snapshots --json | python3 -c '
+import json, sys
+print("\n".join(sorted({t for s in json.load(sys.stdin) for t in s.get("tags", []) if t.startswith("site:")})))')
+  fi
+
+  if [[ $(date +%u) == 7 ]]; then
+    as_repo_owner restic prune --quiet || { echo "$host: prune failed" >&2; failed=1; }
+  fi
+done
+exit $failed
