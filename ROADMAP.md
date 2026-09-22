@@ -26,7 +26,10 @@ code exists.
       own user) instead of a public phpMyAdmin
 - [x] **Disk quotas** per plan, enforced by the kernel and reported; applied
       to existing sites on plan change, retried if a host is down
-- [ ] **Backups**: nightly files + database per site, off-host, restore tested
+- [x] **Backups**: nightly files + database per site, off-host, encrypted,
+      restore and control-host-only recovery drilled
+- [ ] **Append-only backup storage** (a compromised customer host can
+      currently delete its own host's backups)
 - [ ] **Custom domains**: ownership verified by DNS, certificate on demand
 - [ ] **Billing checkout**: plan upgrade through Lemon Squeezy checkout
       (blocked on products existing - dashboard-only)

@@ -42,7 +42,7 @@ if [[ $VERIFY_ONLY -eq 0 ]]; then
 log "packages"
 export DEBIAN_FRONTEND=noninteractive
 NEED=()
-for p in ca-certificates curl gnupg ufw fail2ban jq unattended-upgrades; do
+for p in ca-certificates curl gnupg ufw fail2ban jq unattended-upgrades bzip2; do
   dpkg -s "$p" >/dev/null 2>&1 || NEED+=("$p")
 done
 if ((${#NEED[@]})); then

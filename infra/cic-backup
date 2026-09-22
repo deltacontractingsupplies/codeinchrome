@@ -1,0 +1,184 @@
+#!/usr/bin/env bash
+#
+# Per-site backups with restic: files and database, encrypted, deduplicated.
+#
+#   cic-backup run [site-id ...]       back up the given sites, or all of them
+#   cic-backup list <site-id>          snapshots for a site, as JSON
+#   cic-backup restore <site-id> [id]  restore files and database (default: latest)
+#   cic-backup check                   verify the repository's integrity
+#
+# Installed to /opt/codeinchrome/bin/cic-backup by infra/setup-backups.sh.
+# Reads RESTIC_REPOSITORY and RESTIC_PASSWORD from
+# /opt/codeinchrome/etc/backup.env, and CIC_MYSQL_ROOT_PASSWORD from mysql.env.
+#
+# Each site gets two snapshots per run, tagged site:<id> and kind:files or
+# kind:db. restic cannot put a path and a stdin stream in one snapshot, and
+# the files and the database are taken seconds apart rather than at one
+# instant. For a Laravel app that is the usual trade; a site that needs the
+# two to be exactly consistent should put its uploads in the database.
+
+set -Eeuo pipefail
+
+CIC=/opt/codeinchrome
+ROOT=/srv/customers
+ID_RE='^[a-z0-9][a-z0-9-]{1,38}[a-z0-9]$'
+
+die() { echo "cic-backup: $*" >&2; exit 1; }
+
+# shellcheck disable=SC1091
+. "$CIC/etc/backup.env"
+# shellcheck disable=SC1091
+. "$CIC/etc/mysql.env"
+export RESTIC_REPOSITORY RESTIC_PASSWORD
+HOST_ID=$(cat "$CIC/etc/host.id")
+
+valid_id() { [[ $1 =~ $ID_RE && $1 != *--* ]] || die "invalid site id: $1"; }
+db_name() { echo "site_${1//-/_}"; }
+
+# Only the load during a restore reads stdin. `docker exec -i` everywhere
+# swallowed whatever the CALLER was feeding on stdin - run under `bash -s`, the
+# rest of the calling script vanished after the first dump.
+mysql_root()       { docker exec    -e MYSQL_PWD="$CIC_MYSQL_ROOT_PASSWORD" cic-mysql "$@" -uroot -h127.0.0.1 </dev/null; }
+mysql_root_stdin() { docker exec -i -e MYSQL_PWD="$CIC_MYSQL_ROOT_PASSWORD" cic-mysql "$@" -uroot -h127.0.0.1; }
+
+backup_site() {
+  local id=$1
+  valid_id "$id"
+  local app=$ROOT/$id/vol/app
+  mountpoint -q "$ROOT/$id/vol" || die "$id: disk is not mounted; refusing to back up an empty directory as if it were the site"
+
+  restic backup --quiet --host "$HOST_ID" --tag "site:$id" --tag kind:files \
+    --exclude "$app/storage/framework/cache" \
+    --exclude "$app/storage/framework/views" \
+    "$app"
+
+  # --single-transaction: a consistent InnoDB snapshot without locking the
+  # site's tables while it runs. pipefail makes a failed dump fail the backup
+  # instead of storing an empty file that looks like one.
+  mysql_root mysqldump --single-transaction --routines --triggers --events \
+      --no-tablespaces --databases "$(db_name "$id")" \
+    | restic backup --quiet --host "$HOST_ID" --tag "site:$id" --tag kind:db \
+      --stdin --stdin-filename "$id.sql"
+
+  restic forget --quiet --host "$HOST_ID" --tag "site:$id" --group-by host,tags \
+    --keep-daily 7 --keep-weekly 4 --keep-monthly 3 >/dev/null
+}
+
+cmd_run() {
+  local ids=("$@") failed=0
+  if (( ${#ids[@]} == 0 )); then
+    for img in "$ROOT"/*/disk.img; do
+      [[ -e $img ]] && ids+=("$(basename "$(dirname "$img")")")
+    done
+  fi
+  for id in "${ids[@]}"; do
+    if backup_site "$id"; then
+      echo "backed up $id"
+    else
+      echo "FAILED $id" >&2
+      failed=1
+    fi
+  done
+  # Sites deleted from this host: their snapshots are kept for 30 days after
+  # the last one was taken - long enough to undo a regretted delete - and then
+  # forgotten. Without this, a deleted customer's data would sit in the
+  # repository forever, which is both a storage leak and a promise broken.
+  local tag gone
+  while read -r tag; do
+    gone=${tag#site:}
+    [[ -e $ROOT/$gone/disk.img ]] && continue
+    valid_id "$gone"
+    restic forget --quiet --host "$HOST_ID" --tag "site:$gone" --keep-within 30d >/dev/null \
+      && echo "retention: $gone is deleted; keeping only its last 30 days of snapshots"
+  done < <(restic snapshots --host "$HOST_ID" --json | python3 -c '
+import json, sys
+tags = {t for s in json.load(sys.stdin) for t in s.get("tags", []) if t.startswith("site:")}
+print("\n".join(sorted(tags)))')
+
+  # Pruning rewrites pack files and is the expensive part; once a week.
+  if [[ $(date +%u) == 7 && ${CIC_BACKUP_PRUNE:-auto} != never ]]; then
+    restic prune --quiet
+  fi
+  exit $failed
+}
+
+cmd_list() {
+  valid_id "$1"
+  restic snapshots --host "$HOST_ID" --tag "site:$1" --json
+}
+
+# Restore replaces the site's files and database with a snapshot's. The
+# container is stopped for the duration so nothing writes half-way through,
+# and files are restored BESIDE the live copy and only swapped in once the
+# restore has completed - a failed restore leaves the site as it was.
+cmd_restore() {
+  # NOT local: the EXIT trap below runs after this function has returned, in
+  # the script's scope, and under set -u a trap that names a vanished local
+  # would itself crash instead of restarting the container.
+  id=$1 which=${2:-latest}
+  valid_id "$id"
+  vol=$ROOT/$id/vol app=$ROOT/$id/vol/app
+  mountpoint -q "$vol" || die "$id: disk is not mounted"
+
+  local files_snap db_snap
+  if [[ $which == latest ]]; then
+    files_snap=$(restic snapshots --host "$HOST_ID" --tag "site:$id,kind:files" --latest 1 --json | python3 -c 'import json,sys; s=json.load(sys.stdin); print(s[-1]["short_id"] if s else "")')
+    db_snap=$(restic snapshots --host "$HOST_ID" --tag "site:$id,kind:db" --latest 1 --json | python3 -c 'import json,sys; s=json.load(sys.stdin); print(s[-1]["short_id"] if s else "")')
+  else
+    # A files snapshot id; its database pair is the db snapshot closest after it.
+    files_snap=$which
+    db_snap=$(restic snapshots --host "$HOST_ID" --tag "site:$id" --json | python3 -c '
+import json, sys
+snaps = json.load(sys.stdin)
+f = next((s for s in snaps if s["short_id"] == sys.argv[1] and "kind:files" in s.get("tags", [])), None)
+if not f: sys.exit(0)
+dbs = sorted((s for s in snaps if "kind:db" in s.get("tags", []) and s["time"] >= f["time"]), key=lambda s: s["time"])
+print(dbs[0]["short_id"] if dbs else "")' "$which")
+  fi
+  [[ -n $files_snap ]] || die "$id: no files snapshot to restore"
+  [[ -n $db_snap ]] || die "$id: no database snapshot paired with $files_snap"
+
+  staging=$vol/.restore-$$
+  rm -rf "$staging"
+  restic restore "$files_snap" --target "$staging" --include "$app" >/dev/null
+  [[ -d $staging$app ]] || die "$id: snapshot $files_snap restored nothing for $app"
+
+  # Whatever happens from here, the container comes back. A failure before
+  # the swap leaves the old files in place; a failure after the database was
+  # dropped is reported loudly, because the site will then be serving with
+  # an incomplete database until someone restores again.
+  stage=stopping
+  trap 'rc=$?; docker start "cic-$id" >/dev/null 2>&1 || true; rm -rf "$staging" "$vol/.restore-$$.sql"
+        (( rc == 0 )) || echo "cic-backup: restore of $id FAILED during: $stage" >&2' EXIT
+  docker stop "cic-$id" >/dev/null 2>&1 || true
+  stage="reading the database snapshot"
+  restic dump "$db_snap" "/$id.sql" > "$vol/.restore-$$.sql"
+  [[ -s $vol/.restore-$$.sql ]] || die "$id: database snapshot $db_snap is empty"
+
+  # Database: drop and reload, so tables created after the snapshot do not
+  # linger. Grants are on the database name and survive the drop.
+  local db
+  db=$(db_name "$id")
+  stage="replacing the database (it may now be INCOMPLETE - restore again)"
+  mysql_root mysql -e "DROP DATABASE IF EXISTS \`$db\`"
+  mysql_root_stdin mysql < "$vol/.restore-$$.sql"
+  rm -f "$vol/.restore-$$.sql"
+
+  # Files: swap the restored tree in, then drop the old one.
+  stage="swapping in the restored files"
+  mv "$app" "$vol/.replaced-$$"
+  mv "$staging$app" "$app"
+  rm -rf "$staging" "$vol/.replaced-$$"
+  chown -R 33:33 "$app"
+
+  docker start "cic-$id" >/dev/null
+  echo "restored $id from files $files_snap and database $db_snap"
+}
+
+case "${1:-}" in
+  run) shift; cmd_run "$@" ;;
+  list) cmd_list "${2:?site id}" ;;
+  restore) cmd_restore "${2:?site id}" "${3:-latest}" ;;
+  check) restic check ;;
+  *) die "usage: cic-backup {run|list|restore|check} ..." ;;
+esac
