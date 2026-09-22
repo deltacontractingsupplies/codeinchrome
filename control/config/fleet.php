@@ -71,7 +71,21 @@ return [
      * empty site with no application key. Reads and status calls are fine
      * against any version; creating is not.
      */
-    'min_agent_version' => '0.12.0',
+    /*
+     * Where monitoring alerts are POSTed as {"text": "..."} - a Slack incoming
+     * webhook, or Discord's /slack endpoint. Unset means alerts go only to the
+     * log and the operator status page, which is recorded on each incident.
+     */
+    'alert_webhook' => env('CIC_ALERT_WEBHOOK'),
+
+    /*
+     * Accounts that can see the operator status page. By address, from the
+     * environment, so no one can make themselves an operator from inside the
+     * application.
+     */
+    'admin_emails' => array_filter(array_map('trim', explode(',', (string) env('CIC_ADMIN_EMAILS', '')))),
+
+    'min_agent_version' => '0.13.0',
 
     /*
      * The zone every free subdomain is created under, and the hosts that are

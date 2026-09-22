@@ -6,6 +6,7 @@ use App\Http\Controllers\DatabaseController;
 use App\Http\Controllers\DomainController;
 use App\Http\Controllers\FileController;
 use App\Http\Controllers\SiteController;
+use App\Http\Controllers\StatusController;
 use App\Http\Controllers\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -22,6 +23,7 @@ Route::middleware('guest')->group(function () {
 
 Route::middleware('auth')->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
+    Route::get('/status', StatusController::class)->name('status');
     Route::get('/sites', [SiteController::class, 'index'])->name('dashboard');
     // Provisioning creates a container and a DNS record, so it is throttled
     // separately and much harder than a page view.

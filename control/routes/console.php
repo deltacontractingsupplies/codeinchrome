@@ -6,3 +6,4 @@ use Illuminate\Support\Facades\Schedule;
 // withoutOverlapping: a slow or unreachable host must not stack up runs.
 Schedule::command('fleet:sync-usage')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('fleet:apply-limits')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('fleet:monitor')->everyMinute()->withoutOverlapping();

@@ -52,6 +52,12 @@ abstract class TestCase extends BaseTestCase
         putenv('DB_DATABASE=' . self::$schemaPath);
 
         parent::setUp();
+
+        // No test may reach the network. A fake whose URL pattern does not
+        // match used to let the request through to the REAL internet - the
+        // monitoring test briefly tried to resolve a live customer domain.
+        // Now an unmatched request fails the test that made it.
+        \Illuminate\Support\Facades\Http::preventStrayRequests();
     }
 
     private static function buildSchemaOnce(): string

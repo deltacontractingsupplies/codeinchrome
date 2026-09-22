@@ -12,8 +12,11 @@ class SiteController extends Controller
 {
     public function index(Request $request): View
     {
+        $sites = $request->user()->sites()->latest()->get();
+
         return view('sites.index', [
-            'sites' => $request->user()->sites()->latest()->get(),
+            'sites' => $sites,
+            'checks' => \App\Models\Monitor::whereIn('key', $sites->map(fn ($s) => "site:{$s->site_id}"))->get()->keyBy('key'),
             'plan' => $request->user()->planConfig(),
         ]);
     }

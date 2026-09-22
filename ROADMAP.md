@@ -38,7 +38,8 @@ code exists.
       site's container as www-data; destructive commands need confirm
 - [x] **Logs**: Laravel log, request log and PHP/Apache output in the editor
 - [ ] **Account security**: email verification, password reset, rate limits
-- [ ] **Monitoring**: host health and per-site availability, alerting
+- [x] **Monitoring**: every host and site checked each minute from outside;
+      incidents after two failures; alerts to a webhook (needs `CIC_ALERT_WEBHOOK`)
 - [x] **Control plane backups**, and every backup replicated to a second host
       that refuses deletion; full recovery drilled from the replica
 - [ ] **Public repository** (blocked on `gh auth login`)

@@ -71,6 +71,12 @@
                     @if ($site->limits_pending)
                         <p class="mt-1 text-xs text-amber-400">Your plan change is still being applied to this site.</p>
                     @endif
+                    @php $check = $checks["site:{$site->site_id}"] ?? null; @endphp
+                    @if ($check)
+                        <p class="mt-1 text-xs {{ $check->fail_streak === 0 ? 'text-teal-400' : 'text-red-400' }}" title="Checked from outside {{ $check->checked_at?->diffForHumans() }}">
+                            {{ $check->fail_streak === 0 ? 'Up' : 'Not responding' }} &middot; {{ $check->detail }}@if ($check->latency_ms) &middot; {{ $check->latency_ms }} ms @endif
+                        </p>
+                    @endif
                     <p class="mt-1 text-xs text-neutral-500">
                         {{ $site->status }} &middot; host {{ $site->host }}
                         @if ($site->provisioned_at) &middot; created {{ $site->provisioned_at->diffForHumans() }} @endif

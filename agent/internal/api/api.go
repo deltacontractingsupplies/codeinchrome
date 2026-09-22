@@ -107,6 +107,13 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}))
 	})
 
+	mux.HandleFunc("GET /v1/host/stats", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, ok(resp{
+			"stats": mgr.Stats(r.Context()),
+			"basis": "statfs, /proc/meminfo, /proc/loadavg, a MySQL ping and systemd, read at call time",
+		}))
+	})
+
 	mux.HandleFunc("GET /v1/usage", func(w http.ResponseWriter, r *http.Request) {
 		usage, err := mgr.Usage(r.Context())
 		if err != nil {

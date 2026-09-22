@@ -58,6 +58,11 @@ class AgentClient
         return $this->send('get', '/healthz', authenticated: false);
     }
 
+    public function hostStats(): array
+    {
+        return $this->send('get', '/v1/host/stats')['stats'] ?? [];
+    }
+
     public function hostInfo(): array
     {
         return $this->send('get', '/v1/host');

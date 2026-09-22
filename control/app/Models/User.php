@@ -27,6 +27,12 @@ class User extends Authenticatable
         return $this->hasMany(Subscription::class);
     }
 
+    /** Operators are listed in CIC_ADMIN_EMAILS; nothing in the app can grant it. */
+    public function isOperator(): bool
+    {
+        return in_array(strtolower($this->email), array_map('strtolower', config('fleet.admin_emails')), true);
+    }
+
     /** The plan config this user is entitled to right now. */
     public function planConfig(): array
     {

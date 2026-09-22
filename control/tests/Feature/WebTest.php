@@ -35,6 +35,13 @@ class WebTest extends TestCase
             '127.0.0.1:944*/v1/host' => Http::response([
                 'ok' => true, 'version' => config('fleet.min_agent_version'), 'sites' => 0, 'running' => 0,
             ]),
+            // The breached-password check asks Have I Been Pwned by the first
+            // five characters of the SHA-1. This used to be a LIVE call from
+            // the test suite; it is answered here instead. "password123" is in
+            // the range the way it is in the real corpus; nothing else is.
+            'api.pwnedpasswords.com/range/*' => fn ($r) => Http::response(
+                str_ends_with($r->url(), '/CBFDA') ? "C6008F9CAB4083784CBD1874F76618D2A97:251682\r\n0000000000000000000000000000000000A:1" : "0000000000000000000000000000000000A:1"
+            ),
             '127.0.0.1:944*/v1/sites*' => fn ($r) => $r->method() === 'DELETE'
                 ? Http::response(['ok' => true, 'parts' => ['container' => 'removed', 'vhost' => 'removed', 'data' => 'removed', 'log' => 'removed', 'network' => 'removed']])
                 : Http::response(['ok' => true, 'site' => ['id' => 'x', 'port' => 20000, 'state' => 'running']], 201),

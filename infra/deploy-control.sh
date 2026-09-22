@@ -97,7 +97,7 @@ SESSION_SAME_SITE=lax
 CACHE_STORE=file
 QUEUE_CONNECTION=sync
 
-$(grep -E '^(CLOUDFLARE|LEMONSQUEEZY)_' .env)
+$(grep -E '^(CLOUDFLARE|LEMONSQUEEZY|CIC_ADMIN|CIC_ALERT)_' .env)
 $tokens
 ENV
 ssh_ 'set -e
