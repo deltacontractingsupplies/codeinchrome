@@ -30,7 +30,11 @@ class WebTest extends TestCase
                 'errors' => [],
                 'result' => $r->method() === 'GET' ? [] : ['id' => 'rec-test'],
             ]),
-            '127.0.0.1:944*/v1/host' => Http::response(['ok' => true, 'version' => '0.2.0', 'sites' => 0, 'running' => 0]),
+            // From config, never a literal: a hardcoded version silently goes
+            // stale the moment fleet.min_agent_version is raised.
+            '127.0.0.1:944*/v1/host' => Http::response([
+                'ok' => true, 'version' => config('fleet.min_agent_version'), 'sites' => 0, 'running' => 0,
+            ]),
             '127.0.0.1:944*/v1/sites*' => fn ($r) => $r->method() === 'DELETE'
                 ? Http::response(['ok' => true, 'parts' => ['container' => 'removed', 'vhost' => 'removed', 'data' => 'removed', 'log' => 'removed', 'network' => 'removed']])
                 : Http::response(['ok' => true, 'site' => ['id' => 'x', 'port' => 20000, 'state' => 'running']], 201),

@@ -47,7 +47,15 @@ class ProvisioningTest extends TestCase
 
     private int $deleteStatus = 200;
 
-    private string $agentVersion = '0.2.0';
+    /**
+     * Defaults to the CONFIGURED minimum rather than a literal.
+     *
+     * It used to be hardcoded, and when fleet.min_agent_version was raised the
+     * fake kept answering the old number - so every provisioning test failed
+     * for a reason that had nothing to do with provisioning. A test fixture
+     * that has to be kept in step with config by hand will eventually not be.
+     */
+    private string $agentVersion = '';
 
     private ?array $createResponse = null;
 
@@ -75,7 +83,7 @@ class ProvisioningTest extends TestCase
         $this->dnsRecords = [];
         $this->createResponse = null;
         $this->createStatus = 201;
-        $this->agentVersion = '0.2.0';
+        $this->agentVersion = config('fleet.min_agent_version');
 
         Http::fake(array_merge([
             // STATEFUL on purpose. A stateless fake whose GET always returned
@@ -258,7 +266,9 @@ class ProvisioningTest extends TestCase
     public function test_it_refuses_to_provision_onto_an_agent_too_old_to_build_the_site(): void
     {
         $this->fakeAgent();
-        $this->agentVersion = '0.1.0';
+        // One patch below whatever the minimum currently is, so this test
+        // keeps meaning the same thing when the minimum moves.
+        $this->agentVersion = '0.0.1';
         $user = User::factory()->create(['plan' => 'starter']);
 
         // Not a try/catch with fail() inside it: PHPUnit's fail() throws an
@@ -273,7 +283,7 @@ class ProvisioningTest extends TestCase
         }
 
         $this->assertNotNull($message, 'Provisioned onto an agent that cannot seed an app or generate a key.');
-        $this->assertStringContainsString('0.1.0', $message);
+        $this->assertStringContainsString('0.0.1', $message);
         $this->assertStringContainsString('deploy-host.sh', $message, 'The error must say how to fix it.');
 
         $this->assertSame([], $this->dnsRecords, 'No DNS record for a site that was never built.');
