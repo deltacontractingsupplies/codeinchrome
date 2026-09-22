@@ -237,6 +237,22 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"path": path, "deleted": true}))
 	})
 
+	mux.HandleFunc("PUT /v1/sites/{id}/aliases", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Aliases []string `json:"aliases"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {aliases: [...]}"))
+			return
+		}
+		site, err := mgr.SetAliases(r.Context(), r.PathValue("id"), body.Aliases)
+		if err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, fail("aliases_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"site": site, "basis": "vhost rewritten and proxy reloaded"}))
+	})
+
 	mux.HandleFunc("PUT /v1/sites/{id}/limits", func(w http.ResponseWriter, r *http.Request) {
 		var o sites.LimitsOpts
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&o); err != nil {

@@ -63,6 +63,11 @@ type Site struct {
 
 	// DiskGB is the size of the site's own filesystem. The usage fields are
 	// read from that filesystem at call time and never stored.
+	// Aliases are verified custom domains served by the same site. The control
+	// plane only sends a domain here after its owner has proved control of it
+	// with a DNS TXT record; this list is also what /tls-ask approves.
+	Aliases []string `json:"aliases,omitempty"`
+
 	DiskGB        int   `json:"diskGb"`
 	DiskUsedBytes int64 `json:"diskUsedBytes"`
 	DiskSizeBytes int64 `json:"diskSizeBytes"`
@@ -221,8 +226,17 @@ func (m *Manager) Hosts(domain string) bool {
 		if !e.IsDir() {
 			continue
 		}
-		if s, err := m.load(e.Name()); err == nil && strings.EqualFold(s.Domain, domain) {
+		s, err := m.load(e.Name())
+		if err != nil {
+			continue
+		}
+		if strings.EqualFold(s.Domain, domain) {
 			return true
+		}
+		for _, a := range s.Aliases {
+			if strings.EqualFold(a, domain) {
+				return true
+			}
 		}
 	}
 	return false

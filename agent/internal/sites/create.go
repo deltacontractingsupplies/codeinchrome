@@ -467,6 +467,10 @@ func (m *Manager) renderCaddy(ctx context.Context, s Site) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Every name the site answers to. validDomain has already refused braces,
+	// quotes, whitespace and newlines in each of them, so none can close this
+	// block and open another.
+	names := append([]string{s.Domain}, s.Aliases...)
 	return fmt.Sprintf(`# codeinchrome site %s - generated, do not edit by hand
 %s {
 	# Certificate requested on first connection, not at load; see /tls-ask.
@@ -487,7 +491,7 @@ func (m *Manager) renderCaddy(ctx context.Context, s Site) (string, error) {
 		format json
 	}
 }
-`, s.ID, s.Domain, port, s.ID), nil
+`, s.ID, strings.Join(names, ", "), port, s.ID), nil
 }
 
 func (m *Manager) writeCaddy(ctx context.Context, s Site) error {
@@ -736,4 +740,84 @@ func (m *Manager) SetLimits(ctx context.Context, id string, o LimitsOpts) (map[s
 		return applied, err
 	}
 	return applied, nil
+}
+
+// MaxAliases bounds the vhost and the certificates one site can make us hold.
+const MaxAliases = 10
+
+// SetAliases replaces the site's custom domains and reloads the proxy.
+//
+// The whole list, not add/remove: the control plane is the record of which
+// domains are verified, and sending the full set means a missed call can
+// never leave a stale domain being served.
+func (m *Manager) SetAliases(ctx context.Context, id string, aliases []string) (Site, error) {
+	if err := ValidID(id); err != nil {
+		return Site{}, err
+	}
+	if len(aliases) > MaxAliases {
+		return Site{}, fmt.Errorf("at most %d custom domains per site", MaxAliases)
+	}
+	seen := map[string]bool{}
+	clean := []string{}
+	for _, a := range aliases {
+		a = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(a), "."))
+		if err := validDomain(a); err != nil {
+			return Site{}, err
+		}
+		if seen[a] {
+			continue
+		}
+		seen[a] = true
+		clean = append(clean, a)
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	site, err := m.load(id)
+	if err != nil {
+		return Site{}, fmt.Errorf("no such site %q", id)
+	}
+	for _, a := range clean {
+		if strings.EqualFold(a, site.Domain) {
+			return Site{}, fmt.Errorf("%s is already the site's own address", a)
+		}
+	}
+	// Refuse a domain another site on this host already serves: two vhosts
+	// claiming one name is a Caddy config error that would block every reload.
+	entries, _ := os.ReadDir(m.cfg.Root)
+	for _, e := range entries {
+		other, err := m.load(e.Name())
+		if err != nil || other.ID == id {
+			continue
+		}
+		for _, a := range clean {
+			if strings.EqualFold(a, other.Domain) || containsFold(other.Aliases, a) {
+				return Site{}, fmt.Errorf("%s is already served by another site on this host", a)
+			}
+		}
+	}
+
+	previous := site.Aliases
+	site.Aliases = clean
+	if err := m.save(site); err != nil {
+		return Site{}, err
+	}
+	if err := m.writeCaddy(ctx, site); err != nil {
+		// Put the record back so it matches the vhost that is still live.
+		site.Aliases = previous
+		_ = m.save(site)
+		_ = m.writeCaddy(context.Background(), site)
+		return Site{}, err
+	}
+	return site, nil
+}
+
+func containsFold(list []string, s string) bool {
+	for _, x := range list {
+		if strings.EqualFold(x, s) {
+			return true
+		}
+	}
+	return false
 }

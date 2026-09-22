@@ -30,7 +30,8 @@ code exists.
       restore and control-host-only recovery drilled
 - [x] **Append-only backup storage**: hosts can add snapshots but never
       delete one; retention runs only on the control host
-- [ ] **Custom domains**: ownership verified by DNS, certificate on demand
+- [x] **Custom domains**: ownership proved by a DNS TXT record, A record
+      checked, certificate on first visit; verified end to end with a real domain
 - [ ] **Billing checkout**: plan upgrade through Lemon Squeezy checkout
       (blocked on products existing - dashboard-only)
 - [ ] **Artisan / composer from the editor**: a fixed allow-list of commands,

@@ -27,6 +27,11 @@ class Site extends Model
         return 'site_id';
     }
 
+    public function domains(): \Illuminate\Database\Eloquent\Relations\HasMany
+    {
+        return $this->hasMany(SiteDomain::class);
+    }
+
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);

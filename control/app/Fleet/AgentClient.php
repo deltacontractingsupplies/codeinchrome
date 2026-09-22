@@ -95,6 +95,12 @@ class AgentClient
         ])['applied'] ?? [];
     }
 
+    /** Replace the site's verified custom domains; the agent rewrites the vhost. */
+    public function setAliases(string $id, array $aliases): array
+    {
+        return $this->send('put', "/v1/sites/$id/aliases", ['aliases' => array_values($aliases)])['site'] ?? [];
+    }
+
     /** @return array<int, array<string, mixed>> one entry per site on the host */
     public function usage(): array
     {

@@ -2,6 +2,7 @@
 
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\DatabaseController;
+use App\Http\Controllers\DomainController;
 use App\Http\Controllers\FileController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\WebhookController;
@@ -30,6 +31,13 @@ Route::middleware('auth')->group(function () {
     // dashboard, so the browser needs no second credential and there is no
     // long-lived token to leak.
     Route::get('/sites/{site}/edit', [SiteController::class, 'edit'])->name('sites.edit');
+
+    Route::get('/sites/{site}/domains', [DomainController::class, 'index'])->name('domains.index');
+    Route::post('/sites/{site}/domains', [DomainController::class, 'store'])->middleware('throttle:20,1')->name('domains.store');
+    // Verification queries public DNS; throttled so it cannot be used to make
+    // us hammer resolvers.
+    Route::post('/sites/{site}/domains/{domain}/verify', [DomainController::class, 'verify'])->middleware('throttle:20,1')->name('domains.verify');
+    Route::delete('/sites/{site}/domains/{domain}', [DomainController::class, 'destroy'])->name('domains.destroy');
     Route::get('/sites/{site}/files', [FileController::class, 'index'])->name('files.index');
     Route::put('/sites/{site}/files', [FileController::class, 'store'])->name('files.store');
     Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->name('files.destroy');

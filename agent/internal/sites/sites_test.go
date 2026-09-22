@@ -143,3 +143,23 @@ func TestDatabaseIdentifiersAreSafeForEveryValidID(t *testing.T) {
 		}
 	}
 }
+
+func TestHostsApprovesVerifiedAliasesOnly(t *testing.T) {
+	root := t.TempDir()
+	m, err := New(Config{Root: root, CaddyDir: t.TempDir(), HostID: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "shop"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.save(Site{ID: "shop", Domain: "shop.codeinchrome.com", Aliases: []string{"shop.example.com"}}); err != nil {
+		t.Fatal(err)
+	}
+	if !m.Hosts("SHOP.example.com") {
+		t.Error("a verified alias is not approved for a certificate")
+	}
+	if m.Hosts("example.com") || m.Hosts("other.example.com") {
+		t.Error("an unverified name under the alias was approved")
+	}
+}

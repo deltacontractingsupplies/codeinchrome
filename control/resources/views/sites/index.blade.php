@@ -85,6 +85,8 @@
                 @if ($site->status === 'live')
                     <a href="{{ route('sites.edit', $site) }}"
                        class="rounded-md bg-teal-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-teal-400">Edit code</a>
+                    <a href="{{ route('domains.index', $site) }}"
+                       class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-neutral-500">Domains</a>
                 @endif
                 {{-- A two-step delete with no JavaScript and no confirm().
                      A native dialog freezes the page for a browser-driving
