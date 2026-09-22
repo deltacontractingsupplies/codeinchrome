@@ -1,13 +1,16 @@
 <?php
 
+use App\Http\Controllers\AccountController;
 use App\Http\Controllers\AuthController;
 use App\Http\Controllers\BillingController;
 use App\Http\Controllers\ConsoleController;
 use App\Http\Controllers\DatabaseController;
 use App\Http\Controllers\DomainController;
 use App\Http\Controllers\FileController;
+use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\StatusController;
+use App\Http\Controllers\TwoFactorController;
 use App\Http\Controllers\WebhookController;
 use Illuminate\Support\Facades\Route;
 
@@ -20,11 +23,30 @@ Route::middleware('guest')->group(function () {
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:10,1');
     Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:10,1');
+    Route::get('/two-factor-challenge', [TwoFactorController::class, 'challenge'])->name('two-factor.challenge');
+
+    // Password reset. Every action 404s unless mail really leaves the
+    // building (fleet.mail_enabled); throttled because each one sends mail.
+    Route::get('/forgot-password', [PasswordResetController::class, 'request'])->name('password.request');
+    Route::post('/forgot-password', [PasswordResetController::class, 'email'])->middleware('throttle:5,1')->name('password.email');
+    Route::get('/reset-password/{token}', [PasswordResetController::class, 'edit'])->name('password.reset');
+    Route::post('/reset-password', [PasswordResetController::class, 'update'])->middleware('throttle:10,1')->name('password.update');
+    // Brute-force limiting is per account, inside the controller; this is
+    // only a coarse ceiling against floods.
+    Route::post('/two-factor-challenge', [TwoFactorController::class, 'verify'])->middleware('throttle:30,1');
 });
 
-Route::middleware('auth')->group(function () {
+// auth.session: sessions carry a hash of the password, so changing it signs
+// out every other session (AccountController::password).
+Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
     Route::get('/status', StatusController::class)->name('status');
+    Route::get('/account', [AccountController::class, 'show'])->name('account');
+    Route::put('/account/password', [AccountController::class, 'password'])->middleware('throttle:10,1')->name('account.password');
+    Route::delete('/account', [AccountController::class, 'destroy'])->middleware('throttle:5,1')->name('account.destroy');
+    Route::get('/account/two-factor', [TwoFactorController::class, 'setup'])->name('two-factor.setup');
+    Route::post('/account/two-factor', [TwoFactorController::class, 'confirm'])->middleware('throttle:10,1')->name('two-factor.confirm');
+    Route::delete('/account/two-factor', [TwoFactorController::class, 'disable'])->name('two-factor.disable');
     Route::get('/billing', [BillingController::class, 'index'])->name('billing');
     Route::post('/billing/checkout', [BillingController::class, 'checkout'])->middleware('throttle:10,1')->name('billing.checkout');
     Route::get('/billing/return', [BillingController::class, 'return'])->name('billing.return');

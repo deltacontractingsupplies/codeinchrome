@@ -30,6 +30,10 @@ ssh_() { ssh -o ConnectTimeout=15 -o StrictHostKeyChecking=accept-new "root@$ip"
 # not cosmetic - it makes a correctly deployed host look unusable.
 version=$(cat agent/VERSION)
 
+if [[ ${CIC_SKIP_TESTS:-0} != 1 ]]; then
+  ( cd agent && go vet ./... && go test ./... >/dev/null ) || { echo "REFUSING to deploy: agent tests fail" >&2; exit 1; }
+fi
+
 say "building the agent $version"
 ( cd agent && CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
     go build -ldflags="-s -w -X main.version=$version" -o bin/cic-agent-linux ./cmd/cic-agent )

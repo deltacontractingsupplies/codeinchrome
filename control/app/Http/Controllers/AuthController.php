@@ -54,13 +54,25 @@ class AuthController extends Controller
             'password' => ['required'],
         ]);
 
-        if (! Auth::attempt($credentials, true)) {
+        // Validate first, sign in second: an account with two-factor on must
+        // not be signed in by the password alone, even for one request.
+        if (! Auth::validate($credentials)) {
             // One message for both a wrong password and an unknown address.
             // Distinguishing them tells an attacker which emails have accounts.
             return back()
                 ->withInput($request->only('email'))
                 ->withErrors(['email' => 'Those details do not match an account.']);
         }
+
+        $user = \App\Models\User::where('email', $credentials['email'])->first();
+        if ($user->two_factor_confirmed_at) {
+            $request->session()->regenerate();
+            $request->session()->put(['login.id' => $user->id, 'login.remember' => true, 'login.at' => now()->timestamp]);
+
+            return redirect()->route('two-factor.challenge');
+        }
+
+        Auth::login($user, true);
 
         // Without this, a session id captured before sign-in stays valid after
         // it - which is session fixation.

@@ -85,6 +85,13 @@ return [
      */
     'admin_emails' => array_filter(array_map('trim', explode(',', (string) env('CIC_ADMIN_EMAILS', '')))),
 
+    /*
+     * Whether mail actually leaves the building. Password reset and email
+     * verification are offered ONLY when it does: a "forgot password" link
+     * whose email is written to a log file is worse than no link.
+     */
+    'mail_enabled' => ! in_array(env('MAIL_MAILER', 'log'), ['log', 'array'], true),
+
     'min_agent_version' => '0.13.0',
 
     /*

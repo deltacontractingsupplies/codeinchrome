@@ -18,6 +18,9 @@
         </div>
         <button class="w-full rounded-md bg-teal-500 px-4 py-2 font-medium text-neutral-950 hover:bg-teal-400">Sign in</button>
     </form>
+    @if (config('fleet.mail_enabled'))
+        <p class="mt-4 text-sm"><a href="{{ route('password.request') }}" class="text-neutral-400 hover:text-neutral-200">Forgot your password?</a></p>
+    @endif
     <p class="mt-6 text-sm text-neutral-500">
         No account? <a href="{{ route('register') }}" class="text-teal-400 hover:text-teal-300">Start free</a>
     </p>

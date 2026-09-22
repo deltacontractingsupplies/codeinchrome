@@ -31,3 +31,4 @@ playwright-report/
 /control/.env.*
 !/control/.env.example
 /control/database/*.sqlite
+.predeploy-tests.log

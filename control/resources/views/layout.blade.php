@@ -20,7 +20,7 @@
             </a>
             <nav class="flex items-center gap-4 text-sm">
                 @auth
-                    <span class="text-neutral-500 hidden sm:inline">{{ auth()->user()->email }}</span>
+                    <a href="{{ route('account') }}" class="text-neutral-500 hover:text-neutral-300 hidden sm:inline">{{ auth()->user()->email }}</a>
                     <a href="{{ route('dashboard') }}" class="text-neutral-300 hover:text-white">Sites</a>
                     <a href="{{ route('billing') }}" class="text-neutral-300 hover:text-white">Billing</a>
                     <form method="POST" action="{{ route('logout') }}">@csrf

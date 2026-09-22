@@ -20,6 +20,20 @@ for forbidden in $CIC_FORBIDDEN_HOSTS; do
   [[ "$ip" == "$forbidden" ]] && { echo "REFUSING: $ip is the production host" >&2; exit 1; }
 done
 
+# Never deploy code whose tests fail. (A deploy chained on `grep` finding the
+# test summary line went out once with a failing test - the summary line is
+# printed either way.) CIC_SKIP_TESTS=1 exists for emergencies, and says so.
+if [[ ${CIC_SKIP_TESTS:-0} != 1 ]]; then
+  ( cd control && PAO_DISABLE=1 php artisan test >.predeploy-tests.log 2>&1 ) || {
+    tail -30 .predeploy-tests.log >&2
+    echo "REFUSING to deploy: the control-plane tests fail (log: .predeploy-tests.log)" >&2
+    exit 1
+  }
+  rm -f .predeploy-tests.log
+else
+  echo "WARNING: deploying WITHOUT running tests (CIC_SKIP_TESTS=1)" >&2
+fi
+
 say()  { printf '\n\033[1;36m[%s]\033[0m %s\n' "$name" "$*"; }
 ok()   { printf '\033[32m  ok\033[0m %s\n' "$*"; }
 die()  { printf '\033[31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }

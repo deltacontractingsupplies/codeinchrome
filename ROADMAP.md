@@ -40,7 +40,11 @@ code exists.
 - [x] **Artisan / composer from the editor**: a fixed allow-list, run in the
       site's container as www-data; destructive commands need confirm
 - [x] **Logs**: Laravel log, request log and PHP/Apache output in the editor
-- [ ] **Account security**: email verification, password reset, rate limits
+- [x] **Account security**: TOTP two-factor (RFC-vector tested, replay-proof,
+      per-account lockout), recovery codes, password change that signs out
+      other sessions, account deletion that removes every site first
+- [ ] **Password reset and email verification** (built and tested; switch on
+      when a mail provider is configured - MAIL_MAILER other than log)
 - [x] **Monitoring**: every host and site checked each minute from outside;
       incidents after two failures; alerts to a webhook (needs `CIC_ALERT_WEBHOOK`)
 - [x] **Control plane backups**, and every backup replicated to a second host
