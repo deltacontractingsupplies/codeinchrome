@@ -20,3 +20,14 @@ dist/
 tests/e2e/.playwright/
 test-results/
 playwright-report/
+
+# Control plane
+/control/vendor
+/control/node_modules
+/control/public/build
+/control/public/hot
+/control/storage/*.key
+/control/.env
+/control/.env.*
+!/control/.env.example
+/control/database/*.sqlite
