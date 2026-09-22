@@ -51,6 +51,16 @@ class SiteController extends Controller
         );
     }
 
+    public function edit(Request $request, Site $site): View
+    {
+        // 404 rather than 403, for the same reason as the file API: a 403
+        // confirms the name exists and belongs to somebody else.
+        abort_unless($site->user_id === $request->user()->id, 404);
+        abort_unless($site->status === 'live', 409, 'This site is not live yet.');
+
+        return view('sites.editor', ['site' => $site]);
+    }
+
     public function destroy(Request $request, Site $site): RedirectResponse
     {
         // Ownership, not just authentication. Without this any signed-in user

@@ -101,12 +101,27 @@ class AgentClient
 
     public function readFile(string $id, string $path): string
     {
-        return $this->send('get', "/v1/sites/$id/files", query: ['read' => 1, 'path' => $path])['content'] ?? '';
+        return $this->readFileWithRevision($id, $path)['content'];
     }
 
-    public function writeFile(string $id, string $path, string $content): array
+    /** @return array{content: string, revision: string} */
+    public function readFileWithRevision(string $id, string $path): array
     {
-        return $this->send('put', "/v1/sites/$id/files", ['path' => $path, 'content' => $content]);
+        $r = $this->send('get', "/v1/sites/$id/files", query: ['read' => 1, 'path' => $path]);
+
+        return ['content' => $r['content'] ?? '', 'revision' => $r['revision'] ?? ''];
+    }
+
+    /**
+     * @param  string  $expect  "" to write unconditionally, "absent" to create
+     *                          only if missing, or the revision from a read.
+     *                          A mismatch is an AgentRefused whose
+     *                          detail['error'] is "conflict", and NOTHING was
+     *                          written.
+     */
+    public function writeFile(string $id, string $path, string $content, string $expect = ''): array
+    {
+        return $this->send('put', "/v1/sites/$id/files", ['path' => $path, 'content' => $content, 'expect' => $expect]);
     }
 
     public function deleteFile(string $id, string $path): bool

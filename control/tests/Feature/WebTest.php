@@ -180,4 +180,39 @@ class WebTest extends TestCase
 
         $this->assertGuest();
     }
+
+    public function test_the_owner_can_open_the_editor(): void
+    {
+        $user = User::factory()->create(['plan' => 'starter']);
+        $this->actingAs($user)->post('/sites', ['site_id' => 'editable']);
+        $site = Site::where('site_id', 'editable')->firstOrFail();
+
+        $this->actingAs($user)->get(route('sites.edit', $site))
+            ->assertOk()
+            ->assertSee('data-site="editable"', false)
+            ->assertSee('csrf-token', false);
+    }
+
+    public function test_a_stranger_cannot_open_someone_elses_editor(): void
+    {
+        $owner = User::factory()->create(['plan' => 'starter']);
+        $this->actingAs($owner)->post('/sites', ['site_id' => 'private-one']);
+        $site = Site::where('site_id', 'private-one')->firstOrFail();
+
+        $this->flushSession();
+        $this->actingAs(User::factory()->create())->get(route('sites.edit', $site))->assertNotFound();
+    }
+
+    public function test_the_dashboard_uses_no_native_dialogs(): void
+    {
+        // A native confirm() freezes the page for a browser-driving agent.
+        $user = User::factory()->create(['plan' => 'starter']);
+        $this->actingAs($user)->post('/sites', ['site_id' => 'dialog-free']);
+
+        $html = $this->actingAs($user)->get('/sites')->assertOk()->getContent();
+
+        $this->assertStringNotContainsString('confirm(', $html);
+        $this->assertStringNotContainsString('alert(', $html);
+        $this->assertStringContainsString('Delete permanently', $html);
+    }
 }

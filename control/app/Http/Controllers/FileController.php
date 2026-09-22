@@ -32,7 +32,7 @@ class FileController extends Controller
             $agent = AgentClient::for($site->host);
 
             if ($request->boolean('read')) {
-                return ['path' => $path, 'content' => $agent->readFile($site->site_id, $path)];
+                return ['path' => $path] + $agent->readFileWithRevision($site->site_id, $path);
             }
 
             return ['listing' => $agent->listFiles($site->site_id, $path)];
@@ -50,10 +50,11 @@ class FileController extends Controller
             // `string` rule rejects an empty body - and emptying a file is a
             // perfectly ordinary edit. Coerced back below.
             'content' => ['present', 'nullable', 'string', 'max:2097152'],
+            'expect' => ['nullable', 'string', 'max:64'],
         ]);
 
         return $this->attempt(fn () => AgentClient::for($site->host)
-            ->writeFile($site->site_id, $data['path'], $data['content'] ?? ''));
+            ->writeFile($site->site_id, $data['path'], $data['content'] ?? '', $data['expect'] ?? ''));
     }
 
     public function destroy(Request $request, Site $site): JsonResponse
@@ -91,11 +92,15 @@ class FileController extends Controller
         try {
             return response()->json(['ok' => true] + $work());
         } catch (AgentRefused $e) {
+            $error = $e->detail['error'] ?? 'refused';
+
             return response()->json([
                 'ok' => false,
-                'error' => $e->detail['error'] ?? 'refused',
+                'error' => $error,
                 'hint' => $e->detail['hint'] ?? $e->getMessage(),
-            ], 422);
+                // 409 for a stale save, so a client can tell "someone else
+                // changed this" from "this request is invalid" by status alone.
+            ], $error === 'conflict' ? 409 : 422);
         } catch (AgentUnreachable $e) {
             return response()->json([
                 'ok' => false,

@@ -2,6 +2,7 @@ package sites
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -243,5 +244,86 @@ func TestFileApiRejectsABadSiteId(t *testing.T) {
 		if _, err := m.ReadFile(ctx, id, "x"); err == nil {
 			t.Errorf("ReadFile accepted the invalid site id %q", id)
 		}
+	}
+}
+
+// A binary file must be refused, not returned as text: JSON encoding would
+// replace its invalid bytes with U+FFFD, and saving it back would corrupt it.
+func TestReadRefusesBinaryFiles(t *testing.T) {
+	m, _, _ := newTestManager(t)
+	app := filepath.Join(m.dir("demo"), "app", "public")
+
+	png := []byte{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0xff, 0xfe}
+	if err := os.WriteFile(filepath.Join(app, "logo.png"), png, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ReadFile(context.Background(), "demo", "public/logo.png"); err == nil {
+		t.Fatal("returned a binary file as text; saving it back would corrupt it")
+	}
+
+	latin1 := []byte("caf\xe9") // valid Latin-1, invalid UTF-8
+	if err := os.WriteFile(filepath.Join(app, "old.txt"), latin1, 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := m.ReadFile(context.Background(), "demo", "public/old.txt"); err == nil {
+		t.Fatal("returned invalid UTF-8 as text")
+	}
+
+	// And ordinary multibyte text must still be readable.
+	if err := os.WriteFile(filepath.Join(app, "ar.txt"), []byte("مرحبا — café ✓"), 0o640); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := m.ReadFile(context.Background(), "demo", "public/ar.txt"); err != nil || got != "مرحبا — café ✓" {
+		t.Fatalf("valid UTF-8 did not round-trip: %q %v", got, err)
+	}
+}
+
+// Two editors - a customer and their AI agent - with the same file open. The
+// second save must not silently erase the first.
+func TestWriteIfRefusesAStaleRevision(t *testing.T) {
+	ctx := context.Background()
+	m, _, _ := newTestManager(t)
+
+	_, rev, err := m.ReadFileRevision(ctx, "demo", "public/index.php")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Editor A saves first, against the revision both of them read.
+	revA, err := m.WriteFileIf(ctx, "demo", "public/index.php", "<?php echo 'A';", rev)
+	if err != nil {
+		t.Fatalf("first save refused: %v", err)
+	}
+
+	// Editor B saves against the SAME old revision: must be refused.
+	if _, err := m.WriteFileIf(ctx, "demo", "public/index.php", "<?php echo 'B';", rev); !errors.Is(err, ErrConflict) {
+		t.Fatalf("stale save was not refused as a conflict: %v", err)
+	}
+	if got, _ := m.ReadFile(ctx, "demo", "public/index.php"); got != "<?php echo 'A';" {
+		t.Fatalf("A's work was overwritten: %q", got)
+	}
+
+	// B re-reads, gets A's revision, and can now save.
+	if _, err := m.WriteFileIf(ctx, "demo", "public/index.php", "<?php echo 'B';", revA); err != nil {
+		t.Fatalf("save with the current revision refused: %v", err)
+	}
+}
+
+func TestWriteIfAbsentDoesNotClobberANewFile(t *testing.T) {
+	ctx := context.Background()
+	m, _, _ := newTestManager(t)
+
+	if _, err := m.WriteFileIf(ctx, "demo", "app/New.php", "first", "absent"); err != nil {
+		t.Fatalf("creating a new file refused: %v", err)
+	}
+	if _, err := m.WriteFileIf(ctx, "demo", "app/New.php", "second", "absent"); !errors.Is(err, ErrConflict) {
+		t.Fatalf("\"new file\" replaced an existing one: %v", err)
+	}
+	if got, _ := m.ReadFile(ctx, "demo", "app/New.php"); got != "first" {
+		t.Fatalf("existing file was clobbered: %q", got)
+	}
+	// A revision for a file that does not exist is also a conflict: it was deleted.
+	if _, err := m.WriteFileIf(ctx, "demo", "app/Gone.php", "x", Revision([]byte("old"))); !errors.Is(err, ErrConflict) {
+		t.Fatalf("saving over a deleted file was not a conflict: %v", err)
 	}
 }

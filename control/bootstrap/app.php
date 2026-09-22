@@ -30,6 +30,19 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->validateCsrfTokens(except: [
             'webhooks/*',
         ]);
+
+        /*
+         * File contents are data, byte for byte. Laravel's TrimStrings trims
+         * every request string by default, so every save from the editor was
+         * stripping the file's leading and trailing whitespace: the final
+         * newline vanished, and a file that began with indentation was
+         * altered - silently, on every save. Found by the browser suite
+         * writing a file and reading it back, not by the feature tests, which
+         * used toContain() and could not see a missing newline.
+         */
+        $middleware->trimStrings(except: [
+            'content',
+        ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {
         $exceptions->shouldRenderJsonWhen(

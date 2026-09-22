@@ -8,6 +8,7 @@ package api
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 	"time"
@@ -42,6 +43,28 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	// stay unauthenticated without leaking which customers are on this host.
 	mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusOK, ok(resp{"version": version, "time": time.Now().UTC()}))
+	})
+
+	// Caddy's on-demand TLS gate. Caddy requests a certificate on the first
+	// TLS handshake for a name, but only after this answers 200 for it.
+	//
+	// Why on-demand at all: with certificates requested at config load, Caddy
+	// asked Let's Encrypt within seconds of the DNS record being created. The
+	// validators sometimes looked the name up before it had propagated, got
+	// NXDOMAIN, and that negative answer is cached for the zone's SOA minimum -
+	// 30 minutes on this Cloudflare plan, which does not allow lowering it. A
+	// newly created site was then unreachable over HTTPS for up to half an
+	// hour. Requesting on first connection means the name demonstrably
+	// resolves for at least one client before anyone asks the CA to check it.
+	//
+	// Why gated: without this, anyone pointing any name at this IP could make
+	// us request certificates for it, burning the CA rate limit for everyone.
+	mux.HandleFunc("GET /tls-ask", func(w http.ResponseWriter, r *http.Request) {
+		if mgr.Hosts(r.URL.Query().Get("domain")) {
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
 	})
 
 	mux.HandleFunc("GET /v1/host", func(w http.ResponseWriter, r *http.Request) {
@@ -137,12 +160,14 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 
 		if r.URL.Query().Get("read") == "1" {
-			content, err := mgr.ReadFile(r.Context(), r.PathValue("id"), path)
+			content, rev, err := mgr.ReadFileRevision(r.Context(), r.PathValue("id"), path)
 			if err != nil {
 				writeJSON(w, http.StatusBadRequest, fail("cannot_read", err.Error()))
 				return
 			}
-			writeJSON(w, http.StatusOK, ok(resp{"path": path, "content": content}))
+			// revision is what a caller presents as `expect` to save without
+			// overwriting a change made since this read.
+			writeJSON(w, http.StatusOK, ok(resp{"path": path, "content": content, "revision": rev}))
 			return
 		}
 
@@ -158,6 +183,7 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		var body struct {
 			Path    string `json:"path"`
 			Content string `json:"content"`
+			Expect  string `json:"expect"` // "", "absent", or a revision from a read
 		}
 		// Bounded at twice the file limit so the envelope and JSON escaping
 		// have room, and no further: an unbounded body is a memory exhaustion
@@ -166,14 +192,23 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {path, content}"))
 			return
 		}
-		if err := mgr.WriteFile(r.Context(), r.PathValue("id"), body.Path, body.Content); err != nil {
+		rev, err := mgr.WriteFileIf(r.Context(), r.PathValue("id"), body.Path, body.Content, body.Expect)
+		if errors.Is(err, sites.ErrConflict) {
+			// Nothing was written. The caller's copy is stale; it must re-read,
+			// reconcile, and try again with the new revision.
+			writeJSON(w, http.StatusConflict, fail("conflict",
+				"The file changed since you read it, or already exists. Nothing was written: re-read it and save again."))
+			return
+		}
+		if err != nil {
 			writeJSON(w, http.StatusBadRequest, fail("cannot_write", err.Error()))
 			return
 		}
 		writeJSON(w, http.StatusOK, ok(resp{
-			"path":  body.Path,
-			"bytes": len(body.Content),
-			"basis": "written to a temporary file in the same directory and renamed",
+			"path":     body.Path,
+			"bytes":    len(body.Content),
+			"revision": rev,
+			"basis":    "written to a temporary file in the same directory and renamed",
 		}))
 	})
 

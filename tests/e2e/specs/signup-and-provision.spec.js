@@ -98,8 +98,13 @@ test('a visitor can sign up, provision a site, and see it live', async ({ page }
   });
 
   await test.step('the site can be deleted, and really goes', async () => {
-    page.once('dialog', (dialog) => dialog.accept());
-    await page.getByRole('button', { name: 'Delete' }).click();
+    // Two in-page steps, no native dialog: a confirm() would freeze the page
+    // for a browser-driving agent. If one appears, that is itself a failure.
+    page.on('dialog', (dialog) => {
+      throw new Error(`a native ${dialog.type()} dialog appeared: "${dialog.message()}"`);
+    });
+    await page.getByText('Delete', { exact: true }).click();
+    await page.getByRole('button', { name: 'Delete permanently' }).click();
 
     await expect(page.getByText(/was removed/)).toBeVisible();
     await expect(page.getByText('No sites yet')).toBeVisible();

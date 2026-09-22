@@ -52,7 +52,7 @@ class FileApiTest extends TestCase
                 'PUT' => Http::response(['ok' => true, 'path' => $r['path'], 'bytes' => strlen($r['content'])]),
                 'DELETE' => Http::response(['ok' => true, 'deleted' => true]),
                     default => str_contains($r->url(), 'read=1')
-                        ? Http::response(['ok' => true, 'content' => '<?php // hello'])
+                        ? Http::response(['ok' => true, 'content' => '<?php // hello', 'revision' => 'rev-1'])
                         : Http::response(['ok' => true, 'listing' => ['path' => '/', 'entries' => [], 'truncated' => false]]),
                 };
             },
@@ -117,6 +117,45 @@ class FileApiTest extends TestCase
         Http::assertSent(fn ($r) => $r->method() === 'GET'
             && str_contains(urldecode($r->url()), 'path=/config')
             && ! str_contains($r->url(), 'read=1'));
+    }
+
+    public function test_a_read_carries_its_revision_and_a_write_passes_expect_through(): void
+    {
+        $this->actingAs($this->owner)
+            ->getJson(route('files.index', ['site' => $this->site, 'read' => 1, 'path' => '/a.php']))
+            ->assertOk()->assertJsonPath('revision', 'rev-1');
+
+        $this->actingAs($this->owner)
+            ->putJson(route('files.store', $this->site), ['path' => '/a.php', 'content' => 'x', 'expect' => 'rev-1'])
+            ->assertOk();
+
+        Http::assertSent(fn ($r) => $r->method() === 'PUT' && $r['expect'] === 'rev-1');
+    }
+
+    public function test_a_stale_save_is_409_and_distinct_from_an_invalid_one(): void
+    {
+        $this->agentResponse = ['ok' => false, 'error' => 'conflict', 'hint' => 'The file changed since you read it.'];
+        $this->agentStatus = 409;
+
+        $this->actingAs($this->owner)
+            ->putJson(route('files.store', $this->site), ['path' => '/a.php', 'content' => 'x', 'expect' => 'old'])
+            ->assertStatus(409)
+            ->assertJsonPath('error', 'conflict');
+    }
+
+    /**
+     * The exact bytes must reach the agent. TrimStrings used to strip the
+     * final newline and any leading indentation from every saved file.
+     */
+    public function test_file_content_reaches_the_agent_byte_for_byte(): void
+    {
+        $content = "\n  <?php\n\techo 1;  \n\n";
+
+        $this->actingAs($this->owner)
+            ->putJson(route('files.store', $this->site), ['path' => '/ws.php', 'content' => $content])
+            ->assertOk();
+
+        Http::assertSent(fn ($r) => $r->method() === 'PUT' && $r['content'] === $content);
     }
 
     public function test_a_stranger_gets_404_not_403(): void

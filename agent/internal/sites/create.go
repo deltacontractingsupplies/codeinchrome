@@ -407,6 +407,10 @@ func (m *Manager) renderCaddy(ctx context.Context, s Site) (string, error) {
 	}
 	return fmt.Sprintf(`# codeinchrome site %s - generated, do not edit by hand
 %s {
+	# Certificate requested on first connection, not at load; see /tls-ask.
+	tls {
+		on_demand
+	}
 	reverse_proxy 127.0.0.1:%s
 	encode gzip zstd
 	header {

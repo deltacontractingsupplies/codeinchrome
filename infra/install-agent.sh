@@ -59,6 +59,16 @@ cat > /etc/caddy/Caddyfile <<'CADDY'
 	# checked below rather than assumed.
 	admin localhost:2019
 	email ops@codeinchrome.com
+
+	# Certificates are requested on the first TLS connection for a name, and
+	# only for names the agent confirms it hosts. See the /tls-ask handler in
+	# agent/internal/api/api.go for why: requesting at load time raced DNS
+	# propagation, and a lost race left a new site without HTTPS for up to 30
+	# minutes. The ask gate stops anyone from making us request certificates
+	# for names we do not serve.
+	on_demand_tls {
+		ask http://127.0.0.1:9440/tls-ask
+	}
 	servers {
 		trusted_proxies static private_ranges
 	}
@@ -130,6 +140,8 @@ check "caddy active"             'systemctl is-active caddy'
 check "base image present"       'docker image inspect codeinchrome/laravel:8.3'
 check "caddy reload works"       'systemctl reload caddy'
 check "admin api loopback only"  '! has "0.0.0.0:2019" ss -ltn'
+check "tls gate refuses a stranger" '[[ "$(curl -s -o /dev/null -w %{http_code} "http://127.0.0.1:9440/tls-ask?domain=not-ours.example.com")" == "404" ]]'
+check "caddy has the tls gate"   'has "tls-ask" curl -s http://127.0.0.1:2019/config/apps/tls/automation'
 # The isolation claim that matters: a customer container must not be able to
 # reconfigure the proxy that fronts every other customer on this host.
 check "container cannot reach admin API" \

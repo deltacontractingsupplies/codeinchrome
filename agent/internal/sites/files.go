@@ -2,12 +2,16 @@ package sites
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
 	"sort"
 	"strings"
+	"unicode/utf8"
 )
 
 // The file API the browser panel drives.
@@ -197,28 +201,46 @@ func (m *Manager) ListFiles(_ context.Context, id, rel string) (Listing, error) 
 	return out, nil
 }
 
+// ErrConflict means the file changed since the caller last read it.
+var ErrConflict = errors.New("conflict")
+
+// Revision identifies exact file contents. Content-addressed rather than a
+// modification time: mtimes have coarse resolution on some filesystems and are
+// preserved by `cp -a`, so two different versions can share one.
+func Revision(content []byte) string {
+	sum := sha256.Sum256(content)
+	return hex.EncodeToString(sum[:])
+}
+
 // ReadFile returns the contents of one file, refusing anything too large to
 // edit sensibly rather than streaming it into the caller's memory.
-func (m *Manager) ReadFile(_ context.Context, id, rel string) (string, error) {
+func (m *Manager) ReadFile(ctx context.Context, id, rel string) (string, error) {
+	content, _, err := m.ReadFileRevision(ctx, id, rel)
+	return content, err
+}
+
+// ReadFileRevision is ReadFile plus the revision the caller must present to
+// write the file back without overwriting someone else's change.
+func (m *Manager) ReadFileRevision(_ context.Context, id, rel string) (string, string, error) {
 	abs, err := m.resolve(id, rel)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 
 	info, err := os.Stat(abs)
 	if err != nil {
-		return "", fmt.Errorf("no such file")
+		return "", "", fmt.Errorf("no such file")
 	}
 	if info.IsDir() {
-		return "", fmt.Errorf("that is a directory")
+		return "", "", fmt.Errorf("that is a directory")
 	}
 	if info.Size() > MaxFileSize {
-		return "", fmt.Errorf("file is %d bytes; the editor limit is %d", info.Size(), MaxFileSize)
+		return "", "", fmt.Errorf("file is %d bytes; the editor limit is %d", info.Size(), MaxFileSize)
 	}
 
 	f, err := os.Open(abs)
 	if err != nil {
-		return "", fmt.Errorf("cannot read that file")
+		return "", "", fmt.Errorf("cannot read that file")
 	}
 	defer f.Close()
 
@@ -226,64 +248,123 @@ func (m *Manager) ReadFile(_ context.Context, id, rel string) (string, error) {
 	// two, and a stat is not a lock.
 	b, err := io.ReadAll(io.LimitReader(f, MaxFileSize+1))
 	if err != nil {
-		return "", fmt.Errorf("cannot read that file")
+		return "", "", fmt.Errorf("cannot read that file")
 	}
 	if len(b) > MaxFileSize {
-		return "", fmt.Errorf("file grew past the editor limit while being read")
+		return "", "", fmt.Errorf("file grew past the editor limit while being read")
 	}
 
-	return string(b), nil
+	// Refuse binary files rather than return them as text.
+	//
+	// The content travels as a JSON string, and encoding/json replaces every
+	// invalid UTF-8 sequence with U+FFFD. An image or a font would therefore
+	// arrive already mangled, and the first save from the editor would write
+	// the mangled version back over the original - silent, permanent
+	// corruption of a file nobody meant to change.
+	if IsBinary(b) {
+		return "", "", fmt.Errorf("binary file: not editable as text")
+	}
+
+	return string(b), Revision(b), nil
 }
 
-// WriteFile replaces a file's contents, creating parent directories as needed.
+// IsBinary reports whether content cannot round-trip through a JSON string
+// unchanged: it contains a NUL byte, or it is not valid UTF-8.
+func IsBinary(b []byte) bool {
+	for _, c := range b {
+		if c == 0 {
+			return true
+		}
+	}
+	return !utf8.Valid(b)
+}
+
+// WriteFile replaces a file's contents unconditionally.
+func (m *Manager) WriteFile(ctx context.Context, id, rel, content string) error {
+	_, err := m.WriteFileIf(ctx, id, rel, content, "")
+	return err
+}
+
+// WriteFileIf replaces a file's contents only if it is still what the caller
+// last saw, and returns the new revision.
+//
+// expect:
+//
+//	""        write unconditionally
+//	"absent"  the file must not exist yet (creating a "new" file must not
+//	          quietly replace one that someone else just made)
+//	<sha256>  the file must currently have exactly this revision
+//
+// A customer and their AI agent can have the same file open at once. Without
+// this, whichever saved second silently erased the other's work.
 //
 // Written to a temporary file in the same directory and renamed, so a failure
 // part-way leaves the previous version intact rather than a truncated one.
-func (m *Manager) WriteFile(_ context.Context, id, rel, content string) error {
+func (m *Manager) WriteFileIf(_ context.Context, id, rel, content, expect string) (string, error) {
+	// Held across check-and-rename, or two writers could both pass the check.
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
 	if len(content) > MaxFileSize {
-		return fmt.Errorf("content is %d bytes; the limit is %d", len(content), MaxFileSize)
+		return "", fmt.Errorf("content is %d bytes; the limit is %d", len(content), MaxFileSize)
 	}
 
 	abs, err := m.resolve(id, rel)
 	if err != nil {
-		return err
+		return "", err
 	}
 	if info, err := os.Stat(abs); err == nil && info.IsDir() {
-		return fmt.Errorf("that is a directory")
+		return "", fmt.Errorf("that is a directory")
+	}
+
+	if expect != "" {
+		current, rerr := os.ReadFile(abs)
+		exists := rerr == nil
+		switch {
+		case expect == "absent" && exists:
+			return "", ErrConflict
+		case expect != "absent" && !exists:
+			return "", ErrConflict
+		case expect != "absent" && Revision(current) != expect:
+			return "", ErrConflict
+		}
 	}
 
 	dir := filepath.Dir(abs)
 	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return fmt.Errorf("cannot create the parent directory")
+		return "", fmt.Errorf("cannot create the parent directory")
 	}
 	if err := chownAsWWW(dir); err != nil {
-		return fmt.Errorf("cannot set ownership on the parent directory")
+		return "", fmt.Errorf("cannot set ownership on the parent directory")
 	}
 
 	tmp, err := os.CreateTemp(dir, ".cic-write-*")
 	if err != nil {
-		return fmt.Errorf("cannot write there")
+		return "", fmt.Errorf("cannot write there")
 	}
 	tmpName := tmp.Name()
 	defer os.Remove(tmpName) // no-op once the rename has succeeded
 
 	if _, err := tmp.WriteString(content); err != nil {
 		tmp.Close()
-		return fmt.Errorf("cannot write there")
+		return "", fmt.Errorf("cannot write there")
 	}
 	if err := tmp.Close(); err != nil {
-		return fmt.Errorf("cannot write there")
+		return "", fmt.Errorf("cannot write there")
 	}
 	// Owned by www-data, or the site's own PHP cannot read what the panel just
 	// wrote - and 0640 so it is not world-readable on the host.
 	if err := chownAsWWW(tmpName); err != nil {
-		return fmt.Errorf("cannot set ownership")
+		return "", fmt.Errorf("cannot set ownership")
 	}
 	if err := os.Chmod(tmpName, 0o640); err != nil {
-		return fmt.Errorf("cannot set permissions")
+		return "", fmt.Errorf("cannot set permissions")
 	}
 
-	return os.Rename(tmpName, abs)
+	if err := os.Rename(tmpName, abs); err != nil {
+		return "", fmt.Errorf("cannot write there")
+	}
+	return Revision([]byte(content)), nil
 }
 
 // DeleteFile removes a file or an empty directory.

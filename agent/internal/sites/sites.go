@@ -183,3 +183,28 @@ func run(ctx context.Context, d time.Duration, name string, args ...string) (str
 	}
 	return string(out), nil
 }
+
+// Hosts reports whether this host serves the given domain.
+//
+// Read from the site records at call time, never cached: Caddy asks this
+// before requesting a certificate, and a stale "yes" for a deleted site would
+// keep issuing certificates for a domain we no longer serve.
+func (m *Manager) Hosts(domain string) bool {
+	domain = strings.ToLower(strings.TrimSuffix(strings.TrimSpace(domain), "."))
+	if domain == "" {
+		return false
+	}
+	entries, err := os.ReadDir(m.cfg.Root)
+	if err != nil {
+		return false
+	}
+	for _, e := range entries {
+		if !e.IsDir() {
+			continue
+		}
+		if s, err := m.load(e.Name()); err == nil && strings.EqualFold(s.Domain, domain) {
+			return true
+		}
+	}
+	return false
+}

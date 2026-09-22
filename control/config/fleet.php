@@ -71,7 +71,7 @@ return [
      * empty site with no application key. Reads and status calls are fine
      * against any version; creating is not.
      */
-    'min_agent_version' => '0.4.0',
+    'min_agent_version' => '0.6.0',
 
     /*
      * The zone every free subdomain is created under, and the hosts that are

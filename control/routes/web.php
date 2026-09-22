@@ -28,6 +28,7 @@ Route::middleware('auth')->group(function () {
     // The panel's file operations. Session-authenticated like the rest of the
     // dashboard, so the browser needs no second credential and there is no
     // long-lived token to leak.
+    Route::get('/sites/{site}/edit', [SiteController::class, 'edit'])->name('sites.edit');
     Route::get('/sites/{site}/files', [FileController::class, 'index'])->name('files.index');
     Route::put('/sites/{site}/files', [FileController::class, 'store'])->name('files.store');
     Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->name('files.destroy');

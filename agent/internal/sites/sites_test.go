@@ -1,6 +1,10 @@
 package sites
 
-import "testing"
+import (
+	"os"
+	"path/filepath"
+	"testing"
+)
 
 // A site id becomes a directory name, a container name and a DNS label. Anything
 // that gets past this is a path traversal, a container-name collision or a broken
@@ -74,5 +78,30 @@ func TestValidDomain(t *testing.T) {
 	}
 	if err := validDomain(string(long)); err == nil {
 		t.Error("validDomain accepted a 254-character domain; the limit is 253")
+	}
+}
+
+func TestHostsAnswersOnlyForDomainsThisHostServes(t *testing.T) {
+	root := t.TempDir()
+	m, err := New(Config{Root: root, CaddyDir: t.TempDir(), HostID: "h"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Join(root, "shop"), 0o750); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.save(Site{ID: "shop", Domain: "shop.codeinchrome.com"}); err != nil {
+		t.Fatal(err)
+	}
+
+	for _, d := range []string{"shop.codeinchrome.com", "SHOP.codeinchrome.com", "shop.codeinchrome.com."} {
+		if !m.Hosts(d) {
+			t.Errorf("Hosts(%q) = false for a domain this host serves", d)
+		}
+	}
+	for _, d := range []string{"", "evil.com", "other.codeinchrome.com", "codeinchrome.com", "xshop.codeinchrome.com"} {
+		if m.Hosts(d) {
+			t.Errorf("Hosts(%q) = true: would let anyone make us request a certificate for it", d)
+		}
 	}
 }

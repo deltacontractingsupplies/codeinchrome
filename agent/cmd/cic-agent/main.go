@@ -110,7 +110,13 @@ func main() {
 func authenticated(token string, next http.Handler) http.Handler {
 	want := []byte("Bearer " + token)
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/healthz" { // liveness must not require a secret
+		// Two unauthenticated routes, both deliberately so:
+		//   /healthz  - liveness must not require a secret
+		//   /tls-ask  - Caddy calls it before issuing a certificate and cannot
+		//               send a bearer token. It answers only yes/no for one
+		//               domain, and the agent binds 127.0.0.1, which customer
+		//               containers cannot reach (verify-isolation.sh proves it).
+		if r.URL.Path == "/healthz" || r.URL.Path == "/tls-ask" {
 			next.ServeHTTP(w, r)
 			return
 		}

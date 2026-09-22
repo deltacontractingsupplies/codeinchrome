@@ -28,6 +28,8 @@ was a violation of that rule rather than a crash:
 | `POST /v1/sites` returned 201 with a running container | The agent was a version too old to seed an app or generate a key, so the site had neither |
 | 15 isolation probes reported DENIED | The container did not exist; `docker exec` fails identically whether the boundary held or the subject was absent |
 | The webhook suite passed, every test green | The route was CSRF-protected and would have rejected every real delivery with 419 — Laravel disables CSRF *during tests* |
+| Every editor save returned `ok: true` | Laravel's `TrimStrings` middleware had stripped the file's leading and trailing whitespace before it was written — every save silently removed the final newline |
+| A new site was created, DNS and all | Caddy asked Let's Encrypt for its certificate before the record had propagated; the NXDOMAIN was cached for 30 minutes and the site had no HTTPS for that long |
 
 Each of those is now a test, and most of them are checks that run on every
 deploy.
@@ -41,7 +43,9 @@ control/      Laravel 13 control plane: accounts, plans, provisioning,
               billing webhooks, the dashboard.
 infra/        Host bootstrap, agent install, image build, deploys, tunnels,
               and the isolation test that must pass on every host.
-panel/        The in-browser editor the agent drives.
+control/resources/js/editor.js
+              The in-browser editor. A person clicks it; an AI agent drives the
+              same functions through window.cic (run cic.help() in the console).
 tests/e2e/    Playwright, against the real fleet. No mocked provisioning.
 ```
 
@@ -103,8 +107,10 @@ them, because disagreement is the interesting case.
 
 ## Status
 
-Working end to end: signup, provisioning, DNS, TLS, the dashboard, tenant
-isolation, host bootstrap, the e2e suite against production.
+Working end to end: signup, provisioning, DNS, TLS, the dashboard, the
+in-browser editor (with conflict detection between a person and an agent
+editing the same file), tenant isolation, host bootstrap, and the e2e suite
+against production.
 
 Not finished: Lemon Squeezy products cannot be created over their API
 (`POST /v1/products` returns 405, they are dashboard-only), so the plan catalog

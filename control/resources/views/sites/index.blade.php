@@ -59,11 +59,25 @@
                         <p class="mt-2 max-w-xl text-xs text-red-400">{{ $site->last_error }}</p>
                     @endif
                 </div>
-                <form method="POST" action="{{ route('sites.destroy', $site) }}"
-                      onsubmit="return confirm('Delete {{ $site->domain }} and everything on it? This cannot be undone.')">
-                    @csrf @method('DELETE')
-                    <button class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-400 hover:border-red-800 hover:text-red-300">Delete</button>
-                </form>
+                <div class="flex items-center gap-2">
+                @if ($site->status === 'live')
+                    <a href="{{ route('sites.edit', $site) }}"
+                       class="rounded-md bg-teal-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-teal-400">Edit code</a>
+                @endif
+                {{-- A two-step delete with no JavaScript and no confirm().
+                     A native dialog freezes the page for a browser-driving
+                     agent, which cannot dismiss it - and this product is
+                     meant to be driven by one. --}}
+                <details class="relative">
+                    <summary class="list-none cursor-pointer rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-400 hover:border-red-800 hover:text-red-300">Delete</summary>
+                    <form method="POST" action="{{ route('sites.destroy', $site) }}"
+                          class="absolute right-0 z-10 mt-2 w-64 rounded-md border border-red-900 bg-neutral-900 p-3 text-sm shadow-lg">
+                        @csrf @method('DELETE')
+                        <p class="text-neutral-300">Delete <strong>{{ $site->domain }}</strong> and everything on it? This cannot be undone.</p>
+                        <button class="mt-3 w-full rounded-md bg-red-700 px-3 py-1.5 font-medium text-white hover:bg-red-600">Delete permanently</button>
+                    </form>
+                </details>
+                </div>
             </li>
         @endforeach
     </ul>
