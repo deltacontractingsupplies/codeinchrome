@@ -62,6 +62,25 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}))
 	})
 
+	// Exposed as well as run at start-up: an operator who has just restarted
+	// something should be able to heal the proxy without restarting the agent.
+	mux.HandleFunc("POST /v1/reconcile", func(w http.ResponseWriter, r *http.Request) {
+		changed, err := mgr.Reconcile(r.Context())
+		if changed == nil {
+			changed = []string{}
+		}
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, resp{
+				"ok": false, "error": "reconcile_failed", "hint": err.Error(), "changed": changed,
+			})
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{
+			"changed": changed,
+			"basis":   "each running site's vhost compared against the port docker reports for it",
+		}))
+	})
+
 	mux.HandleFunc("GET /v1/sites", func(w http.ResponseWriter, r *http.Request) {
 		list, err := mgr.List(r.Context())
 		if err != nil {
@@ -107,7 +126,7 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			writeJSON(w, http.StatusUnprocessableEntity, fail("delete_failed", err.Error()))
 			return
 		}
-		all := done["container"] && done["vhost"] && done["data"]
+		all := done["container"] && done["vhost"] && done["data"] && done["log"] && done["network"]
 		body := resp{"removed": done}
 		if !all {
 			body["ok"] = false
@@ -121,7 +140,7 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		writeJSON(w, http.StatusNotFound, fail("no_such_route",
-			"GET /healthz, GET /v1/host, GET|POST /v1/sites, GET|DELETE /v1/sites/{id}"))
+			"GET /healthz, GET /v1/host, GET|POST /v1/sites, GET|DELETE /v1/sites/{id}, POST /v1/reconcile"))
 	})
 
 	return mux

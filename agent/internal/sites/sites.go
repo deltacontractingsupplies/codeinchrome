@@ -40,6 +40,15 @@ type Site struct {
 	CreatedAt time.Time `json:"createdAt"`
 	CPULimit  string    `json:"cpuLimit"`
 	MemLimit  string    `json:"memLimit"`
+
+	// Port is FIXED at creation and published explicitly on the host loopback.
+	//
+	// It used to be an ephemeral port picked by Docker, and that was a latent
+	// outage: `docker restart` hands out a different ephemeral port, while the
+	// Caddy vhost still names the old one. One restart turned a working site
+	// into a 502, so a host reboot - with restart=unless-stopped bringing every
+	// container back - would have 502'd every site on the host at once.
+	Port int `json:"port"`
 }
 
 // A site id is used as a directory name, a container name and a DNS label, so

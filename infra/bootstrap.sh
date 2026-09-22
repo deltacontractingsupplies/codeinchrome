@@ -63,21 +63,33 @@ fi
 # Containers must never be able to gain privileges, and the daemon must not
 # hand out the host's whole log disk to one noisy customer.
 mkdir -p /etc/docker
-if [[ ! -f /etc/docker/daemon.json ]] || ! jq -e '."no-new-privileges"' /etc/docker/daemon.json >/dev/null 2>&1; then
+if [[ ! -f /etc/docker/daemon.json ]] || ! jq -e '.icc == false' /etc/docker/daemon.json >/dev/null 2>&1; then
   cat > /etc/docker/daemon.json <<'JSON'
 {
   "no-new-privileges": true,
   "live-restore": true,
+  "icc": false,
+  "default-address-pools": [ { "base": "172.20.0.0/14", "size": 28 } ],
   "log-driver": "json-file",
   "log-opts": { "max-size": "10m", "max-file": "3" },
   "default-ulimits": { "nofile": { "Name": "nofile", "Hard": 4096, "Soft": 1024 } }
 }
 JSON
   systemctl restart docker
-  ok "docker hardened (no-new-privileges, capped logs)"
+  ok "docker hardened (icc=false, no-new-privileges, capped logs)"
 else
   ok "docker config already hardened"
 fi
+
+# `icc: false` above is the reason this matters. It was added after a measured
+# failure, not on principle: with every site on the shared default bridge, one
+# tenant read 70,403 bytes of another tenant's live app straight off
+# 172.17.0.2:8080, bypassing Caddy entirely. Nothing in this architecture needs
+# container-to-container traffic - Caddy reaches each container through a port
+# published on the host's loopback - so the correct amount of it is none.
+#
+# The address pool is sized for the per-site networks the agent creates:
+# 172.20.0.0/14 in /28s is 16,384 networks, against a few hundred sites a host.
 systemctl enable --now docker >/dev/null 2>&1 || true
 
 # ─────────────────────────────────────────────────────────────────────────────

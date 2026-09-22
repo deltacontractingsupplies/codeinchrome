@@ -62,6 +62,17 @@ func main() {
 		fatal("cannot start site manager: %v", err)
 	}
 
+	// Heal before serving. A host that rebooted has every container back on a
+	// restart policy, and until this runs its vhosts may name ports those
+	// containers no longer hold - which is a 502 on every site at once.
+	if changed, err := mgr.Reconcile(context.Background()); err != nil {
+		slog.Error("reconcile failed; some sites may be serving 502", "err", err, "changed", changed)
+	} else if len(changed) > 0 {
+		slog.Info("reconciled vhosts to match running containers", "changes", changed)
+	} else {
+		slog.Info("vhosts already match the running containers", "sites", len(changed))
+	}
+
 	srv := &http.Server{
 		Addr:              *addr,
 		Handler:           authenticated(token, api.Routes(mgr, version)),
