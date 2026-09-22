@@ -123,6 +123,28 @@ func (m *Manager) Create(ctx context.Context, o CreateOpts) (Site, error) {
 		cleanup()
 		return Site{}, err
 	}
+
+	password, err := m.createDatabase(ctx, o.ID)
+	if err != nil {
+		cleanup()
+		return Site{}, err
+	}
+	if err := os.WriteFile(filepath.Join(dir, "db.secret"), []byte(password), 0o600); err != nil {
+		_ = m.dropDatabase(context.Background(), o.ID)
+		cleanup()
+		return Site{}, fmt.Errorf("store database credentials: %w", err)
+	}
+	site.Database, site.DBUser = DBName(o.ID), DBUser(o.ID)
+	if err := m.save(site); err != nil {
+		_ = m.dropDatabase(context.Background(), o.ID)
+		cleanup()
+		return Site{}, err
+	}
+	if err := m.configureAppDatabase(ctx, site, password); err != nil {
+		_ = m.dropDatabase(context.Background(), o.ID)
+		cleanup()
+		return Site{}, err
+	}
 	if err := m.writeCaddy(ctx, site); err != nil {
 		cleanup()
 		return Site{}, err
@@ -269,6 +291,8 @@ func (m *Manager) startContainer(ctx context.Context, s Site) error {
 		"--tmpfs", "/run:rw,noexec,nosuid,size=16m",
 
 		"-v", filepath.Join(s.Root, "app") + ":/var/www/html:rw",
+		// The host's MySQL, which binds the docker gateway and nothing public.
+		"--add-host", dbHostForSites + ":host-gateway",
 		// Fixed, loopback-only. Not ephemeral: see Site.Port for the 502 that
 		// taught us the difference.
 		"--publish", fmt.Sprintf("127.0.0.1:%d:8080", s.Port),
@@ -500,6 +524,7 @@ func (m *Manager) Delete(ctx context.Context, id string) (map[string]string, err
 	hadLog := logErr == nil
 	_, netErr := run(ctx, 15*time.Second, "docker", "network", "inspect", m.network(id), "--format", "{{.Id}}")
 	hadNetwork := netErr == nil
+	hadDB, hadDBUser, dbErr := m.databaseExists(ctx, id)
 
 	verdict := func(present bool, removeErr error, stillThere func() bool) string {
 		if !present {
@@ -549,6 +574,25 @@ func (m *Manager) Delete(ctx context.Context, id string) (map[string]string, err
 		_, e := run(ctx, 15*time.Second, "docker", "network", "inspect", m.network(id))
 		return e == nil
 	})
+
+	// The database and its user. "failed" if we could not even look: a
+	// database we cannot see is not a database we can claim is gone.
+	switch {
+	case dbErr != nil && m.cfg.MySQLPassword == "":
+		done["database"] = "absent" // no server on this host, so nothing to remove
+	case dbErr != nil:
+		done["database"] = "failed"
+	case !hadDB && !hadDBUser:
+		done["database"] = "absent"
+	default:
+		_ = m.dropDatabase(ctx, id)
+		stillDB, stillUser, err := m.databaseExists(ctx, id)
+		if err != nil || stillDB || stillUser {
+			done["database"] = "failed"
+		} else {
+			done["database"] = "removed"
+		}
+	}
 
 	if done["vhost"] == "removed" {
 		_ = m.ReloadProxy(ctx)

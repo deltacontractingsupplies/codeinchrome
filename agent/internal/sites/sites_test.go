@@ -105,3 +105,41 @@ func TestHostsAnswersOnlyForDomainsThisHostServes(t *testing.T) {
 		}
 	}
 }
+
+func TestSetEnvReplacesCommentedKeysAndKeepsEverythingElse(t *testing.T) {
+	in := "APP_NAME=Laravel\nDB_CONNECTION=sqlite\n# DB_HOST=127.0.0.1\n# DB_PORT=3306\n\n# keep me\nAPP_DEBUG=false\n"
+	out := SetEnv(in, "DB_CONNECTION", "mysql")
+	out = SetEnv(out, "DB_HOST", "cic-db")
+	out = SetEnv(out, "DB_PASSWORD", "s3cret")
+
+	want := "APP_NAME=Laravel\nDB_CONNECTION=mysql\nDB_HOST=cic-db\n# DB_PORT=3306\n\n# keep me\nAPP_DEBUG=false\nDB_PASSWORD=s3cret\n"
+	if out != want {
+		t.Fatalf("SetEnv produced\n%q\nwant\n%q", out, want)
+	}
+	// A key that merely STARTS with another must not be touched.
+	if got := SetEnv("DB_HOST_EXTRA=x\n", "DB_HOST", "y"); got != "DB_HOST_EXTRA=x\nDB_HOST=y\n" {
+		t.Fatalf("prefix key was clobbered: %q", got)
+	}
+}
+
+func TestDatabaseIdentifiersAreSafeForEveryValidID(t *testing.T) {
+	for _, id := range []string{"abc", "my-shop", "a234567890123456789012345678901234567890"} {
+		if err := ValidID(id); err != nil {
+			t.Fatal(err)
+		}
+		if _, err := quoteIdent(DBName(id)); err != nil {
+			t.Errorf("DBName(%q) = %q is not a safe identifier", id, DBName(id))
+		}
+		if u := DBUser(id); len(u) > 32 || !safeIdent.MatchString(u) {
+			t.Errorf("DBUser(%q) = %q: MySQL user names are limited to 32 safe characters", id, u)
+		}
+	}
+	if DBUser("a-b") == DBUser("a-c") {
+		t.Error("two sites share a database user")
+	}
+	for _, bad := range []string{"x`; DROP DATABASE mysql; --", "a b", "", "A"} {
+		if _, err := quoteIdent(bad); err == nil {
+			t.Errorf("quoteIdent accepted %q", bad)
+		}
+	}
+}

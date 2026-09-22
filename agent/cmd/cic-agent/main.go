@@ -57,6 +57,10 @@ func main() {
 		Root:     *root,
 		CaddyDir: *caddyDir,
 		HostID:   strings.TrimSpace(string(hostID)),
+		// From /opt/codeinchrome/etc/mysql.env via the systemd unit. Read
+		// from the environment rather than a flag so it never appears in
+		// `ps` output.
+		MySQLPassword: os.Getenv("CIC_MYSQL_ROOT_PASSWORD"),
 	})
 	if err != nil {
 		fatal("cannot start site manager: %v", err)

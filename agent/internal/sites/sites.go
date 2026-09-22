@@ -21,6 +21,11 @@ type Config struct {
 	Root     string // /srv/customers
 	CaddyDir string // /opt/codeinchrome/caddy/sites
 	HostID   string
+
+	// Root password for the host's MySQL, from /opt/codeinchrome/etc/mysql.env.
+	// Empty means this host has no database server, and creating a site fails
+	// with that reason rather than producing a site without a database.
+	MySQLPassword string
 }
 
 type Manager struct {
@@ -49,6 +54,12 @@ type Site struct {
 	// into a 502, so a host reboot - with restart=unless-stopped bringing every
 	// container back - would have 502'd every site on the host at once.
 	Port int `json:"port"`
+
+	// The site's database and MySQL user. The password is deliberately NOT a
+	// field here: this struct is what the API returns. It lives in db.secret,
+	// beside site.json, readable by root only.
+	Database string `json:"database,omitempty"`
+	DBUser   string `json:"dbUser,omitempty"`
 }
 
 // A site id is used as a directory name, a container name and a DNS label, so

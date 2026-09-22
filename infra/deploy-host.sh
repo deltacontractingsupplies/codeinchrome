@@ -37,6 +37,9 @@ say "building the agent $version"
 say "hardening the host"
 ssh_ 'bash -s' < infra/bootstrap.sh
 
+say "database server"
+ssh_ 'bash -s' < infra/mysql.sh
+
 say "building the base image"
 ssh_ 'mkdir -p /opt/codeinchrome/images/laravel-8.3'
 scp -q infra/images/laravel-8.3/Dockerfile "root@$ip:/opt/codeinchrome/images/laravel-8.3/Dockerfile"

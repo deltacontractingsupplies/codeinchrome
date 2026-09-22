@@ -49,6 +49,15 @@ test('a person and an agent can both edit a real site, without erasing each othe
     await expect(page.locator('#sbMsg')).toHaveText('Ready');
   });
 
+  await test.step('the site was given its own MySQL database', async () => {
+    const env = await page.evaluate(() => window.cic.read('/.env'));
+    expect(env.ok).toBe(true);
+    expect(env.content).toMatch(/^DB_CONNECTION=mysql$/m);
+    expect(env.content).toMatch(/^DB_HOST=cic-db$/m);
+    expect(env.content).toMatch(new RegExp(`^DB_DATABASE=site_${siteName.replace(/-/g, '_')}$`, 'm'));
+    expect(env.content).toMatch(/^DB_PASSWORD=[0-9a-f]{64}$/m);
+  });
+
   await test.step('the explorer shows the real Laravel tree, with the open file revealed', async () => {
     await expect(page.locator('.node.active .nm')).toHaveText('web.php');
     for (const name of ['app', 'public', 'routes', 'artisan', 'composer.json']) {

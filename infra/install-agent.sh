@@ -97,6 +97,9 @@ Requires=docker.service
 [Service]
 Type=simple
 EnvironmentFile=$CIC/etc/agent.env
+# The leading "-" makes it optional: a host without MySQL still runs the agent,
+# and creating a site there fails with that reason instead.
+EnvironmentFile=-$CIC/etc/mysql.env
 ExecStart=$CIC/bin/cic-agent -addr 127.0.0.1:9440
 Restart=always
 RestartSec=3
