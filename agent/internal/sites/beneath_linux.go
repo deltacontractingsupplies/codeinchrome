@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"time"
 
 	"golang.org/x/sys/unix"
@@ -30,10 +31,54 @@ func openDirBeneath(rootFD int, rel string) (int, error) {
 	if rel == "" || rel == "." {
 		return unix.Dup(rootFD)
 	}
-	return unix.Openat2(rootFD, rel, &unix.OpenHow{
-		Flags:   unix.O_PATH | unix.O_DIRECTORY | unix.O_CLOEXEC,
-		Resolve: beneath,
-	})
+	return openat2Beneath(rootFD, rel, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC)
+}
+
+// noOpenat2 is set the first time the kernel - or a seccomp filter -
+// answers ENOSYS. systemd's RestrictSUIDSGID= (on in the agent's unit) does
+// exactly that: seccomp cannot inspect openat2's flags, so systemd refuses the
+// whole call with ENOSYS to send programs back to openat. Every test passed
+// outside systemd and site creation then failed on the hosts. A test may set
+// it to exercise the walk.
+var noOpenat2 atomic.Bool
+
+// openat2Beneath opens rel under rootFD with no symlink and no escape on the
+// way: openat2(RESOLVE_BENEATH|RESOLVE_NO_SYMLINKS) where it is allowed, and
+// otherwise the same guarantee built from openat - one component at a time,
+// each relative to the handle of the folder before it, each O_NOFOLLOW. A
+// component that is a symlink fails (ELOOP, or ENOTDIR for a folder opened
+// O_PATH|O_DIRECTORY|O_NOFOLLOW); ".." cannot occur, the path is Clean()ed
+// from "/". Nothing is resolved by path from outside the site, so no swap
+// between two steps can redirect the walk: each step starts from a handle.
+func openat2Beneath(rootFD int, rel string, flags int) (int, error) {
+	if !noOpenat2.Load() {
+		fd, err := unix.Openat2(rootFD, rel, &unix.OpenHow{Flags: uint64(flags), Resolve: beneath})
+		if !errors.Is(err, unix.ENOSYS) {
+			return fd, err
+		}
+		noOpenat2.Store(true)
+	}
+	parts := splitRel(rel)
+	if len(parts) == 0 {
+		return unix.Openat(rootFD, ".", flags|unix.O_NOFOLLOW, 0)
+	}
+	dir, err := unix.Dup(rootFD)
+	if err != nil {
+		return -1, err
+	}
+	for _, part := range parts[:len(parts)-1] {
+		next, err := unix.Openat(dir, part, unix.O_PATH|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+		unix.Close(dir)
+		if err != nil {
+			if errors.Is(err, unix.ENOTDIR) {
+				return -1, unix.ELOOP // a symlink (or a file) where a folder should be
+			}
+			return -1, err
+		}
+		dir = next
+	}
+	defer unix.Close(dir)
+	return unix.Openat(dir, parts[len(parts)-1], flags|unix.O_NOFOLLOW, 0)
 }
 
 func splitRel(rel string) []string {
@@ -130,15 +175,14 @@ func openBeneath(root, rel string) (*os.File, error) {
 	if clean == "" {
 		clean = "."
 	}
-	fd, err := unix.Openat2(rootFD, clean, &unix.OpenHow{
-		Flags:   unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW,
-		Resolve: beneath,
-	})
+	fd, err := openat2Beneath(rootFD, clean, unix.O_RDONLY|unix.O_CLOEXEC|unix.O_NOFOLLOW)
 	if err != nil {
 		if errors.Is(err, unix.ENOENT) {
 			return nil, os.ErrNotExist
 		}
-		return nil, fmt.Errorf("%w: %s", errOutside, clean)
+		// The errno is kept: "outside the site" for an EAGAIN or an EACCES
+		// sends whoever reads it looking for an attack that is not there.
+		return nil, fmt.Errorf("%w: %s (%v)", errOutside, clean, err)
 	}
 	return os.NewFile(uintptr(fd), filepath.Join(root, clean)), nil
 }

@@ -31,8 +31,10 @@ test.afterAll(() => destroySite(siteName));
 test('a visitor can sign up, provision a site, and see it live', async ({ page }) => {
   await test.step('the landing page is there', async () => {
     await page.goto('/');
-    await expect(page.getByRole('heading', { level: 1 })).toContainText('Laravel hosting');
-    await expect(page.getByText('Starter')).toBeVisible();
+    await expect(page.getByRole('heading', { level: 1 })).toContainText('Laravel app');
+    // The product itself is on the page: the editor and the agent at work.
+    await expect(page.getByRole('figure', { name: /The editor in the browser/ })).toBeVisible();
+    await expect(page.getByText('Starter', { exact: true }).first()).toBeVisible();
   });
 
   await test.step('sign up', async () => {

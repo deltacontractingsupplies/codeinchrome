@@ -39,6 +39,15 @@ on()  { local ip=$1; shift; ssh -o ConnectTimeout=20 "root@$ip" "$@"; }
 artisan() { on "$control_ip" "cd /srv/control && sudo -u codeinchrome php8.4 artisan $*"; }
 tinker() { artisan "tinker --execute=$(printf %q "$1")" | tail -1; }
 
+# The bench account is moved through the paid plans, and a paid plan reserves
+# its whole allowance in the fleet's stock (control/app/Fleet/Stock.php). Left
+# on Studio, it made the whole fleet read out of stock for real customers. So
+# it goes back to free however this script ends.
+restore_bench_plan() {
+  tinker "\$u = App\Models\User::where('email', '$EMAIL')->first(); if (\$u) { \$u->update(['plan' => 'free']); app(App\Fleet\PlanLimits::class)->applyTo(\$u); } echo 'ok';" >/dev/null 2>&1 || true
+}
+trap restore_bench_plan EXIT
+
 for forbidden in $CIC_FORBIDDEN_HOSTS; do
   for h in $CIC_HOSTS; do [[ ${h##*:} == "$forbidden" ]] && die "REFUSING: production host"; done
 done
