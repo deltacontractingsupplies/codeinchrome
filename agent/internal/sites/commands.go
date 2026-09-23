@@ -242,6 +242,11 @@ func tailFile(path string, n int) (string, bool, error) {
 	if err != nil {
 		return "", false, err
 	}
+	return tailOpen(f, n)
+}
+
+// tailOpen is tailFile on a file already opened (and closes it).
+func tailOpen(f *os.File, n int) (string, bool, error) {
 	defer f.Close()
 	info, err := f.Stat()
 	if err != nil {
@@ -278,7 +283,7 @@ type LogResult struct {
 
 // Logs returns the tail of one of the site's logs:
 //
-//	app        storage/logs/laravel.log, from the site's own disk
+//	app        storage/logs/laravel.log or the newest daily laravel-*.log
 //	access     every request Caddy served for the site, one compact line each
 //	container  Apache and PHP's own output (what display_errors=Off sends to stderr)
 func (m *Manager) Logs(ctx context.Context, id, source string, n int) (LogResult, error) {
@@ -292,16 +297,18 @@ func (m *Manager) Logs(ctx context.Context, id, source string, n int) (LogResult
 
 	switch source {
 	case "app":
-		// Through resolve(), so a symlink planted at storage/logs cannot point
-		// this read somewhere else on the host.
-		path, err := m.resolve(id, "storage/logs/laravel.log")
-		if err != nil {
-			return res, err
-		}
-		lines, clipped, err := tailFile(path, n)
+		// The newest of laravel.log and the daily laravel-YYYY-MM-DD.log files
+		// (sites log daily since 0.18: one file used to grow without end).
+		// Listed and opened through kernel-checked handles, so a symlink
+		// planted at storage/logs cannot point this read at the host.
+		f, err := m.newestAppLog(id)
 		if os.IsNotExist(err) {
 			return res, nil // no log yet is an empty log, not an error
 		}
+		if err != nil {
+			return res, fmt.Errorf("cannot read the application log")
+		}
+		lines, clipped, err := tailOpen(f, n)
 		if err != nil {
 			return res, fmt.Errorf("cannot read the application log")
 		}
@@ -354,4 +361,37 @@ func compactAccessLog(raw string) string {
 			e.Status, e.Request.Method, e.Request.Host, e.Request.URI, e.Size, e.Dur*1000, e.Request.RemoteIP))
 	}
 	return strings.Join(out, "\n")
+}
+
+var appLogName = regexp.MustCompile(`^laravel(-\d{4}-\d{2}-\d{2})?\.log$`)
+
+// newestAppLog opens the most recently written Laravel log of the site.
+func (m *Manager) newestAppLog(id string) (*os.File, error) {
+	root, err := m.realRoot(id)
+	if err != nil {
+		return nil, err
+	}
+	dir, err := openBeneath(root, "/storage/logs")
+	if err != nil {
+		return nil, err
+	}
+	entries, err := dir.ReadDir(-1)
+	if err != nil {
+		dir.Close()
+		return nil, err
+	}
+	best, bestTime := "", time.Time{}
+	for _, e := range entries {
+		if !e.Type().IsRegular() || !appLogName.MatchString(e.Name()) {
+			continue
+		}
+		if info, err := statAt(dir, e.Name()); err == nil && info.ModTime().After(bestTime) {
+			best, bestTime = e.Name(), info.ModTime()
+		}
+	}
+	dir.Close()
+	if best == "" {
+		return nil, os.ErrNotExist
+	}
+	return openBeneath(root, "/storage/logs/"+best)
 }

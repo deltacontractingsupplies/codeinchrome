@@ -1,8 +1,12 @@
 package sites
 
 import (
+	"context"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestCommandAllowList(t *testing.T) {
@@ -77,5 +81,32 @@ func TestComposerCannotBePointedAtAnotherDirectory(t *testing.T) {
 	}
 	if _, _, err := validateCommand("composer", []string{"require", "-W", "laravel/reverb", "--dev"}); err != nil {
 		t.Errorf("an ordinary require was refused: %v", err)
+	}
+}
+
+func TestTheAppLogIsTheNewestDailyFileAndNeverFollowsALink(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	logs := filepath.Join(m.appDir(id), "storage/logs")
+	os.MkdirAll(logs, 0o755)
+	os.WriteFile(filepath.Join(logs, "laravel-2026-09-22.log"), []byte("yesterday\n"), 0o644)
+	os.WriteFile(filepath.Join(logs, "laravel-2026-09-23.log"), []byte("line one\nERROR today\n"), 0o644)
+	old := time.Now().Add(-24 * time.Hour)
+	os.Chtimes(filepath.Join(logs, "laravel-2026-09-22.log"), old, old)
+	os.WriteFile(filepath.Join(logs, "other.log"), []byte("not laravel\n"), 0o644)
+
+	res, err := m.Logs(ctx, id, "app", 10)
+	if err != nil || !strings.Contains(res.Lines, "ERROR today") || strings.Contains(res.Lines, "yesterday") {
+		t.Fatalf("want today's daily log, got %q %v", res.Lines, err)
+	}
+
+	// storage/logs swapped for a link to the host: nothing is read.
+	host := t.TempDir()
+	os.WriteFile(filepath.Join(host, "laravel.log"), []byte("HOST SECRET\n"), 0o644)
+	os.RemoveAll(logs)
+	os.Symlink(host, logs)
+	res, _ = m.Logs(ctx, id, "app", 10)
+	if strings.Contains(res.Lines, "HOST SECRET") {
+		t.Fatal("the log reader followed a symlink out of the site")
 	}
 }
