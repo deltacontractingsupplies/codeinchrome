@@ -73,11 +73,11 @@ code exists.
       SECRET from the owner. A live round trip needs a person's own account.
 - [x] **Themes**: light and dark, following the system by default, switchable,
       remembered; every page including the editor
-- [ ] **Plans described in capacity, not CPU/RAM**: page views and concurrent
+- [x] **Plans described in capacity, not CPU/RAM**: page views and concurrent
       visitors measured per plan (tests/load/run.sh) and shown with every step
       of the test. WebSocket connections: harness built (tests/load/ws.sh,
-      ext-uv added to the image so Reverb is not capped at 1024 sockets) -
-      to be measured after the image is rolled out
+      ext-uv, and a 65536 open-file limit for WebSocket sites) - measured:
+      starter 4,000, pro and studio 10,000+ connections, shown on every plan
 - [x] **Out of stock**: a plan cannot be bought, or a site created, when the
       fleet has no room for it; fails closed on stale host figures
 - [x] **Behind Cloudflare's proxy**: site, app, apex and www records proxied;
@@ -105,11 +105,11 @@ code exists.
       database export/import (the database before an import is kept),
       customer backups with restore (backs up first, so undoable), queue/cron
       (scheduler)/WebSockets. Left: a permissions view, PHP settings
-- [ ] **Git in every site, every change committed automatically** (agent 0.18: built and tested, deploy + e2e pending): every save,
+- [x] **Git in every site, every change committed automatically** (deployed; e2e-tested: save, restore, bin, backup restore recorded): every save,
       upload, move, delete, command and restore is a version; any earlier one
       opens read-only and restores as a new version; outside the container,
       never served, backed up with the site
-- [ ] **Root file operations kernel-checked against symlink swaps** (agent 0.18, deploy pending): every
+- [x] **Root file operations kernel-checked against symlink swaps** (deployed; the agent refuses to start unless they work in its sandbox): every
       read, write, upload, move, zip and unzip by the agent (root) goes through
       openat2 RESOLVE_BENEATH|NO_SYMLINKS / renameat2 NOREPLACE, so a site
       cannot race a folder into a link to the host. Tested as root on Linux.
