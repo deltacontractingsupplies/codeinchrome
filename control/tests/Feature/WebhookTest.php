@@ -159,4 +159,28 @@ class WebhookTest extends TestCase
         $this->assertNull($event->processed_at);
         $this->assertStringContainsString('No user matches', $event->error);
     }
+
+    public function test_an_ended_subscription_for_a_deleted_account_is_done_not_retried_forever(): void
+    {
+        config(['billing.plans.pro.variant_id' => '777']);
+        $gone = new User(['email' => 'deleted@example.com']);
+        $gone->id = 99998;
+
+        foreach (['cancelled', 'expired', 'paused', 'unpaid'] as $i => $status) {
+            $this->send($this->payload($gone, '777', $status, "sub_gone_$i"))->assertOk()->assertSee('no_account');
+        }
+        $this->assertSame(4, WebhookEvent::whereNotNull('processed_at')->count());
+        $this->assertSame(0, Subscription::count(), 'Nothing is created for an account that does not exist.');
+    }
+
+    public function test_a_renewing_subscription_with_no_account_still_fails_loudly(): void
+    {
+        config(['billing.plans.pro.variant_id' => '777']);
+        $gone = new User(['email' => 'deleted@example.com']);
+        $gone->id = 99997;
+
+        foreach (['active', 'on_trial', 'past_due'] as $i => $status) {
+            $this->send($this->payload($gone, '777', $status, "sub_live_$i"))->assertStatus(500);
+        }
+    }
 }

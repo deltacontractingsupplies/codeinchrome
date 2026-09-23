@@ -136,3 +136,17 @@ export async function lsResume(id) {
   await lsTestSubscription(id);
   return (await lsRequest('PATCH', `subscriptions/${id}`, { data: { type: 'subscriptions', id: String(id), attributes: { cancelled: false } } })).attributes;
 }
+
+/**
+ * Cancel every TEST subscription a test account holds - the spec's finally,
+ * so a failed run never leaves a renewing subscription behind.
+ */
+export async function lsCancelAllFor(email) {
+  if (!email.endsWith('@codeinchrome.test')) throw new Error('lsCancelAllFor is for test accounts only');
+  const { store } = ls();
+  const subs = await lsRequest('GET', `subscriptions?filter[store_id]=${store}&filter[user_email]=${encodeURIComponent(email)}`);
+  for (const s of subs) {
+    if (!s.attributes.cancelled && s.attributes.status !== 'expired') await lsCancel(s.id);
+  }
+  return subs.length;
+}

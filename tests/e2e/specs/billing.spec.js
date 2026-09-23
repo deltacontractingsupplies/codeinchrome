@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { confirmSignup, billingOf, lsSubscription, lsCancel, lsResume } from '../helpers/fixtures.js';
+import { confirmSignup, billingOf, lsSubscription, lsCancel, lsResume, lsCancelAllFor } from '../helpers/fixtures.js';
 
 /**
  * A new customer buys a plan, end to end, against the REAL Lemon Squeezy
@@ -39,6 +39,7 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
   page.on('dialog', (d) => { throw new Error(`native dialog: ${d.message()}`); });
   let subscriptionId;
 
+  try {
   await test.step('sign up; the account starts on Free', async () => {
     await page.goto('/register');
     await page.getByLabel('Name').fill('Billing Runner');
@@ -61,15 +62,15 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
   });
 
   await test.step('pay with the test card', async () => {
-    const card = page.frameLocator('iframe[title*="payment input"]');
+    const card = page.frameLocator('iframe[src*="elements-inner-payment"]');
     await card.locator('[name="number"]').fill(TEST_CARD.number);
     await card.locator('[name="expiry"]').fill(TEST_CARD.expiry);
     await card.locator('[name="cvc"]').fill(TEST_CARD.cvc);
 
     await page.getByLabel('Cardholder name').fill('Billing Runner');
-    await page.getByLabel('Address line 1').fill('1 Test Street');
-    await page.getByLabel('City').fill('New York');
-    await page.getByLabel('ZIP').fill('10001');
+    await page.getByRole('textbox', { name: 'Address line 1' }).fill('1 Test Street');
+    await page.getByRole('textbox', { name: 'City' }).fill('New York');
+    await page.getByRole('textbox', { name: 'ZIP' }).fill('10001');
     const state = page.getByRole('combobox', { name: 'Search for option' });
     if (await state.isVisible()) {
       await state.click();
@@ -81,13 +82,11 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
   });
 
   await test.step('back on our billing page; the signed webhook moves the account to Pro', async () => {
-    // Lemon Squeezy shows its own confirmation, then follows redirect_url.
-    const back = page.getByRole('link', { name: /continue|return/i });
-    await Promise.race([
-      page.waitForURL(/app\.codeinchrome\.com\/billing/, { timeout: 90_000 }),
-      back.first().waitFor({ timeout: 90_000 }).then(() => back.first().click()),
-    ]);
+    // Lemon Squeezy confirms on its own page; Continue follows redirect_url.
+    await expect(page.getByRole('heading', { name: 'Thanks for your order!' })).toBeVisible({ timeout: 90_000 });
+    await page.getByRole('button', { name: 'Continue' }).click();
     await page.waitForURL(/app\.codeinchrome\.com\/billing/, { timeout: 60_000 });
+    await expect(page.getByText('Your payment is being confirmed')).toBeVisible();
 
     const state = await waitForBilling(page, (s) => s.plan === 'pro' && s.status === 'active', 'plan pro, status active');
     subscriptionId = state.id;
@@ -104,6 +103,7 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
 
   await test.step('while subscribed, deleting the account is refused', async () => {
     await page.goto('/account');
+    await page.getByText('Delete my account').click();
     const form = page.locator('form', { has: page.getByRole('button', { name: 'Delete everything' }) });
     await form.getByPlaceholder('Current password').fill(password);
     await form.getByRole('button', { name: 'Delete everything' }).click();
@@ -129,4 +129,8 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
     await lsCancel(subscriptionId);
     await waitForBilling(page, (s) => s.status === 'cancelled', 'final cancel');
   });
+  } finally {
+    // Whatever failed, no test subscription is left renewing in Lemon Squeezy.
+    await lsCancelAllFor(email);
+  }
 });

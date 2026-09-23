@@ -72,6 +72,17 @@ class WebhookHandler
     private function syncSubscription(array $payload, array $attributes, array $custom): string
     {
         $user = $this->resolveUser($attributes, $custom);
+        if (! $user && ! in_array($attributes['status'] ?? '', ['active', 'on_trial', 'past_due'], true)) {
+            // No account, and the subscription will never charge again
+            // (cancelled, expired, paused, unpaid): the usual case is a customer
+            // who cancelled, then deleted their account. Throwing here made Lemon Squeezy
+            // retry an event that can never succeed.
+            Log::info('subscription event for an account that no longer exists; nothing to revoke', [
+                'subscription' => $payload['data']['id'] ?? null, 'status' => $attributes['status'] ?? null,
+            ]);
+
+            return 'no_account';
+        }
         if (! $user) {
             // Better to fail loudly and keep the row for replay than to
             // discard a payment because we could not match it to an account.
