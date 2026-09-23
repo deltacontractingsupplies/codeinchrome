@@ -33,6 +33,10 @@
                     <span class="text-sm text-neutral-500">Free</span>
                 @elseif (! $plan['variant_id'])
                     <span class="text-sm text-neutral-500">Not available to buy yet</span>
+                @elseif (($stock[$key] ?? 0) < 1)
+                    {{-- Before the portal link too: a plan change there would
+                         otherwise bypass the stock check. --}}
+                    <span class="text-sm font-medium text-amber-300" data-stock="out">Out of stock</span>
                 @elseif ($subscription?->portal_url && $subscription->entitled())
                     {{-- An existing subscriber changes plan in the portal, so they
                          are never charged for two subscriptions at once. --}}
@@ -42,6 +46,9 @@
                         <input type="hidden" name="plan" value="{{ $key }}">
                         <button class="w-full rounded-md bg-teal-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-teal-400">Choose {{ $plan['name'] }}</button>
                     </form>
+                @endif
+                @if ($key !== $current && is_int($stock[$key] ?? null) && $stock[$key] >= 1 && $stock[$key] <= 3)
+                    <p class="mt-2 text-xs text-amber-300" data-stock="{{ $stock[$key] }}">Only {{ $stock[$key] }} left</p>
                 @endif
             </div>
         </div>

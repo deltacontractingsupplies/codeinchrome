@@ -92,6 +92,25 @@ return [
      */
     'mail_enabled' => ! in_array(env('MAIL_MAILER', 'log'), ['log', 'array'], true),
 
+    /*
+     * What the fleet can sell (App\Fleet\Stock). Capacity is each host's own
+     * reported resources minus the reserve, times the overcommit. Sites rarely
+     * sit at their memory ceiling and CPU is shared by design; disk is a
+     * kernel-enforced quota and is never overcommitted.
+     */
+    'stock' => [
+        'overcommit' => [
+            'cpu' => (float) env('CIC_OVERCOMMIT_CPU', 4.0),
+            'memory' => (float) env('CIC_OVERCOMMIT_MEMORY', 1.5),
+            'disk' => 1.0,
+        ],
+        // For each host's own services: MySQL, Caddy, the agent, the OS.
+        'reserve' => ['memory_mb' => 2048, 'disk_gb' => 15],
+        // Figures older than this (the monitor refreshes them every minute)
+        // add no capacity: we do not sell into a fleet we cannot see.
+        'fresh_seconds' => 600,
+    ],
+
     'min_agent_version' => '0.16.0',
 
     /*

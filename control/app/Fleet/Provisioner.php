@@ -46,9 +46,15 @@ class Provisioner
         $owned = $user->sites()->whereIn('status', ['provisioning', 'live'])->count();
         if ($owned >= $plan['sites']) {
             throw new RuntimeException(
-                "The {$plan['name']} plan includes {$plan['sites']} " .
-                ($plan['sites'] === 1 ? 'site' : 'sites') . " and you have $owned. Upgrade to add another."
+                "The {$plan['name']} plan includes {$plan['sites']} ".
+                ($plan['sites'] === 1 ? 'site' : 'sites')." and you have $owned. Upgrade to add another."
             );
+        }
+
+        // Paid plans reserved their whole allowance when bought (Stock); a
+        // free site takes its room now, if there is any.
+        if ((int) $plan['price'] === 0 && ! app(Stock::class)->siteFits($user->plan ?: 'free')) {
+            throw new RuntimeException('New sites are out of stock right now. We are adding capacity; please check back soon.');
         }
 
         // Unique across the fleet: the subdomain is shared space, so two
@@ -67,8 +73,8 @@ class Provisioner
         }
         $existing?->delete();
 
-        $host = $this->pickHost();
-        $domain = $siteId . '.' . config('fleet.zone');
+        $host = $this->pickHost($plan['memory']);
+        $domain = $siteId.'.'.config('fleet.zone');
 
         $site = Site::create([
             'user_id' => $user->id,
@@ -124,7 +130,7 @@ class Provisioner
             $this->dns->delete($site->site_id);
         } catch (\Throwable $e) {
             Log::error('rollback could not remove DNS', ['site' => $site->site_id, 'error' => $e->getMessage()]);
-            $site->update(['last_error' => $site->last_error . ' | DNS record may remain: ' . $e->getMessage()]);
+            $site->update(['last_error' => $site->last_error.' | DNS record may remain: '.$e->getMessage()]);
         }
 
         if ($cause instanceof AgentUnreachable) {
@@ -133,7 +139,7 @@ class Provisioner
             // container of the first one's may still be serving on it.
             $site->update([
                 'status' => 'orphaned',
-                'last_error' => $site->last_error . ' | Host state UNKNOWN; a container may exist. Run fleet:audit.',
+                'last_error' => $site->last_error.' | Host state UNKNOWN; a container may exist. Run fleet:audit.',
             ]);
 
             return;
@@ -181,7 +187,7 @@ class Provisioner
             Audit::record('site.delete_incomplete', $site->user, $site, ['parts' => $parts]);
             $site->update([
                 'status' => 'failed',
-                'last_error' => 'Not fully removed: ' . implode(', ', $failed),
+                'last_error' => 'Not fully removed: '.implode(', ', $failed),
             ]);
         }
 
@@ -189,32 +195,37 @@ class Provisioner
     }
 
     /**
-     * Least-loaded host with capacity.
+     * The host with the most memory to spare that can take one more site of
+     * this size.
      *
-     * Counts from our own rows rather than asking each agent, because a host
+     * Counted from our own rows rather than asking each agent, because a host
      * that is unreachable would otherwise look empty and attract every new
-     * site. Packing is the point - the margin comes from filling hosts rather
-     * than giving each customer a VM - but a host is never filled past its
-     * declared capacity.
+     * site. Its capacity is its own last report to the monitor (Stock); a host
+     * whose report is stale takes no new sites. The declared site count still
+     * caps it.
      */
-    private function pickHost(): string
+    private function pickHost(string $memoryLimit = '0m'): string
     {
-        $counts = Site::whereIn('status', ['provisioning', 'live'])
-            ->selectRaw('host, count(*) as total')
-            ->groupBy('host')
-            ->pluck('total', 'host');
+        $stock = app(Stock::class);
+        $need = Stock::megabytes($memoryLimit);
+        $sites = Site::whereIn('status', ['provisioning', 'live'])->get(['host', 'memory_limit']);
 
         $best = null;
-        $bestLoad = PHP_INT_MAX;
+        $bestSpare = -1;
 
         foreach (config('fleet.hosts') as $name => $cfg) {
-            $used = (int) ($counts[$name] ?? 0);
-            if ($used >= $cfg['capacity']) {
+            $here = $sites->where('host', $name);
+            if ($here->count() >= $cfg['capacity']) {
                 continue;
             }
-            if ($used < $bestLoad) {
+            $cap = $stock->hostMemoryMb($name);
+            if ($cap === null) {
+                continue;
+            }
+            $spare = $cap - $here->sum(fn ($s) => Stock::megabytes((string) $s->memory_limit)) - $need;
+            if ($spare >= 0 && $spare > $bestSpare) {
                 $best = $name;
-                $bestLoad = $used;
+                $bestSpare = $spare;
             }
         }
 
@@ -240,9 +251,9 @@ class Provisioner
 
         if (version_compare($version, $minimum, '<')) {
             throw new RuntimeException(
-                "Host [$host] runs agent $version and this needs at least $minimum. " .
-                'An older agent creates a site with no application skeleton and no application key, ' .
-                "and reports success while doing it. Run: infra/deploy-host.sh $host " .
+                "Host [$host] runs agent $version and this needs at least $minimum. ".
+                'An older agent creates a site with no application skeleton and no application key, '.
+                "and reports success while doing it. Run: infra/deploy-host.sh $host ".
                 config("fleet.hosts.$host.ip")
             );
         }

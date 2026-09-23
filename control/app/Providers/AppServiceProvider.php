@@ -2,10 +2,11 @@
 
 namespace App\Providers;
 
+use App\Fleet\Stock;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\RateLimiter;
-
+use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
 
 class AppServiceProvider extends ServiceProvider
@@ -23,6 +24,19 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // How many of each paid plan the fleet can still take (App\Fleet\Stock),
+        // for every page that lists plans. For a signed-in customer the count
+        // is theirs: what they hold now is released by a change of plan.
+        View::composer(['partials.plans', 'billing'], function ($view) {
+            $stock = app(Stock::class);
+            $user = auth()->user();
+            $view->with('stock', collect(config('billing.plans'))
+                ->map(fn ($p, $key) => $p['price'] > 0
+                    ? ($user ? $stock->availableFor($user, $key) : $stock->available($key))
+                    : null)
+                ->all());
+        });
+
         /*
          * Every limit has its own NAME, and so its own bucket.
          *
@@ -33,14 +47,14 @@ class AppServiceProvider extends ServiceProvider
          * commands in one minute was throttled everywhere. Found by the
          * end-to-end suite, which does exactly that from one address.
          */
-        $by = fn (Request $r, string $suffix = '') => ($r->user()?->id ?? $r->ip()) . $suffix;
+        $by = fn (Request $r, string $suffix = '') => ($r->user()?->id ?? $r->ip()).$suffix;
 
         // Per address AND per IP: one attacker cannot lock a victim out by
         // failing their logins from elsewhere, and cannot spray many addresses
         // from one IP either (the per-IP ceiling).
         RateLimiter::for('login', fn (Request $r) => [
-            Limit::perMinute(10)->by(strtolower((string) $r->input('email')) . '|' . $r->ip()),
-            Limit::perMinute(30)->by('ip:' . $r->ip()),
+            Limit::perMinute(10)->by(strtolower((string) $r->input('email')).'|'.$r->ip()),
+            Limit::perMinute(30)->by('ip:'.$r->ip()),
         ]);
         RateLimiter::for('register', fn (Request $r) => Limit::perMinute(10)->by($r->ip()));
         RateLimiter::for('password-mail', fn (Request $r) => Limit::perMinute(5)->by($r->ip()));

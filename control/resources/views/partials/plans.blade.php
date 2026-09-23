@@ -11,6 +11,7 @@
                 <li>{{ $plan['disk_gb'] }} GB disk</li>
                 <li>{{ $plan['custom_domains'] ? 'Custom domains' : 'Free subdomain' }}</li>
             </ul>
+            @include('partials.stock', ['left' => $stock[$key] ?? null])
         </div>
     @endforeach
 </div>

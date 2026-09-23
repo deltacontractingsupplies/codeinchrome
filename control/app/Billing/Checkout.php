@@ -32,6 +32,10 @@ class Checkout
             // sending the customer to a checkout that will fail.
             throw new RuntimeException("The {$plan['name']} plan is not available to buy yet.");
         }
+        // Never take money for what the fleet cannot hold (App\Fleet\Stock).
+        if (app(\App\Fleet\Stock::class)->availableFor($user, $planKey) < 1) {
+            throw new RuntimeException("{$plan['name']} is out of stock right now. We are adding capacity; please check back soon.");
+        }
         foreach (['api_key', 'store_id'] as $key) {
             if (! config("billing.$key")) {
                 throw new RuntimeException("Billing is not configured (billing.$key is empty).");

@@ -56,6 +56,7 @@ class Monitoring
         } catch (\Throwable $e) {
             return ["host:$host" => [$label, false, 'agent unreachable: ' . $e->getMessage(), null]];
         }
+        Stock::remember($host, $s);
         $ms = (int) round((microtime(true) - $started) * 1000);
 
         $out = ["host:$host" => [$label, true, sprintf('load %.2f on %d CPUs, %d%% memory available',

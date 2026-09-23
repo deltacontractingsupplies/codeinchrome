@@ -2,11 +2,13 @@
 
 namespace Tests\Feature;
 
-use App\Fleet\AgentUnreachable;
+use App\Fleet\AgentRefused;
 use App\Fleet\Dns;
 use App\Fleet\Provisioner;
+use App\Fleet\Stock;
 use App\Models\Site;
 use App\Models\User;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -102,7 +104,7 @@ class ProvisioningTest extends TestCase
                         ? [['id' => $this->dnsRecords[$name], 'name' => $name]]
                         : [];
                 } elseif ($request->method() === 'POST') {
-                    $id = 'rec-' . count($this->dnsRecords);
+                    $id = 'rec-'.count($this->dnsRecords);
                     $this->dnsRecords[$request['name']] = $id;
                     $body['result'] = ['id' => $id];
                 } elseif ($request->method() === 'DELETE') {
@@ -292,7 +294,7 @@ class ProvisioningTest extends TestCase
     public function test_an_unreachable_agent_is_recorded_as_unknown_not_as_clean_failure(): void
     {
         $this->fakeAgent([
-            '127.0.0.1:944*/v1/sites*' => fn () => throw new \Illuminate\Http\Client\ConnectionException('tunnel down'),
+            '127.0.0.1:944*/v1/sites*' => fn () => throw new ConnectionException('tunnel down'),
         ]);
         $user = User::factory()->create(['plan' => 'starter']);
 
@@ -379,7 +381,7 @@ class ProvisioningTest extends TestCase
         try {
             Provisioner::make()->destroy($site->fresh());
             $this->assertTrue(false, 'The agent reported a partial removal; destroy must not report success.');
-        } catch (\App\Fleet\AgentRefused $e) {
+        } catch (AgentRefused $e) {
             $this->assertSame(
                 ['container' => 'removed', 'vhost' => 'removed', 'data' => 'failed', 'log' => 'removed', 'network' => 'removed'],
                 $e->detail['parts'],
@@ -406,5 +408,22 @@ class ProvisioningTest extends TestCase
         // ACME certificate) and never the host's own address.
         Http::assertSent(fn ($r) => $r->method() === 'POST'
             && $r['name'] === 'shop.codeinchrome.com' && $r['proxied'] === true && $r['ttl'] === 1);
+    }
+
+    public function test_a_new_site_goes_to_the_host_with_the_most_memory_to_spare_and_never_to_a_silent_one(): void
+    {
+        $this->fakeAgent();
+        $user = User::factory()->create(['plan' => 'starter']);
+
+        // h1 reports more memory, but its last report is stale: it takes nothing.
+        Stock::remember('h1', ['cpus' => 64, 'memTotalBytes' => 512 * 1024 ** 3, 'diskTotalBytes' => 4096 * 1024 ** 3]);
+        $this->travel(11)->minutes();
+        Stock::remember('h2', ['cpus' => 4, 'memTotalBytes' => 8 * 1024 ** 3, 'diskTotalBytes' => 100 * 1024 ** 3]);
+
+        $this->assertSame('h2', Provisioner::make()->provision($user, 'first')->host);
+
+        // Both fresh now; h1 has far more to spare.
+        Stock::remember('h1', ['cpus' => 64, 'memTotalBytes' => 512 * 1024 ** 3, 'diskTotalBytes' => 4096 * 1024 ** 3]);
+        $this->assertSame('h1', Provisioner::make()->provision($user, 'second')->host);
     }
 }

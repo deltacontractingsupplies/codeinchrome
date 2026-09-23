@@ -59,6 +59,15 @@ abstract class TestCase extends BaseTestCase
         // Now an unmatched request fails the test that made it.
         \Illuminate\Support\Facades\Http::preventStrayRequests();
 
+        // The fleet has room, unless a test says otherwise. In production a
+        // host adds capacity only once the monitor has heard from it (App\Fleet\
+        // Stock fails closed); here the usual host names report ample, fresh
+        // figures so that tests about other things are not "out of stock".
+        // StockTest replaces these to test the limits themselves.
+        foreach (['h1', 'h2', 'h3', 'h4'] as $host) {
+            \App\Fleet\Stock::remember($host, ['cpus' => 64, 'memTotalBytes' => 256 * 1024 ** 3, 'diskTotalBytes' => 4096 * 1024 ** 3]);
+        }
+
         // Every credential check is held to at least 200 ms (Laravel's auth
         // "timebox"), so a login for an unknown address costs the same as one
         // for a real account - a timing side-channel defence that stays ON in
