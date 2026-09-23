@@ -1,6 +1,7 @@
 import { monaco, languageFor } from './monaco.js';
 import { startPhpLanguageServer } from './lsp.js';
 import { previewKind, loadPreview, renderPreview } from './preview.js';
+import { installLaravelProviders } from './laravel.js';
 /*
  * The codeinchrome editor.
  *
@@ -93,6 +94,39 @@ const php = startPhpLanguageServer({
       el.title = bad ? text : 'PHP IntelliSense (Phpactor) is running in this site';
       el.classList.toggle('bad', bad);
     }
+  },
+});
+
+// Laravel's string conventions: route and view names, and ⌘-click from a
+// view name to its Blade file (laravel.js). Quiet: no terminal output.
+installLaravelProviders({
+  monaco,
+  listDir: async (path) => {
+    const r = await api('GET', { path });
+    return r.ok ? r.listing.entries : [];
+  },
+  runArtisan: async (args) => {
+    const r = await apiAt(SITE.commandUrl, 'POST', {}, { tool: 'artisan', args });
+    return r.ok ? r.result.output : '';
+  },
+  fileUri: (path) => monaco.Uri.from({ scheme: 'cic', path }),
+});
+
+// A jump to another file (go to definition, a view name, Phpactor into
+// vendor/) opens it in this editor's own tabs, then selects the target.
+monaco.editor.registerEditorOpener({
+  async openCodeEditor(_source, resource, selectionOrPosition) {
+    if (resource.scheme !== 'cic') return false;
+    const r = await openFile(resource.path);
+    if (!r.ok) return true;
+    if (selectionOrPosition) {
+      const sel = 'startLineNumber' in selectionOrPosition ? selectionOrPosition
+        : new monaco.Range(selectionOrPosition.lineNumber, selectionOrPosition.column, selectionOrPosition.lineNumber, selectionOrPosition.column);
+      editor.setSelection(sel);
+      editor.revealRangeInCenter(sel);
+    }
+    editor.focus();
+    return true;
   },
 });
 
@@ -321,7 +355,11 @@ function nodeFor(entry, depth) {
   more.className = 'del';
   more.title = `Actions for ${entry.name}`;
   more.setAttribute('aria-haspopup', 'menu');
-  more.textContent = '⋯';
+  more.setAttribute('aria-label', `Actions for ${entry.name}`);
+  const dots = document.createElement('i');
+  dots.className = 'ci ci-ellipsis';
+  dots.setAttribute('aria-hidden', 'true');
+  more.append(dots);
   more.addEventListener('click', (e) => {
     e.stopPropagation();
     openNodeMenu(entry, more);
@@ -753,9 +791,15 @@ function setMode(next) {
   $('dbSide').hidden = next !== 'db';
   $('dbPanel').hidden = next !== 'db';
   if (next === 'db') {
+    // The code editor stays mounted but must not show through: its minimap
+    // is positioned over the panel otherwise.
+    $('editorWrap').hidden = true;
+    $('preview').hidden = true;
+    $('empty').hidden = true;
     if (!dbLoaded) loadTables();
     $('sql').focus();
   } else {
+    show(active);
     editor.focus();
   }
 }

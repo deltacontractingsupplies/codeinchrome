@@ -189,3 +189,16 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg
   /* A checkerboard behind transparent images, as in VS Code. */
   background: repeating-conic-gradient(var(--list-hover) 0% 25%, transparent 0% 50%) 50% / 16px 16px; }
 .preview-page { width: 100%; max-width: 900px; height: auto; box-shadow: 0 1px 4px rgba(0, 0, 0, .4); background: #fff; }
+
+/* VS Code's own icons: the codicon font Monaco already ships (MIT). Code
+   points from Monaco's registry (base/common/codiconsLibrary.js). */
+.ci { font: normal normal normal 16px/1 codicon; display: inline-block; text-decoration: none; text-rendering: auto;
+  -webkit-font-smoothing: antialiased; vertical-align: middle; speak: never; }
+.ci-new-file::before { content: "\ea7f"; }
+.ci-new-folder::before { content: "\ea80"; }
+.ci-cloud-upload::before { content: "\eac3"; }
+.ci-search::before { content: "\ea6d"; }
+.ci-refresh::before { content: "\eb37"; }
+.ci-ellipsis::before { content: "\ea7c"; }
+.ci-terminal::before { content: "\ea85"; font-size: 14px; }
+.side-actions button { display: inline-grid; place-items: center; }

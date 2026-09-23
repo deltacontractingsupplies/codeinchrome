@@ -58,11 +58,11 @@
             <div class="side-head" id="filesHead">
                 <span>EXPLORER</span>
                 <span class="side-actions">
-                    <button type="button" id="btnNew" title="New file">＋</button>
-                    <button type="button" id="btnNewFolder" title="New folder">▣</button>
-                    <button type="button" id="btnUpload" title="Upload files">⤒</button>
-                    <button type="button" id="btnSearch" title="Search in files">⌕</button>
-                    <button type="button" id="btnRefresh" title="Refresh">⟳</button>
+                    <button type="button" id="btnNew" title="New file" aria-label="New file"><i class="ci ci-new-file" aria-hidden="true"></i></button>
+                    <button type="button" id="btnNewFolder" title="New folder" aria-label="New folder"><i class="ci ci-new-folder" aria-hidden="true"></i></button>
+                    <button type="button" id="btnUpload" title="Upload files" aria-label="Upload files"><i class="ci ci-cloud-upload" aria-hidden="true"></i></button>
+                    <button type="button" id="btnSearch" title="Search in files" aria-label="Search in files"><i class="ci ci-search" aria-hidden="true"></i></button>
+                    <button type="button" id="btnRefresh" title="Refresh" aria-label="Refresh"><i class="ci ci-refresh" aria-hidden="true"></i></button>
                     <input type="file" id="uploadInput" multiple hidden>
                 </span>
             </div>
@@ -75,7 +75,7 @@
             <div id="nodeMenu" class="nodemenu" role="menu" hidden></div>
             <div id="dbSide" class="tree" hidden>
                 <div class="side-head"><span id="dbName">DATABASE</span>
-                    <span class="side-actions"><button type="button" id="btnDbRefresh" title="Refresh">⟳</button></span>
+                    <span class="side-actions"><button type="button" id="btnDbRefresh" title="Refresh" aria-label="Refresh"><i class="ci ci-refresh" aria-hidden="true"></i></button></span>
                 </div>
                 <div id="dbTables"></div>
                 <div class="side-head"><span>BACKUP</span></div>
@@ -88,7 +88,7 @@
             </div>
             <div id="historySide" class="tree" hidden>
                 <div class="side-head"><span id="historyTitle">THIS FILE</span>
-                    <span class="side-actions"><button type="button" id="btnHistoryRefresh" title="Refresh">⟳</button></span>
+                    <span class="side-actions"><button type="button" id="btnHistoryRefresh" title="Refresh" aria-label="Refresh"><i class="ci ci-refresh" aria-hidden="true"></i></button></span>
                 </div>
                 <div id="historyList"></div>
                 <div class="side-head"><span>BIN - DELETED FILES</span></div>
@@ -160,7 +160,7 @@
     <footer class="statusbar">
         <span id="sbSite">{{ $site->domain }}</span>
         <span id="sbMsg" role="status" aria-live="polite"></span>
-        <span class="right"><button type="button" id="sbPanel" class="sb-btn" title="Terminal and logs (Ctrl `)">⌨ Terminal</button><span id="sbLsp" title="PHP IntelliSense (Phpactor), starting">PHP</span><span id="sbPos"></span><span id="sbRev"></span></span>
+        <span class="right"><button type="button" id="sbPanel" class="sb-btn" title="Terminal and logs (Ctrl `)"><i class="ci ci-terminal" aria-hidden="true"></i> Terminal</button><span id="sbLsp" title="PHP IntelliSense (Phpactor), starting">PHP</span><span id="sbPos"></span><span id="sbRev"></span></span>
     </footer>
 
     {{-- In-page dialog. Never alert/confirm/prompt: a native dialog freezes
