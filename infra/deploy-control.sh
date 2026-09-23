@@ -268,13 +268,15 @@ systemctl restart caddy
 POOL
 
 # The bare domain and www point at this host (redirected below). Upserted, so
-# re-running a deploy never duplicates them. Unproxied like every other record:
-# Caddy terminates TLS itself.
+# re-running a deploy never duplicates them. PROXIED, like app: Cloudflare
+# serves visitors and reaches h2 with the origin certificate
+# (setup-cloudflare-proxy.sh). A DNS-only record here would show visitors a
+# certificate only Cloudflare trusts.
 zone=${CLOUDFLARE_ZONE_NAME:-codeinchrome.com}
 for record in "$zone" "www.$zone"; do
   rec=$(curl -fsS -g "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records?type=A&name=$record" \
           -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; print(r[0]["id"] if r else "")')
-  body=$(printf '{"type":"A","name":"%s","content":"%s","ttl":300,"proxied":false}' "$record" "$ip")
+  body=$(printf '{"type":"A","name":"%s","content":"%s","ttl":1,"proxied":true}' "$record" "$ip")
   if [[ -n $rec ]]; then
     curl -fsS -X PUT "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records/$rec" \
       -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" -d "$body" >/dev/null
