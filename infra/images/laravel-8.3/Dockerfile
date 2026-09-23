@@ -32,10 +32,16 @@ RUN set -eux; \
     savedAptMark="$(apt-mark showmanual)"; \
     apt-get update; \
     apt-get install -y --no-install-recommends \
-        libzip-dev libpng-dev libjpeg-dev libfreetype6-dev libicu-dev libonig-dev; \
+        libzip-dev libpng-dev libjpeg-dev libfreetype6-dev libicu-dev libonig-dev libuv1-dev; \
     docker-php-ext-configure gd --with-freetype --with-jpeg; \
     docker-php-ext-install -j"$(nproc)" \
         pdo_mysql mysqli zip gd intl bcmath opcache exif pcntl; \
+    # uv: Laravel Reverb's event loop. Without it ReactPHP falls back to
+    # stream_select, which cannot watch more than 1024 sockets - a hard
+    # ceiling on WebSocket connections whatever the plan's memory.
+    pecl install uv-0.3.0; \
+    docker-php-ext-enable uv; \
+    rm -rf /tmp/pear; \
     \
     apt-mark auto '.*' > /dev/null; \
     [ -z "$savedAptMark" ] || apt-mark manual $savedAptMark > /dev/null; \
@@ -62,7 +68,7 @@ RUN set -eux; \
         echo "FATAL: an extension failed to load at startup:"; echo "$startup"; exit 1 ;; \
     esac; \
     mods="$(php -m)"; \
-    for ext in pdo_mysql mysqli zip gd intl bcmath exif pcntl; do \
+    for ext in pdo_mysql mysqli zip gd intl bcmath exif pcntl uv; do \
       echo "$mods" | grep -qx "$ext" || { echo "FATAL: $ext built but not loaded"; echo "$mods"; exit 1; }; \
     done; \
     php -r 'exit(function_exists("opcache_get_status") ? 0 : 1);' || { echo "FATAL: opcache not active"; exit 1; }; \

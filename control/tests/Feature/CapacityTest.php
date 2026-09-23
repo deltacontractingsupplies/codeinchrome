@@ -14,7 +14,9 @@ class CapacityTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        $file = tempnam(sys_get_temp_dir(), 'cap');
+        // Not sys_get_temp_dir(): on the dev machine that is the internal disk.
+        $file = tempnam(storage_path('framework/testing'), 'cap');
+        $this->beforeApplicationDestroyed(fn () => @unlink($file));
         file_put_contents($file, json_encode([
             'measured_at' => '20260923T1200Z', 'bar' => ['p95_ms' => 500, 'errors' => 0.01],
             'workload' => 'a storefront page',
@@ -42,5 +44,27 @@ class CapacityTest extends TestCase
     {
         $this->get('/pricing')->assertSee('How we measured')->assertSee('View every step of the test')
             ->assertSee('p95 under')->assertSee('every 10 seconds');
+    }
+
+    public function test_websocket_connections_show_only_once_measured(): void
+    {
+        $this->get('/pricing')->assertOk()->assertDontSee('live WebSocket connections')->assertSee('not measured yet');
+
+        $file = tempnam(storage_path('framework/testing'), 'cap');
+        file_put_contents($file, json_encode([
+            'measured_at' => '20260923T1200Z', 'bar' => ['p95_ms' => 500, 'errors' => 0.01], 'workload' => 'a storefront page',
+            'websocket_bar' => ['subscribed' => 0.99, 'closed_early' => 0.01, 'p95_delivery_ms' => 500, 'workload' => 'Reverb broadcasts'],
+            'plans' => ['starter' => ['page_views_per_second' => 30, 'p95_ms' => 20, 'steps' => [],
+                'websocket_connections' => 2000,
+                'websocket_steps' => [['conns' => 2000, 'subscribed' => 2000, 'closed_early' => 0, 'ticks' => 150000, 'p95_ms' => 41.2]]]],
+        ]));
+        try {
+            $this->app->instance(Capacity::class, new Capacity($file));
+            $this->get('/pricing')->assertOk()->assertSee('~2,000 live WebSocket connections')
+                ->assertSee('Reverb broadcasts')->assertSee('41 ms');
+            $this->get('/')->assertOk()->assertSee('Live WebSocket connections')->assertSee('~2,000');
+        } finally {
+            @unlink($file);
+        }
     }
 }

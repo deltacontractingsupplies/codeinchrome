@@ -10,6 +10,9 @@
                 @if ($cap = app(\App\Billing\Capacity::class)->forPlan($key))
                     <li>~{{ number_format($cap['concurrent_visitors']) }} visitors at once</li>
                     <li class="text-neutral-500">{{ $cap['page_views_per_second'] }} page views/s, measured</li>
+                    @if ($cap['websocket_connections'])
+                        <li>~{{ number_format($cap['websocket_connections']) }} live WebSocket connections</li>
+                    @endif
                 @endif
                 <li>{{ $plan['disk_gb'] }} GB disk</li>
                 <li>{{ $plan['custom_domains'] ? 'Custom domains' : 'Free subdomain' }}</li>

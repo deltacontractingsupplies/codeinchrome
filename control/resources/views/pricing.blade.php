@@ -35,13 +35,20 @@
         "Visitors at once" assumes each visitor opens a page every {{ \App\Billing\Capacity::VISITOR_SECONDS_PER_PAGE }} seconds while browsing;
         your own app may be lighter or heavier. Measured {{ \Illuminate\Support\Carbon::parse($measured['measured_at'])->toFormattedDateString() }}.
     </p>
+    @if (! empty($measured['websocket_bar']))
+        <p class="mt-3 max-w-3xl text-sm text-neutral-400">
+            WebSockets were measured separately: {{ $measured['websocket_bar']['workload'] }}.
+            Connections were stepped up until a step missed the bar - at least {{ $measured['websocket_bar']['subscribed'] * 100 }}% of them
+            connected and held for a full minute, and 95% of broadcasts delivered within {{ $measured['websocket_bar']['p95_delivery_ms'] }} ms.
+        </p>
+    @endif
     <div class="mt-4 overflow-x-auto">
         <table class="w-full text-left text-sm">
-            <thead class="text-neutral-500"><tr><th class="py-2 pr-6">Plan</th><th class="py-2 pr-6">Page views/s</th><th class="py-2 pr-6">p95 at that load</th><th class="py-2">Visitors at once</th></tr></thead>
+            <thead class="text-neutral-500"><tr><th class="py-2 pr-6">Plan</th><th class="py-2 pr-6">Page views/s</th><th class="py-2 pr-6">p95 at that load</th><th class="py-2 pr-6">Visitors at once</th><th class="py-2">WebSocket connections</th></tr></thead>
             <tbody class="text-neutral-300">
             @foreach (config('billing.plans') as $key => $plan)
                 @if ($cap = app(\App\Billing\Capacity::class)->forPlan($key))
-                    <tr class="border-t border-neutral-800"><td class="py-2 pr-6">{{ $plan['name'] }}</td><td class="py-2 pr-6">{{ $cap['page_views_per_second'] }}</td><td class="py-2 pr-6">{{ $cap['p95_ms'] }} ms</td><td class="py-2">~{{ number_format($cap['concurrent_visitors']) }}</td></tr>
+                    <tr class="border-t border-neutral-800"><td class="py-2 pr-6">{{ $plan['name'] }}</td><td class="py-2 pr-6">{{ $cap['page_views_per_second'] }}</td><td class="py-2 pr-6">{{ $cap['p95_ms'] }} ms</td><td class="py-2 pr-6">~{{ number_format($cap['concurrent_visitors']) }}</td><td class="py-2">{{ $cap['websocket_connections'] ? '~'.number_format($cap['websocket_connections']) : 'not measured yet' }}</td></tr>
                 @endif
             @endforeach
             </tbody>
@@ -54,11 +61,21 @@
             <table class="mt-1 w-full text-left">
                 <thead class="text-neutral-500"><tr><th class="pr-4">Asked</th><th class="pr-4">Served</th><th class="pr-4">p95</th><th class="pr-4">Errors</th><th>Dropped</th></tr></thead>
                 <tbody>
-                @foreach ($p['steps'] as $st)
+                @foreach ($p['steps'] ?? [] as $st)
                     <tr><td class="pr-4">{{ $st['rate'] }}/s</td><td class="pr-4">{{ round($st['achieved_rps'], 1) }}/s</td><td class="pr-4">{{ round($st['p95_ms']) }} ms</td><td class="pr-4">{{ round($st['failed_ratio'] * 100, 1) }}%</td><td>{{ $st['dropped'] }}</td></tr>
                 @endforeach
                 </tbody>
             </table>
+            @if (! empty($p['websocket_steps']))
+                <table class="mt-2 w-full text-left">
+                    <thead class="text-neutral-500"><tr><th class="pr-4">Connections</th><th class="pr-4">Subscribed</th><th class="pr-4">Closed early</th><th class="pr-4">Broadcasts received</th><th>p95 delivery</th></tr></thead>
+                    <tbody>
+                    @foreach ($p['websocket_steps'] as $st)
+                        <tr><td class="pr-4">{{ number_format($st['conns']) }}</td><td class="pr-4">{{ number_format($st['subscribed']) }}</td><td class="pr-4">{{ number_format($st['closed_early']) }}</td><td class="pr-4">{{ number_format($st['ticks']) }}</td><td>{{ $st['p95_ms'] !== null ? round($st['p95_ms']).' ms' : '-' }}</td></tr>
+                    @endforeach
+                    </tbody>
+                </table>
+            @endif
         @endforeach
     </details>
 </section>

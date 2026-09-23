@@ -29,7 +29,9 @@ class Capacity
         return $this->data;
     }
 
-    /** @return array{page_views_per_second: int, concurrent_visitors: int, p95_ms: ?int}|null */
+    /**
+     * @return array{page_views_per_second: int, concurrent_visitors: int, p95_ms: ?int, websocket_connections: ?int}|null
+     */
     public function forPlan(string $plan): ?array
     {
         $p = $this->all()['plans'][$plan] ?? null;
@@ -41,6 +43,8 @@ class Capacity
             'page_views_per_second' => (int) $p['page_views_per_second'],
             'concurrent_visitors' => (int) $p['page_views_per_second'] * self::VISITOR_SECONDS_PER_PAGE,
             'p95_ms' => $p['p95_ms'] ?? null,
+            // Measured separately (tests/load/ws.sh); absent until it has been.
+            'websocket_connections' => ! empty($p['websocket_connections']) ? (int) $p['websocket_connections'] : null,
         ];
     }
 }

@@ -40,12 +40,15 @@
         <ol class="mt-3 list-decimal space-y-2 pl-6">
             <li>In the editor's terminal: <code class="text-neutral-200">composer require laravel/reverb</code></li>
             <li>Turn on <em>WebSockets</em> above and save.</li>
-            <li>In <code class="text-neutral-200">.env</code>, for your visitors' browsers:
-                <code class="text-neutral-200">REVERB_HOST={{ $site->domain }}</code>,
-                <code class="text-neutral-200">REVERB_PORT=443</code>,
-                <code class="text-neutral-200">REVERB_SCHEME=https</code> - and for your app publishing events from the server:
-                <code class="text-neutral-200">REVERB_SERVER_HOST=127.0.0.1</code>,
-                <code class="text-neutral-200">REVERB_SERVER_PORT=8081</code>.</li>
+            <li>In <code class="text-neutral-200">.env</code>, where your app sends events - Reverb inside the same container:
+                <code class="text-neutral-200">BROADCAST_CONNECTION=reverb</code>,
+                <code class="text-neutral-200">REVERB_HOST=127.0.0.1</code>,
+                <code class="text-neutral-200">REVERB_PORT=8081</code>,
+                <code class="text-neutral-200">REVERB_SCHEME=http</code>.</li>
+            <li>And where your visitors' browsers connect (Laravel Echo reads these):
+                <code class="text-neutral-200">VITE_REVERB_HOST={{ $site->domain }}</code>,
+                <code class="text-neutral-200">VITE_REVERB_PORT=443</code>,
+                <code class="text-neutral-200">VITE_REVERB_SCHEME=https</code>. Then rebuild your assets.</li>
             <li>Browsers connect to <code class="text-neutral-200">wss://{{ $site->domain }}/app/…</code>. Only that path is public; Reverb's publishing API is reachable from your app alone.</li>
         </ol>
     </details>

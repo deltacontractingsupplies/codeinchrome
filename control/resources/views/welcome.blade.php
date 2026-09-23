@@ -121,13 +121,16 @@
         A plan passes a rate only if 95% of pages load within half a second and fewer than 1% fail.
     </p>
     <div class="mt-6 overflow-x-auto">
-        <table class="w-full max-w-2xl text-left text-sm">
+        <table class="w-full max-w-3xl text-left text-sm">
             <thead class="text-neutral-500">
                 <tr class="border-b border-neutral-800">
                     <th scope="col" class="py-2 pr-6 font-normal">Plan</th>
                     <th scope="col" class="py-2 pr-6 font-normal">Visitors at once</th>
                     <th scope="col" class="py-2 pr-6 font-normal">Page views a second</th>
-                    <th scope="col" class="py-2 font-normal">95% of pages within</th>
+                    <th scope="col" class="py-2 pr-6 font-normal">95% of pages within</th>
+                    @if ($measured->contains(fn ($r) => $r['cap']['websocket_connections']))
+                        <th scope="col" class="py-2 font-normal">Live WebSocket connections</th>
+                    @endif
                 </tr>
             </thead>
             <tbody class="text-neutral-200">
@@ -136,7 +139,10 @@
                         <th scope="row" class="py-2 pr-6 font-medium">{{ $row['plan']['name'] }}</th>
                         <td class="py-2 pr-6">~{{ number_format($row['cap']['concurrent_visitors']) }}</td>
                         <td class="py-2 pr-6">{{ $row['cap']['page_views_per_second'] }}</td>
-                        <td class="py-2">{{ $row['cap']['p95_ms'] ? $row['cap']['p95_ms'].' ms' : '' }}</td>
+                        <td class="py-2 pr-6">{{ $row['cap']['p95_ms'] ? $row['cap']['p95_ms'].' ms' : '' }}</td>
+                        @if ($measured->contains(fn ($r) => $r['cap']['websocket_connections']))
+                            <td class="py-2">{{ $row['cap']['websocket_connections'] ? '~'.number_format($row['cap']['websocket_connections']) : '' }}</td>
+                        @endif
                     </tr>
                 @endforeach
             </tbody>

@@ -4,3 +4,4 @@
 {"plan":"free","rate":8,"requests":241,"achieved_rps":8.02630540961942,"failed_ratio":0,"p50_ms":18.089547,"p95_ms":24.95671,"p99_ms":132.0135921999999,"dropped":0}
 {"plan":"free","rate":10,"requests":300,"achieved_rps":9.999782603726215,"failed_ratio":0,"p50_ms":17.871868,"p95_ms":24.42320695,"p99_ms":133.37269612999998,"dropped":0}
 {"plan":"free","rate":15,"requests":451,"achieved_rps":13.510671645708573,"failed_ratio":0,"p50_ms":17.489661,"p95_ms":93.804459,"p99_ms":471.27588349999996,"dropped":0}
+{"plan":"free","rate":20,"requests":600,"achieved_rps":15.286087446005077,"failed_ratio":0.016666666666666666,"p50_ms":17.3882135,"p95_ms":533.88974375,"p99_ms":10000.62310587,"dropped":0}
