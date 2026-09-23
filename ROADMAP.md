@@ -116,3 +116,31 @@ code exists.
 - [ ] **Repository on GitHub, PRIVATE** (owner's choice; blocked on `gh auth login`; then
       `infra/publish-repo.sh --private OWNER/NAME` pushes a history-cleaned
       copy and refuses if any .env secret, private key or artifact is in it)
+
+## The editor, to VS Code's standard (owner's request, 2026-09-23)
+
+Every piece open source, licence checked before use; nothing assumed working
+until it is exercised in the browser against a real site.
+
+- [ ] **Monaco (MIT) as the editor core** - VS Code's own editor: its look,
+      keybindings, multi-cursor, find/replace, minimap, and built-in
+      IntelliSense for JS/TS, CSS, HTML and JSON. Keeps every current
+      guarantee: revision-checked saves, drafts, no native dialogs,
+      window.cic unchanged. Must run under the strict CSP (workers from
+      self; its styles without opening script-src).
+- [ ] **File icons**: Material Icon Theme (MIT, icons included) - folder and
+      file icons by name and extension, as in VS Code. (vscode-icons' artwork
+      is CC BY-SA, which would oblige share-alike; Material is cleaner.)
+- [ ] **PHP IntelliSense**: Phpactor (MIT) as a language server inside the
+      site's own container (so it sees the site's vendor/), bridged to Monaco:
+      completion, hover, go to definition, diagnostics. Intelephense is not
+      open source and is not used.
+- [ ] **Laravel awareness**: completion for route names, view names, config
+      keys and translations; go to view from view('...'); Blade syntax.
+- [ ] **Laravel Boost MCP (MIT) for the agent**: window.cic.mcp.tools() and
+      .call() - routes, schema, config, docs search, last errors - run in the
+      site's container as the site's own user.
+- [ ] **Previews**: images shown, PDFs rendered with pdf.js (Apache-2.0),
+      Markdown preview.
+- [ ] **UI polish pass**: spacing, contrast, focus states, empty states,
+      light theme, keyboard access - checked in both themes by screenshot.
