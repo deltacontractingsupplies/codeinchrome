@@ -10,7 +10,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -262,6 +264,102 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"path": path, "deleted": true}))
+	})
+
+	// The rest of the file manager: folders, move, copy, zip, unzip.
+	pair := func(w http.ResponseWriter, r *http.Request) (a, b string, valid bool) {
+		var body struct{ From, To, Path, Archive, Into string }
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8192)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "invalid body"))
+			return "", "", false
+		}
+		switch {
+		case body.Archive != "":
+			return body.Archive, body.Into, true
+		case body.From != "":
+			return body.From, body.To, true
+		}
+		return body.Path, "", true
+	}
+	fileOp := func(name string, op func(r *http.Request, a, b string) error) http.HandlerFunc {
+		return func(w http.ResponseWriter, r *http.Request) {
+			a, b, valid := pair(w, r)
+			if !valid {
+				return
+			}
+			if err := op(r, a, b); err != nil {
+				writeJSON(w, http.StatusBadRequest, fail("cannot_"+name, err.Error()))
+				return
+			}
+			writeJSON(w, http.StatusOK, ok(resp{"done": name}))
+		}
+	}
+	mux.HandleFunc("POST /v1/sites/{id}/files/mkdir", fileOp("mkdir", func(r *http.Request, a, _ string) error {
+		return mgr.Mkdir(r.Context(), r.PathValue("id"), a)
+	}))
+	mux.HandleFunc("POST /v1/sites/{id}/files/move", fileOp("move", func(r *http.Request, a, b string) error {
+		return mgr.Rename(r.Context(), r.PathValue("id"), a, b)
+	}))
+	mux.HandleFunc("POST /v1/sites/{id}/files/copy", fileOp("copy", func(r *http.Request, a, b string) error {
+		return mgr.Copy(r.Context(), r.PathValue("id"), a, b)
+	}))
+	mux.HandleFunc("POST /v1/sites/{id}/files/zip", fileOp("zip", func(r *http.Request, a, b string) error {
+		return mgr.Zip(r.Context(), r.PathValue("id"), a, b)
+	}))
+	mux.HandleFunc("POST /v1/sites/{id}/files/unzip", fileOp("unzip", func(r *http.Request, a, b string) error {
+		return mgr.Unzip(r.Context(), r.PathValue("id"), a, b)
+	}))
+	mux.HandleFunc("DELETE /v1/sites/{id}/tree", func(w http.ResponseWriter, r *http.Request) {
+		err := mgr.DeleteTree(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"), r.URL.Query().Get("confirm") == "1")
+		if errors.Is(err, sites.ErrNeedsConfirm) {
+			writeJSON(w, http.StatusConflict, fail("needs_confirm", "Deleting a folder deletes everything in it. Pass confirm=1."))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_delete", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"deleted": true}))
+	})
+	mux.HandleFunc("GET /v1/sites/{id}/search", func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		hits, err := mgr.Search(r.Context(), r.PathValue("id"), r.URL.Query().Get("q"), limit)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_search", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"hits": hits}))
+	})
+	// Raw bytes in and out: uploads and downloads carry binary files (images,
+	// fonts, archives) that JSON strings cannot.
+	mux.HandleFunc("PUT /v1/sites/{id}/upload", func(w http.ResponseWriter, r *http.Request) {
+		body := http.MaxBytesReader(w, r.Body, sites.MaxUploadSize+1)
+		if err := mgr.Upload(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"), body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_upload", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"path": r.URL.Query().Get("path")}))
+	})
+	mux.HandleFunc("GET /v1/sites/{id}/download", func(w http.ResponseWriter, r *http.Request) {
+		// Buffered through a temp file so an error after the first byte can
+		// still be reported as an error, not a truncated file.
+		tmp, err := os.CreateTemp("", "cic-dl-*")
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, fail("cannot_download", "no scratch space"))
+			return
+		}
+		defer os.Remove(tmp.Name())
+		defer tmp.Close()
+		name, err := mgr.Download(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"), tmp)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_download", err.Error()))
+			return
+		}
+		tmp.Seek(0, 0)
+		w.Header().Set("Content-Type", "application/octet-stream")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		io.Copy(w, tmp)
 	})
 
 	// History: every version of every file, the bin of deleted files, and

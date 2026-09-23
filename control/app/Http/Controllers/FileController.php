@@ -104,9 +104,10 @@ class FileController extends Controller
                 'ok' => false,
                 'error' => $error,
                 'hint' => $e->detail['hint'] ?? $e->getMessage(),
-                // 409 for a stale save, so a client can tell "someone else
-                // changed this" from "this request is invalid" by status alone.
-            ], $error === 'conflict' ? 409 : 422);
+                // 409 for a stale save or an unconfirmed destructive request,
+                // so a client can tell "decide first" from "this request is
+                // invalid" by status alone.
+            ], in_array($error, ['conflict', 'needs_confirm'], true) ? 409 : 422);
         } catch (AgentUnreachable $e) {
             return response()->json([
                 'ok' => false,

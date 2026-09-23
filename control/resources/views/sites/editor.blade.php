@@ -23,6 +23,15 @@
      data-history="{{ route('history.index', $site) }}"
      data-bin="{{ route('history.bin', $site) }}"
      data-restore="{{ route('history.restore', $site) }}"
+     data-mkdir="{{ route('files.mkdir', $site) }}"
+     data-move="{{ route('files.move', $site) }}"
+     data-copy="{{ route('files.copy', $site) }}"
+     data-zip="{{ route('files.zip', $site) }}"
+     data-unzip="{{ route('files.unzip', $site) }}"
+     data-tree="{{ route('files.tree.destroy', $site) }}"
+     data-search="{{ route('files.search', $site) }}"
+     data-upload="{{ route('files.upload', $site) }}"
+     data-download="{{ route('files.download', $site) }}"
      data-back="{{ route('dashboard') }}">
 
     <header class="titlebar">
@@ -43,11 +52,20 @@
                 <span>EXPLORER</span>
                 <span class="side-actions">
                     <button type="button" id="btnNew" title="New file">＋</button>
+                    <button type="button" id="btnNewFolder" title="New folder">▣</button>
+                    <button type="button" id="btnUpload" title="Upload files">⤒</button>
+                    <button type="button" id="btnSearch" title="Search in files">⌕</button>
                     <button type="button" id="btnRefresh" title="Refresh">⟳</button>
+                    <input type="file" id="uploadInput" multiple hidden>
                 </span>
             </div>
             <div class="side-site">{{ strtoupper($site->site_id) }}</div>
+            <form id="searchBar" class="searchbar" hidden>
+                <input id="searchInput" type="search" placeholder="Search in files" autocomplete="off" spellcheck="false" aria-label="Search in files">
+            </form>
+            <div id="searchResults" class="tree" hidden></div>
             <div id="tree" class="tree" role="tree"></div>
+            <div id="nodeMenu" class="nodemenu" role="menu" hidden></div>
             <div id="dbSide" class="tree" hidden>
                 <div class="side-head"><span id="dbName">DATABASE</span>
                     <span class="side-actions"><button type="button" id="btnDbRefresh" title="Refresh">⟳</button></span>

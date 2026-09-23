@@ -162,3 +162,10 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg
 .node.version .nm { white-space: normal; font-size: 12px; }
 .node.version .del { opacity: .8; font-size: 11px; color: var(--link); }
 .node.version:hover .del { opacity: 1; }
+
+/* File manager: the actions menu and the search bar. */
+.nodemenu { position: fixed; z-index: 20; min-width: 180px; background: var(--panel); border: 1px solid var(--panel-border); border-radius: 6px; padding: 4px; box-shadow: 0 6px 20px var(--overlay); display: grid; }
+.nodemenu button { text-align: left; padding: 5px 10px; border-radius: 4px; font-size: 12px; }
+.nodemenu button:hover, .nodemenu button:focus-visible { background: var(--list-hover); outline: none; }
+.searchbar { padding: 4px 8px 6px 20px; }
+.searchbar input { width: 100%; background: var(--input-bg); border: 1px solid var(--input-border); border-radius: 3px; padding: 4px 8px; color: var(--editor-fg); font: 12px var(--ui); outline: none; }

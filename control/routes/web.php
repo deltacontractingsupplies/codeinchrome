@@ -7,6 +7,7 @@ use App\Http\Controllers\ConsoleController;
 use App\Http\Controllers\DatabaseController;
 use App\Http\Controllers\DomainController;
 use App\Http\Controllers\FileController;
+use App\Http\Controllers\FileManagerController;
 use App\Http\Controllers\HistoryController;
 use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\SiteController;
@@ -88,6 +89,16 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::get('/sites/{site}/files', [FileController::class, 'index'])->name('files.index');
     Route::put('/sites/{site}/files', [FileController::class, 'store'])->name('files.store');
     Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->name('files.destroy');
+    // The rest of the file manager.
+    Route::post('/sites/{site}/files/mkdir', [FileManagerController::class, 'mkdir'])->name('files.mkdir');
+    Route::post('/sites/{site}/files/move', [FileManagerController::class, 'move'])->name('files.move');
+    Route::post('/sites/{site}/files/copy', [FileManagerController::class, 'copy'])->name('files.copy');
+    Route::post('/sites/{site}/files/zip', [FileManagerController::class, 'zip'])->middleware('throttle:command')->name('files.zip');
+    Route::post('/sites/{site}/files/unzip', [FileManagerController::class, 'unzip'])->middleware('throttle:command')->name('files.unzip');
+    Route::delete('/sites/{site}/tree', [FileManagerController::class, 'destroyTree'])->name('files.tree.destroy');
+    Route::get('/sites/{site}/search', [FileManagerController::class, 'search'])->middleware('throttle:command')->name('files.search');
+    Route::post('/sites/{site}/upload', [FileManagerController::class, 'upload'])->middleware('throttle:command')->name('files.upload');
+    Route::get('/sites/{site}/download', [FileManagerController::class, 'download'])->name('files.download');
     // Every version of every file, the bin of deleted ones, and restore.
     Route::get('/sites/{site}/history', [HistoryController::class, 'index'])->name('history.index');
     Route::get('/sites/{site}/bin', [HistoryController::class, 'bin'])->name('history.bin');

@@ -1,0 +1,134 @@
+<?php
+
+namespace App\Http\Controllers;
+
+use App\Audit\Audit;
+use App\Fleet\AgentClient;
+use App\Fleet\AgentRefused;
+use App\Models\Site;
+use Illuminate\Http\JsonResponse;
+use Illuminate\Http\Request;
+use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
+
+/**
+ * The editor's file manager beyond open/save/delete: folders, move, copy,
+ * upload, download, folder delete, search, zip and unzip. As with every file
+ * route, this layer decides WHOSE site it is; the agent, on the host, decides
+ * what a path may be - including never following a symlink out of the site.
+ */
+class FileManagerController extends FileController
+{
+    private const PATH = ['required', 'string', 'max:1024'];
+
+    public function mkdir(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate(['path' => self::PATH]);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->mkdir($site->site_id, $d['path']));
+    }
+
+    public function move(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate(['from' => self::PATH, 'to' => self::PATH]);
+
+        return $this->attempt(function () use ($site, $d) {
+            $r = AgentClient::for($site->host)->move($site->site_id, $d['from'], $d['to']);
+            Audit::record('file.moved', site: $site, detail: $d);
+
+            return $r;
+        });
+    }
+
+    public function copy(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate(['from' => self::PATH, 'to' => self::PATH]);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->copy($site->site_id, $d['from'], $d['to']));
+    }
+
+    public function zip(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate(['from' => self::PATH, 'to' => self::PATH]);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->zip($site->site_id, $d['from'], $d['to']));
+    }
+
+    public function unzip(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate(['archive' => self::PATH, 'into' => self::PATH]);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->unzip($site->site_id, $d['archive'], $d['into']));
+    }
+
+    /** A folder and everything in it. Refused unless confirm - as the agent also insists. */
+    public function destroyTree(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate(['path' => self::PATH, 'confirm' => ['nullable', 'boolean']]);
+
+        return $this->attempt(function () use ($site, $d) {
+            $r = AgentClient::for($site->host)->deleteTree($site->site_id, $d['path'], (bool) ($d['confirm'] ?? false));
+            Audit::record('folder.deleted', site: $site, detail: ['path' => $d['path']]);
+
+            return $r;
+        });
+    }
+
+    public function search(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate(['q' => ['required', 'string', 'min:2', 'max:200']]);
+
+        return $this->attempt(fn () => ['hits' => AgentClient::for($site->host)->search($site->site_id, $d['q'])]);
+    }
+
+    public function upload(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate([
+            'path' => self::PATH,
+            'file' => ['required', 'file', 'max:32768'], // KB: the site's 32 MB limit
+        ]);
+
+        // The stream owns the file handle and closes it when it is released.
+        return $this->attempt(fn () => AgentClient::for($site->host)
+            ->upload($site->site_id, $d['path'], fopen($d['file']->getRealPath(), 'rb')));
+    }
+
+    /**
+     * Always an attachment, never rendered: an uploaded HTML or SVG file must
+     * not run as a page on the dashboard's origin. nosniff and a sandbox CSP
+     * back that up if a browser were ever to try.
+     */
+    public function download(Request $request, Site $site): Response
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate(['path' => self::PATH]);
+
+        try {
+            $file = AgentClient::for($site->host)->download($site->site_id, $d['path']);
+        } catch (AgentRefused $e) {
+            return response()->json(['ok' => false, 'error' => $e->detail['error'] ?? 'refused', 'hint' => $e->detail['hint'] ?? $e->getMessage()], 422);
+        }
+        $name = preg_replace('/[^A-Za-z0-9._-]/', '_', $file['name']) ?: 'download';
+
+        return new StreamedResponse(function () use ($file) {
+            while (! $file['body']->eof()) {
+                echo $file['body']->read(65536);
+                flush();
+            }
+        }, 200, [
+            'Content-Type' => 'application/octet-stream',
+            'Content-Disposition' => "attachment; filename=\"$name\"",
+            'X-Content-Type-Options' => 'nosniff',
+            'Content-Security-Policy' => 'sandbox',
+            'Cache-Control' => 'no-store',
+        ]);
+    }
+}

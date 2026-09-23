@@ -30,6 +30,15 @@ const SITE = {
   historyUrl: root.dataset.history,
   binUrl: root.dataset.bin,
   restoreUrl: root.dataset.restore,
+  mkdirUrl: root.dataset.mkdir,
+  moveUrl: root.dataset.move,
+  copyUrl: root.dataset.copy,
+  zipUrl: root.dataset.zip,
+  unzipUrl: root.dataset.unzip,
+  treeUrl: root.dataset.tree,
+  searchUrl: root.dataset.search,
+  uploadUrl: root.dataset.upload,
+  downloadUrl: root.dataset.download,
 };
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
 const DRAFTS_KEY = `cic.drafts.${SITE.id}`;
@@ -193,18 +202,17 @@ function nodeFor(entry, depth) {
 
   el.append(twisty, name);
 
-  if (!entry.dir) {
-    const del = document.createElement('button');
-    del.type = 'button';
-    del.className = 'del';
-    del.title = `Delete ${entry.name}`;
-    del.textContent = '🗑';
-    del.addEventListener('click', (e) => {
-      e.stopPropagation();
-      confirmDelete(entry.path);
-    });
-    el.append(del);
-  }
+  const more = document.createElement('button');
+  more.type = 'button';
+  more.className = 'del';
+  more.title = `Actions for ${entry.name}`;
+  more.setAttribute('aria-haspopup', 'menu');
+  more.textContent = '⋯';
+  more.addEventListener('click', (e) => {
+    e.stopPropagation();
+    openNodeMenu(entry, more);
+  });
+  el.append(more);
 
   const activate = async () => {
     if (entry.dir) {
@@ -936,6 +944,19 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
                                unconditionally (the result then says so in "note").
   cic.rm(path)                 delete a file (not recursive)    -> { ok, deleted }
                                It goes to the bin and can be restored.
+  cic.mkdir(path)              create a folder (and its parents)
+  cic.mv(from, to)             rename or move a file or folder; never overwrites
+  cic.cp(from, to)             copy a file or folder; never overwrites
+  cic.rmdir(path, { confirm: true })
+                               delete a folder and all it holds; without confirm: 409
+                               needs_confirm and NOTHING is deleted. Files go to the bin.
+  cic.search(q)                case-insensitive text search     -> { ok, hits: [{ path, line, text }] }
+                               (vendor, node_modules, storage, .env are not searched)
+  cic.zip(from, to) / cic.unzip(archive, into)
+                               archives stay inside the site; .env is never zipped;
+                               an archive whose entries would land outside is refused
+  cic.upload(dir, files)       File objects, up to 32 MB each (binary is fine)
+  cic.download(path)           starts a download of one file
   cic.history(path)            every version of a file, newest  -> { ok, versions: [{ commit, at, message }] }
   cic.versionAt(path, commit)  a file as it was at one version  -> { ok, content }
   cic.bin()                    deleted files and where from     -> { ok, bin: [{ path, deletedAt, from }] }
@@ -966,6 +987,246 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
 
   Limits: text files only (binary files are refused rather than corrupted), 2 MB per file,
   paths are confined to this site. Anything outside it is refused with one vague message.`;
+
+/* ───────────────────────── file manager ─────────────────────────
+ * Folders, move, copy, upload, download, folder delete, search, zip, unzip.
+ * The host checks every path; this only asks and shows the answer.
+ */
+
+async function reloadAround(...paths) {
+  for (const p of paths) await refreshAncestors(p);
+  for (const dir of ['/', ...expanded]) if (listings.has(dir)) await loadDir(dir);
+  renderTree();
+}
+
+async function mkdirAt(path) {
+  const res = await apiAt(SITE.mkdirUrl, 'POST', {}, { path: norm(path) });
+  if (res.ok) { expanded.add(norm(path)); await reloadAround(norm(path)); status(`Created ${norm(path)}/`); }
+  else status(`${norm(path)}: ${res.hint}`, true);
+  return res;
+}
+
+async function movePath(from, to) {
+  from = norm(from); to = norm(to);
+  const res = await apiAt(SITE.moveUrl, 'POST', {}, { from, to });
+  if (!res.ok) { status(`${from}: ${res.hint}`, true); return res; }
+  // Open tabs follow the file to its new path.
+  for (const [key, t] of [...tabs]) {
+    if (!t.version && (key === from || key.startsWith(from + '/'))) {
+      tabs.delete(key);
+      tabs.set(to + key.slice(from.length), t);
+      if (active === key) active = to + key.slice(from.length);
+    }
+  }
+  await reloadAround(from, to);
+  show(active);
+  status(`Moved ${from} → ${to}`);
+  return res;
+}
+
+async function copyPath(from, to) {
+  const res = await apiAt(SITE.copyUrl, 'POST', {}, { from: norm(from), to: norm(to) });
+  if (res.ok) { await reloadAround(norm(to)); status(`Copied to ${norm(to)}`); }
+  else status(`${norm(from)}: ${res.hint}`, true);
+  return res;
+}
+
+async function zipPath(from, to) {
+  const res = await apiAt(SITE.zipUrl, 'POST', {}, { from: norm(from), to: norm(to) });
+  if (res.ok) { await reloadAround(norm(to)); status(`Archived to ${norm(to)} (secrets left out)`); }
+  else status(`${norm(from)}: ${res.hint}`, true);
+  return res;
+}
+
+async function unzipPath(archive, into) {
+  const res = await apiAt(SITE.unzipUrl, 'POST', {}, { archive: norm(archive), into: norm(into) });
+  if (res.ok) { expanded.add(norm(into)); await reloadAround(norm(into)); status(`Extracted into ${norm(into)}/`); }
+  else status(`${norm(archive)}: ${res.hint}`, true);
+  return res;
+}
+
+async function deleteFolder(path, { confirm = false } = {}) {
+  path = norm(path);
+  const res = await apiAt(SITE.treeUrl, 'DELETE', { path, confirm: confirm ? 1 : 0 });
+  if (res.ok) {
+    for (const key of [...tabs.keys()]) if (key.startsWith(path + '/') && !tabs.get(key).dirty) tabs.delete(key);
+    expanded.delete(path);
+    listings.delete(path);
+    await reloadAround(parentOf(path));
+    show(tabs.has(active) ? active : ([...tabs.keys()][0] ?? null));
+    status(`Deleted ${path}/ - its files are in the bin (History)`);
+  } else {
+    status(`${path}: ${res.hint}`, true);
+  }
+  return res;
+}
+
+async function uploadFiles(dir, files) {
+  const results = [];
+  for (const file of files) {
+    const path = norm(`${dir}/${file.name}`);
+    const form = new FormData();
+    form.append('path', path);
+    form.append('file', file);
+    status(`Uploading ${path}…`);
+    let res;
+    try {
+      const r = await fetch(SITE.uploadUrl, { method: 'POST', body: form, credentials: 'same-origin',
+        headers: { Accept: 'application/json', 'X-CSRF-TOKEN': CSRF, 'X-Requested-With': 'XMLHttpRequest' } });
+      res = await r.json().catch(() => ({ ok: false, hint: `HTTP ${r.status}` }));
+      if (r.status === 413) res = { ok: false, error: 'too_large', hint: 'That file is larger than 32 MB.' };
+    } catch (error) {
+      res = { ok: false, error: 'network', hint: error.message };
+    }
+    results.push({ path, ...res });
+    if (!res.ok) status(`${path}: ${res.hint ?? res.message}`, true);
+  }
+  expanded.add(norm(dir));
+  await reloadAround(norm(dir));
+  const okCount = results.filter((r) => r.ok).length;
+  if (okCount) status(`Uploaded ${okCount} of ${results.length} file(s) to ${norm(dir)}/`);
+  return { ok: okCount === results.length, results };
+}
+
+function downloadPath(path) {
+  const url = new URL(SITE.downloadUrl, location.origin);
+  url.searchParams.set('path', norm(path));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = baseName(norm(path));
+  document.body.append(a);
+  a.click();
+  a.remove();
+  return { ok: true, url: url.toString() };
+}
+
+async function searchSite(q) {
+  return apiAt(SITE.searchUrl, 'GET', { q });
+}
+
+async function showSearch(q) {
+  const box = $('searchResults');
+  box.replaceChildren();
+  if (q.trim().length < 2) { box.hidden = true; $('tree').hidden = false; return; }
+  const res = await searchSite(q.trim());
+  $('tree').hidden = true;
+  box.hidden = false;
+  if (!res.ok) { box.append(note(res.hint, 0)); return; }
+  if (!res.hits.length) { box.append(note('No matches (dependencies, caches and .env are not searched).', 0)); return; }
+  for (const hit of res.hits) {
+    const row = document.createElement('div');
+    row.className = 'node version';
+    const nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = `${hit.path}:${hit.line}  ${hit.text}`;
+    row.append(nm);
+    row.addEventListener('click', async () => {
+      const r = await openFile(hit.path);
+      if (r.ok) {
+        const lines = ta.value.split('\n');
+        const at = lines.slice(0, hit.line - 1).join('\n').length + (hit.line > 1 ? 1 : 0);
+        ta.focus();
+        ta.setSelectionRange(at, at + (lines[hit.line - 1] ?? '').length);
+      }
+    });
+    box.append(row);
+  }
+}
+
+function closeNodeMenu() {
+  $('nodeMenu').hidden = true;
+  $('nodeMenu').replaceChildren();
+}
+
+function openNodeMenu(entry, anchor) {
+  const menu = $('nodeMenu');
+  menu.replaceChildren();
+  const item = (label, fn) => {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.setAttribute('role', 'menuitem');
+    b.textContent = label;
+    b.addEventListener('click', async (e) => { e.stopPropagation(); closeNodeMenu(); await fn(); });
+    menu.append(b);
+  };
+  const p = entry.path;
+  item('Rename / move…', async () => {
+    const to = await ask(`Move ${p} to:`, { input: p.slice(1), okLabel: 'Move', validate: (v) => (!v.trim() ? 'Give a path.' : null) });
+    if (to) movePath(p, to.trim());
+  });
+  item('Copy…', async () => {
+    const to = await ask(`Copy ${p} to:`, { input: p.slice(1) + (entry.dir ? '-copy' : '.copy'), okLabel: 'Copy' });
+    if (to) copyPath(p, to.trim());
+  });
+  if (entry.dir) {
+    item('New file here…', async () => {
+      const name = await ask(`New file in ${p}/:`, { input: '', okLabel: 'Create' });
+      if (name) createFile(`${p}/${name.trim()}`);
+    });
+    item('New folder here…', async () => {
+      const name = await ask(`New folder in ${p}/:`, { input: '', okLabel: 'Create' });
+      if (name) mkdirAt(`${p}/${name.trim()}`);
+    });
+    item('Upload here…', () => { uploadTarget = p; $('uploadInput').click(); });
+    item('Zip…', async () => {
+      const to = await ask(`Archive ${p}/ as:`, { input: p.slice(1) + '.zip', okLabel: 'Zip' });
+      if (to) zipPath(p, to.trim());
+    });
+  } else {
+    item('Download', () => downloadPath(p));
+    if (p.endsWith('.zip')) {
+      item('Unzip here…', async () => {
+        const into = await ask(`Extract ${p} into:`, { input: p.slice(1, -4), okLabel: 'Extract' });
+        if (into) unzipPath(p, into.trim());
+      });
+    }
+  }
+  item('Delete…', async () => {
+    if (entry.dir) {
+      if (await ask(`Delete the folder ${p}/ and everything in it? Its files go to the bin (History); dependencies and caches do not.`, { okLabel: 'Delete folder' })) {
+        deleteFolder(p, { confirm: true });
+      }
+    } else {
+      confirmDelete(p);
+    }
+  });
+  const r = anchor.getBoundingClientRect();
+  menu.style.top = `${r.bottom + 2}px`;
+  menu.style.left = `${Math.max(8, r.right - 180)}px`;
+  menu.hidden = false;
+  menu.querySelector('button')?.focus();
+}
+
+let uploadTarget = '/';
+document.addEventListener('click', (e) => { if (!$('nodeMenu').contains(e.target)) closeNodeMenu(); });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNodeMenu(); });
+$('btnNewFolder').addEventListener('click', async () => {
+  const path = await ask('New folder path, relative to the site root:', { input: 'app/', okLabel: 'Create',
+    validate: (v) => (!v.trim() ? 'Give it a name.' : null) });
+  if (path) mkdirAt(path.trim().replace(/\/$/, ''));
+});
+$('btnUpload').addEventListener('click', () => { uploadTarget = parentOf(active ?? '/x') || '/'; $('uploadInput').click(); });
+$('uploadInput').addEventListener('change', async (e) => {
+  const files = [...e.target.files];
+  e.target.value = '';
+  if (files.length) uploadFiles(uploadTarget, files);
+});
+$('btnSearch').addEventListener('click', () => {
+  const bar = $('searchBar');
+  bar.hidden = !bar.hidden;
+  if (!bar.hidden) $('searchInput').focus();
+  else { $('searchResults').hidden = true; $('tree').hidden = false; }
+});
+$('searchBar').addEventListener('submit', (e) => { e.preventDefault(); showSearch($('searchInput').value); });
+// Files dropped onto the explorer are uploaded to the folder they land on.
+$('tree').addEventListener('dragover', (e) => { e.preventDefault(); });
+$('tree').addEventListener('drop', (e) => {
+  e.preventDefault();
+  const node = e.target.closest('.node');
+  let dir = '/';
+  if (node) dir = node.classList.contains('dir') ? node.dataset.path : parentOf(node.dataset.path);
+  if (e.dataTransfer?.files?.length) uploadFiles(dir || '/', [...e.dataTransfer.files]);
+});
 
 /* ───────────────────────── history & bin ─────────────────────────
  * Every save, delete and command is a version on the host (vol/history.git).
@@ -1156,6 +1417,17 @@ window.cic = Object.freeze({
   },
 
   rm: (path) => removeFile(path),
+
+  // The file manager.
+  mkdir: (path) => mkdirAt(path),
+  mv: (from, to) => movePath(from, to),
+  cp: (from, to) => copyPath(from, to),
+  rmdir: (path, options = {}) => deleteFolder(path, { confirm: options.confirm === true }),
+  search: (q) => searchSite(String(q)),
+  zip: (from, to) => zipPath(from, to),
+  unzip: (archive, into) => unzipPath(archive, into),
+  upload: (dir, files) => uploadFiles(dir, [...files]),
+  download: (path) => downloadPath(path),
 
   // History: every save is a version; deleted files wait in the bin.
   history: (path) => fileHistory(path),

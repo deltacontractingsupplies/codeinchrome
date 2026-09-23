@@ -234,6 +234,9 @@ php_admin_value[display_errors] = Off
 php_admin_flag[log_errors] = on
 php_admin_value[error_log] = /var/log/php-codeinchrome.log
 php_admin_value[expose_php] = Off
+; The editor's upload passes files through to the site (at most 32 MB there).
+php_admin_value[upload_max_filesize] = 33M
+php_admin_value[post_max_size] = 34M
 ; The app has no business reading outside its own tree.
 php_admin_value[open_basedir] = /srv/control:/var/lib/codeinchrome:/tmp:/usr/share/php
 CONF

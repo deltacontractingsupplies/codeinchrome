@@ -26,19 +26,23 @@ class SecurityHeaders
     {
         $response = $next($request);
 
-        $response->headers->set('Content-Security-Policy', implode('; ', [
-            "default-src 'self'",
-            "script-src 'self'",
-            "style-src 'self'",
-            "img-src 'self' data:",
-            "font-src 'self'",
-            "connect-src 'self'",
-            "object-src 'none'",
-            "base-uri 'self'",
-            "frame-ancestors 'none'",
-            "form-action 'self' https://*.lemonsqueezy.com",
-            'upgrade-insecure-requests',
-        ]));
+        // A response that set its own policy keeps it: a file download says
+        // `sandbox`, stricter than anything below, and must not be loosened.
+        if (! $response->headers->has('Content-Security-Policy')) {
+            $response->headers->set('Content-Security-Policy', implode('; ', [
+                "default-src 'self'",
+                "script-src 'self'",
+                "style-src 'self'",
+                "img-src 'self' data:",
+                "font-src 'self'",
+                "connect-src 'self'",
+                "object-src 'none'",
+                "base-uri 'self'",
+                "frame-ancestors 'none'",
+                "form-action 'self' https://*.lemonsqueezy.com",
+                'upgrade-insecure-requests',
+            ]));
+        }
         $response->headers->set('Cross-Origin-Opener-Policy', 'same-origin');
         $response->headers->set('Permissions-Policy', 'camera=(), microphone=(), geolocation=(), payment=(), usb=()');
         $response->headers->set('X-Content-Type-Options', 'nosniff');
