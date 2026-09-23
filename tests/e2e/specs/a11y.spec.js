@@ -76,5 +76,25 @@ test('every page meets WCAG 2.1 AA (no serious or critical violations), in both 
     problems.push(...(await audit(page, 'editor', { exclude: ['.monaco-editor'] })));
   });
 
+  await test.step('the file tree works from the keyboard alone', async () => {
+    const app = page.locator('#tree .node[data-path="/app"]');
+    await page.locator('#tree .node').first().focus();
+    // Arrow down to "app" (the first folder in a Laravel tree).
+    for (let i = 0; i < 5 && !(await app.evaluate((n) => n === document.activeElement)); i++) await page.keyboard.press('ArrowDown');
+    await expect(app).toBeFocused();
+    await expect(app).toHaveAttribute('aria-expanded', 'false');
+    await page.keyboard.press('ArrowRight');
+    await expect(page.locator('#tree .node[data-path="/app"]')).toHaveAttribute('aria-expanded', 'true');
+    await page.keyboard.press('ArrowDown');
+    await expect(page.locator('#tree .node:focus')).toHaveAttribute('data-path', /^\/app\//);
+    await page.keyboard.press('ArrowLeft');
+    await expect(page.locator('#tree .node[data-path="/app"]')).toBeFocused();
+
+    await page.keyboard.press('End');
+    const last = await page.locator('#tree .node:focus').getAttribute('data-path');
+    await page.keyboard.press('Enter');
+    await expect(page.locator('.tab-name[aria-current="true"]')).toHaveText(last.split('/').pop());
+  });
+
   expect(problems, problems.join('\n')).toEqual([]);
 });

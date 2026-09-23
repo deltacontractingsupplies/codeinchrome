@@ -386,16 +386,52 @@ function nodeFor(entry, depth) {
         expanded.add(entry.path);
         if (!listings.has(entry.path)) await loadDir(entry.path);
       }
-      renderTree();
+      await renderTree();
     } else {
-      openFile(entry.path);
+      await openFile(entry.path);
     }
   };
   el.addEventListener('click', activate);
-  el.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      activate();
+  el.setAttribute('aria-level', String(depth + 1));
+  if (entry.path === active) el.setAttribute('aria-selected', 'true');
+  el.addEventListener('keydown', async (e) => {
+    // The ARIA tree pattern, as VS Code's explorer does it.
+    const nodes = [...$('tree').querySelectorAll('.node')];
+    const i = nodes.indexOf(el);
+    const focusAt = (n) => nodes[Math.max(0, Math.min(nodes.length - 1, n))]?.focus();
+    const refocus = () => $('tree').querySelector(`.node[data-path="${CSS.escape(entry.path)}"]`)?.focus();
+    switch (e.key) {
+      case 'Enter':
+      case ' ':
+        e.preventDefault();
+        await activate();
+        if (entry.dir) refocus();
+        break;
+      case 'ArrowDown': e.preventDefault(); focusAt(i + 1); break;
+      case 'ArrowUp': e.preventDefault(); focusAt(i - 1); break;
+      case 'Home': e.preventDefault(); focusAt(0); break;
+      case 'End': e.preventDefault(); focusAt(nodes.length - 1); break;
+      case 'ArrowRight':
+        e.preventDefault();
+        if (entry.dir && !expanded.has(entry.path)) {
+          await activate();
+          refocus();
+        } else if (entry.dir) {
+          focusAt(i + 1);
+        }
+        break;
+      case 'ArrowLeft': {
+        e.preventDefault();
+        if (entry.dir && expanded.has(entry.path)) {
+          await activate();
+          refocus();
+        } else {
+          const parent = parentOf(entry.path);
+          $('tree').querySelector(`.node[data-path="${CSS.escape(parent)}"]`)?.focus();
+        }
+        break;
+      }
+      default:
     }
   });
 
