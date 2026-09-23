@@ -63,3 +63,19 @@ not json
 		t.Fatalf("got %q\nwant %q", got, want)
 	}
 }
+
+func TestComposerCannotBePointedAtAnotherDirectory(t *testing.T) {
+	for _, args := range [][]string{
+		{"install", "--working-dir=/tmp"},
+		{"require", "vendor/pkg", "--working-dir", "/tmp"},
+		{"install", "-d", "/tmp"},
+		{"install", "-d/tmp"},
+	} {
+		if _, _, err := validateCommand("composer", args); err == nil {
+			t.Errorf("composer %v was accepted", args)
+		}
+	}
+	if _, _, err := validateCommand("composer", []string{"require", "-W", "laravel/reverb", "--dev"}); err != nil {
+		t.Errorf("an ordinary require was refused: %v", err)
+	}
+}

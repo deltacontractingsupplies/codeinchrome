@@ -39,6 +39,7 @@ probe() { printf '  %-46s ' "$1"; shift
 probe "read the other tenants .env"          "cat /srv/customers/$A/app/.env"
 probe "read demo secret via the host path"   'cat /srv/customers/$A/app/.tenant-secret'
 probe "list other customers"                 'ls /srv/customers'
+probe "the cloud metadata service"           'php -r "echo @file_get_contents(\"http://169.254.169.254/hetzner/v1/metadata/hostname\", false, stream_context_create([\"http\"=>[\"timeout\"=>5]]));"'
 probe "see the host control-plane dir"       'ls /opt/codeinchrome'
 probe "read the agent token"                 'cat /opt/codeinchrome/etc/agent.env'
 probe "read host /etc/shadow"                'cat /etc/shadow'

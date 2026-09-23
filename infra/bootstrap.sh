@@ -176,12 +176,17 @@ for port in 25 465 587 2525 3333 4444 5555 7777 8333 14444 45700; do
   iptables -C DOCKER-USER -p tcp --dport "$port" -j REJECT 2>/dev/null \
     || iptables -I DOCKER-USER -p tcp --dport "$port" -j REJECT
 done
+# Link-local, which includes the cloud provider's metadata service at
+# 169.254.169.254: a customer's PHP could read this host's name, instance id
+# and network layout from it (found by audit, proved reachable, now closed).
+iptables -C DOCKER-USER -d 169.254.0.0/16 -j REJECT 2>/dev/null \
+  || iptables -I DOCKER-USER -d 169.254.0.0/16 -j REJECT
 EGRESS
 chmod 0750 /opt/codeinchrome/bin/cic-egress
 /opt/codeinchrome/bin/cic-egress
 # The old snapshot must not linger where something might restore it.
 rm -f /etc/iptables/rules.v4
-ok "outbound mail and common pool ports rejected from containers"
+ok "outbound mail, common pool ports and the metadata service rejected from containers"
 
 # Survive reboot: re-applied after docker creates its chains.
 cat > /etc/systemd/system/cic-egress.service <<'UNIT'

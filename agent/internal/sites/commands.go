@@ -145,6 +145,13 @@ func validateCommand(tool string, args []string) ([]string, time.Duration, error
 		if !composerAllowed[args[0]] {
 			return nil, 0, fmt.Errorf("composer %s is not available here", args[0])
 		}
+		// The working directory is ours to set: a second --working-dir (or
+		// -d) from the caller would point composer somewhere else.
+		for _, a := range args {
+			if a == "-d" || strings.HasPrefix(a, "--working-dir") || (strings.HasPrefix(a, "-d") && !strings.HasPrefix(a, "--")) {
+				return nil, 0, fmt.Errorf("the working directory is fixed to the site")
+			}
+		}
 		// --no-cache: the container's /tmp is a small tmpfs and its root is
 		// read-only, so there is nowhere sensible for a cache to live.
 		out := append([]string{"composer", "--working-dir=/var/www/html", "--no-interaction", "--no-cache", "--ansi"}, args...)
