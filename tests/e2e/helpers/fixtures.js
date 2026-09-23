@@ -150,3 +150,23 @@ export async function lsCancelAllFor(email) {
   }
   return subs.length;
 }
+
+/**
+ * Every TEST-MODE subscription of a @codeinchrome.test account that is still
+ * renewing, cancelled. The global teardown's net for a spec killed by its
+ * timeout, whose own finally never ran.
+ */
+export async function lsCancelAllTestSubscriptions() {
+  const { store } = ls();
+  if (!store) return 0;
+  const subs = await lsRequest('GET', `subscriptions?filter[store_id]=${store}&page[size]=100`);
+  let n = 0;
+  for (const s of subs) {
+    const a = s.attributes;
+    if (a.test_mode && a.user_email.endsWith('@codeinchrome.test') && !a.cancelled && a.status !== 'expired') {
+      await lsCancel(s.id);
+      n++;
+    }
+  }
+  return n;
+}

@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
+import { lsCancelAllTestSubscriptions } from './fixtures.js';
 
 /**
  * After the whole run: remove the test ACCOUNTS it created. Sites are reaped
@@ -7,7 +8,15 @@ import { fileURLToPath } from 'node:url';
  * this existed. The command only touches @codeinchrome.test addresses and
  * refuses any account that still owns a site.
  */
-export default function globalTeardown() {
+export default async function globalTeardown() {
+  // Before the accounts go: no test subscription may be left renewing, even
+  // one whose spec was killed by its timeout before its own finally ran.
+  try {
+    const n = await lsCancelAllTestSubscriptions();
+    if (n) console.warn(`[teardown] cancelled ${n} test subscription(s) a spec left renewing`);
+  } catch (error) {
+    console.warn(`[teardown] could not check test subscriptions: ${error.message}`);
+  }
   const base = process.env.CIC_BASE_URL || 'http://127.0.0.1:8123';
   try {
     if (/127\.0\.0\.1|localhost/.test(base)) {
