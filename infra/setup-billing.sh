@@ -62,10 +62,10 @@ for plan in $PLANS; do
   name=${plan%%:*} cents=${plan##*:}
   product_id=$(NAME=$name python3 -c '
 import json, os, sys
-want = os.environ["NAME"].lower()
-m = [p for p in json.load(sys.stdin)["data"] if p["attributes"]["name"].strip().lower() == want]
-if len(m) != 1: sys.exit(f"expected exactly one product named {os.environ[\"NAME\"]!r}, found {len(m)}")
-if m[0]["attributes"]["status"] != "published": sys.exit(f"{os.environ[\"NAME\"]} is not published")
+name = os.environ["NAME"]
+m = [p for p in json.load(sys.stdin)["data"] if p["attributes"]["name"].strip().lower() == name.lower()]
+if len(m) != 1: sys.exit(f"expected exactly one product named {name!r}, found {len(m)}")
+if m[0]["attributes"]["status"] != "published": sys.exit(f"{name} is not published")
 print(m[0]["id"])
 ' <<<"$products") || die "product $name"
 
@@ -80,7 +80,8 @@ if len(real) != 1: sys.exit(f"{name} has {len(real)} variants; keep exactly one"
 a = real[0]["attributes"]
 if not a.get("is_subscription"): sys.exit(f"{name} is not a subscription")
 if a.get("interval") != "month" or a.get("interval_count") != 1: sys.exit(f"{name} does not bill every 1 month")
-if a.get("price") != cents: sys.exit(f"{name} costs {a.get(\"price\")} cents; the app says {cents}")
+price = a.get("price")
+if price != cents: sys.exit(f"{name} costs {price} cents; the app says {cents}")
 print(real[0]["id"])
 ') || die "variant for $name"
   ok "$name: product $product_id, variant $variant_id, \$$((cents / 100))/month"
