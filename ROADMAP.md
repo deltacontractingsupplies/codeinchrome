@@ -150,8 +150,10 @@ until it is exercised in the browser against a real site.
       the site stays production with debug off; writes refused.
 - [x] **Previews**: images (checkerboard, size), PDFs rendered with pdf.js
       (Apache-2.0, lazy-loaded) - e2e-tested. Markdown preview not yet.
-- [ ] **UI polish pass** (in progress): codicon buttons; Monaco isolated from
-      page CSS (a '.tree' rule and the global reset were hiding suggestion
-      rows); the minimap no longer shows through the Database view; light
-      theme reviewed by screenshot. Next: keyboard walk-through of the whole
-      editor, empty states, focus rings on custom widgets.
+- [x] **UI polish pass**: codicon buttons; Monaco isolated from page CSS;
+      minimap no longer shows through the Database view; light theme reviewed;
+      WCAG 2.1 AA audit (axe-core) of every customer page in both themes, in
+      the e2e suite - its only finding (nested controls in the file tabs)
+      fixed; the file tree fully keyboard-operable (ARIA tree pattern).
+- [x] **Laravel names**: config() keys and <x-> components complete too;
+      Markdown preview, sanitised (marked + DOMPurify).
