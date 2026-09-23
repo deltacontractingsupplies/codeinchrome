@@ -139,15 +139,19 @@ until it is exercised in the browser against a real site.
       agents via cic.php.complete/hover/definition. Found and fixed on the way:
       lowercased URIs, incremental edits to a full-sync server, Phpactor temp
       files filling the container's /tmp, orphaned servers holding site memory.
-- [ ] **Laravel awareness**: Blade highlighting done (with PHP inside {{ }});
-      route/view/config-key completion and go-to-view still to do (Phpactor
-      does not know Laravel's string conventions).
+- [x] **Laravel awareness**: Blade highlighting (PHP inside {{ }}); route(...)
+      and view(...)/@include/@extends complete the site's real route and view
+      names; F12/⌘-click on a view name opens the Blade file (e2e-tested).
+      Not yet: <x-...> component names, config() keys, translation keys.
 - [x] **Laravel Boost MCP (MIT) for the agent**: window.cic.mcp.tools() and
       .call() - routes, schema, config, docs search, last errors - run in the
       site's container as the site's own user. Done: in every new site's
       skeleton; only that process runs as "local" (Boost refuses production),
       the site stays production with debug off; writes refused.
-- [ ] **Previews**: images shown, PDFs rendered with pdf.js (Apache-2.0),
-      Markdown preview.
-- [ ] **UI polish pass**: spacing, contrast, focus states, empty states,
-      light theme, keyboard access - checked in both themes by screenshot.
+- [x] **Previews**: images (checkerboard, size), PDFs rendered with pdf.js
+      (Apache-2.0, lazy-loaded) - e2e-tested. Markdown preview not yet.
+- [ ] **UI polish pass** (in progress): codicon buttons; Monaco isolated from
+      page CSS (a '.tree' rule and the global reset were hiding suggestion
+      rows); the minimap no longer shows through the Database view; light
+      theme reviewed by screenshot. Next: keyboard walk-through of the whole
+      editor, empty states, focus rings on custom widgets.
