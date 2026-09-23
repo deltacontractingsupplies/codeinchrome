@@ -138,3 +138,5 @@ func renameBeneath(root, from, to string) error {
 func statAt(dir *os.File, name string) (os.FileInfo, error) {
 	return os.Lstat(filepath.Join(dir.Name(), name))
 }
+
+func beneathMode() string { return "portable (component-by-component)" }

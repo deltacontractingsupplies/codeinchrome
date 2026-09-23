@@ -390,3 +390,13 @@ func TestCopyAndListingStillWorkOnAnOrdinaryTreeAndThroughInSiteLinks(t *testing
 		t.Fatalf("listing through an in-site link: %+v %v", l, err)
 	}
 }
+
+func TestTheStartupSelfTestPasses(t *testing.T) {
+	m, err := New(Config{Root: t.TempDir(), CaddyDir: t.TempDir(), HostID: "h9"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if mode, err := m.SelfTest(); err != nil || mode == "" {
+		t.Fatalf("self-test: %q %v", mode, err)
+	}
+}

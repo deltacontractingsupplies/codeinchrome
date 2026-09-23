@@ -321,3 +321,10 @@ func (s statInfo) Mode() os.FileMode {
 func (s statInfo) ModTime() time.Time { return time.Unix(s.st.Mtim.Sec, s.st.Mtim.Nsec) }
 func (s statInfo) IsDir() bool        { return s.Mode().IsDir() }
 func (s statInfo) Sys() any           { return &s.st }
+
+func beneathMode() string {
+	if noOpenat2.Load() {
+		return "openat walk (openat2 unavailable here)"
+	}
+	return "openat2"
+}

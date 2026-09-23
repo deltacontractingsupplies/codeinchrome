@@ -72,6 +72,12 @@ func main() {
 		fatal("cannot start site manager: %v", err)
 	}
 
+	mode, err := mgr.SelfTest()
+	if err != nil {
+		fatal("file operations do not work in this environment, refusing to serve: %v", err)
+	}
+	slog.Info("file operations self-test passed", "mode", mode)
+
 	// Heal before serving. A host that rebooted has every container back on a
 	// restart policy, and until this runs its vhosts may name ports those
 	// containers no longer hold - which is a 502 on every site at once.
