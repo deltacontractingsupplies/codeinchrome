@@ -29,10 +29,21 @@ class SecurityHeaders
         // A response that set its own policy keeps it: a file download says
         // `sandbox`, stricter than anything below, and must not be loosened.
         if (! $response->headers->has('Content-Security-Policy')) {
+            // One page may add a nonce for style: the editor, whose code
+            // editor (Monaco) builds <style> elements as it runs. It carries
+            // this request's nonce (resources/js/csp-nonce.js); inline style
+            // from anywhere else is still refused. Scripts are never nonced.
+            $styleNonce = $request->attributes->get('csp_style_nonce');
             $response->headers->set('Content-Security-Policy', implode('; ', [
                 "default-src 'self'",
                 "script-src 'self'",
-                "style-src 'self'",
+                $styleNonce ? "style-src 'self' 'nonce-{$styleNonce}'" : "style-src 'self'",
+                // Monaco positions its lines and line numbers with style
+                // attributes in markup it builds. Attributes only: they
+                // cannot run script, and img-src/font-src still keep them
+                // from loading anything from elsewhere. <style> elements
+                // stay nonce-only, scripts stay 'self'.
+                ...($styleNonce ? ["style-src-attr 'unsafe-inline'"] : []),
                 "img-src 'self' data:",
                 "font-src 'self'",
                 "connect-src 'self'",

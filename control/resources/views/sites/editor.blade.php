@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
+    {{-- For the code editor's own <style> elements only; see csp-nonce.js. --}}
+    <meta name="csp-nonce" content="{{ $cspNonce }}">
     <title>{{ $site->site_id }} — codeinchrome</title>
     <script src="/theme.js"></script>
     @vite(['resources/css/editor.css', 'resources/js/editor.js'])
@@ -105,12 +107,8 @@
             </div>
             <div id="crumb" class="crumb"></div>
             <div class="editor" id="editorWrap">
-                <div id="gutter" class="gutter" aria-hidden="true"></div>
-                <div class="code">
-                    <pre id="hl" class="hl" aria-hidden="true"></pre>
-                    <textarea id="ta" spellcheck="false" autocapitalize="off" autocomplete="off"
-                              aria-label="File contents" disabled></textarea>
-                </div>
+                {{-- Monaco, the editor inside VS Code, mounts here (resources/js/monaco.js). --}}
+                <div id="monaco" class="monaco-host"></div>
             </div>
             <section id="dbPanel" class="dbpanel" hidden>
                 <div class="sqlbar">

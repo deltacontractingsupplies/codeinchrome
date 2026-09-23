@@ -61,7 +61,10 @@ class SiteController extends Controller
         abort_unless($site->user_id === $request->user()->id, 404);
         abort_unless($site->status === 'live', 409, 'This site is not live yet.');
 
-        return view('sites.editor', ['site' => $site]);
+        $nonce = base64_encode(random_bytes(18));
+        $request->attributes->set('csp_style_nonce', $nonce);
+
+        return view('sites.editor', ['site' => $site, 'cspNonce' => $nonce]);
     }
 
     public function destroy(Request $request, Site $site): RedirectResponse

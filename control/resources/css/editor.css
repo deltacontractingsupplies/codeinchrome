@@ -83,15 +83,8 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .conflict span { flex: 1; }
 .conflict button { border: 1px solid var(--warn-fg); border-radius: 3px; padding: 2px 8px; }
 
-.editor { flex: 1; display: grid; grid-template-columns: 56px 1fr; min-height: 0; font: 13px/var(--line) var(--mono); }
-.gutter { overflow: hidden; text-align: right; padding: 0 16px 0 0; color: var(--linenum); user-select: none; }
-.gutter div { height: var(--line); }
-.gutter .cur { color: var(--linenum-active); }
-.code { position: relative; min-width: 0; }
-.hl, #ta { position: absolute; inset: 0; margin: 0; padding: 0 16px 40px 0; font: inherit; white-space: pre; overflow: auto; tab-size: 4; border: 0; }
-.hl { pointer-events: none; color: var(--editor-fg); }
-#ta { background: transparent; color: transparent; caret-color: var(--caret); resize: none; outline: none; }
-#ta::selection { background: var(--selection); color: transparent; }
+.editor { flex: 1; display: flex; min-height: 0; }
+.monaco-host { flex: 1; min-width: 0; min-height: 0; }
 .empty { position: absolute; inset: 57px 0 0 0; display: grid; place-content: center; text-align: center; color: var(--desc); gap: 8px; background: var(--editor-bg); }
 .empty .hint { font-size: 12px; max-width: 420px; }
 kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg); padding: 1px 4px; border-radius: 3px; }

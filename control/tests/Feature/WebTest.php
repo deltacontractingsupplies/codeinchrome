@@ -188,6 +188,33 @@ class WebTest extends TestCase
         $this->assertGuest();
     }
 
+    public function test_only_the_editor_gets_a_style_nonce_and_never_for_scripts(): void
+    {
+        $user = User::factory()->create(['plan' => 'starter']);
+        $this->actingAs($user)->post('/sites', ['site_id' => 'noncey']);
+        $site = Site::where('site_id', 'noncey')->firstOrFail();
+
+        $nonces = [];
+        foreach ([1, 2] as $_) {
+            $r = $this->actingAs($user)->get(route('sites.edit', $site))->assertOk();
+            $csp = $r->headers->get('Content-Security-Policy');
+            $this->assertMatchesRegularExpression("/style-src 'self' 'nonce-([A-Za-z0-9+\\/=]{24})'/", $csp);
+            preg_match("/'nonce-([^']+)'/", $csp, $m);
+            $r->assertSee('<meta name="csp-nonce" content="'.$m[1].'">', false);
+            $this->assertStringContainsString("script-src 'self';", $csp.';');
+            $this->assertSame(1, substr_count($csp, 'nonce-'));
+            $nonces[] = $m[1];
+        }
+        $this->assertNotSame($nonces[0], $nonces[1], 'a nonce must be new on every request');
+
+        $this->assertStringContainsString("style-src-attr 'unsafe-inline'", $csp);
+        $this->assertStringNotContainsString("script-src 'self' 'unsafe", $csp);
+
+        $dash = $this->actingAs($user)->get(route('dashboard'))->headers->get('Content-Security-Policy');
+        $this->assertStringNotContainsString('nonce-', $dash);
+        $this->assertStringNotContainsString('unsafe-inline', $dash);
+    }
+
     public function test_the_owner_can_open_the_editor(): void
     {
         $user = User::factory()->create(['plan' => 'starter']);

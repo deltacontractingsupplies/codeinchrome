@@ -19,10 +19,15 @@ test.afterAll(() => destroySite(siteName));
 // Put the caret at the very end of the editor. Keyboard shortcuts for this
 // differ by platform (Cmd+Down on macOS, Ctrl+End elsewhere); the result is
 // what matters, not the key.
-const toEnd = (page) => page.locator('#ta').evaluate((ta) => {
-  ta.focus();
-  ta.setSelectionRange(ta.value.length, ta.value.length);
-});
+const toEnd = async (page) => {
+  await page.locator('.monaco-editor .view-lines').click();
+  await page.keyboard.press('ControlOrMeta+End');
+};
+// The editor as the person sees it (Monaco), unsaved edits included.
+const shown = (page) => page.evaluate(() => window.cic.buffer());
+const expectShown = async (page, matcher) => {
+  await expect.poll(async () => (await shown(page)).content).toMatch(matcher);
+};
 
 test('a person and an agent can both edit a real site, without erasing each other', async ({ page, browser }) => {
   // Any native dialog is a failure: it would freeze the page for an agent.
@@ -47,7 +52,7 @@ test('a person and an agent can both edit a real site, without erasing each othe
     await page.getByRole('link', { name: 'Edit code' }).click();
     await expect(page).toHaveURL(new RegExp(`/sites/${siteName}/edit$`));
     // It opens routes/web.php on its own, from the real site.
-    await expect(page.locator('#ta')).toHaveValue(/Route::/);
+    await expectShown(page, /Route::/);
     await expect(page.locator('#sbMsg')).toHaveText('Ready');
   });
 
@@ -87,7 +92,7 @@ test('a person and an agent can both edit a real site, without erasing each othe
     expect(res.ok).toBe(true);
 
     await page.evaluate(() => window.cic.open('/app/Hostile.php'));
-    await expect(page.locator('#ta')).toHaveValue(payload);
+    await expect.poll(async () => (await shown(page)).content).toBe(payload);
     await expect(page.locator('#hl')).toContainText('onerror');
 
     expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
@@ -107,7 +112,7 @@ test('a person and an agent can both edit a real site, without erasing each othe
     expect(res.note).toBeUndefined();
 
     // The open, unmodified tab now shows the agent's change.
-    await expect(page.locator('#ta')).toHaveValue(/edited by the agent/);
+    await expectShown(page, /edited by the agent/);
   });
 
   await test.step('a stale save is refused and the person is told, not overwritten', async () => {
@@ -150,7 +155,7 @@ test('a person and an agent can both edit a real site, without erasing each othe
     await page.reload();
 
     await expect(page.locator('#sbMsg')).toContainText('Restored 1 unsaved');
-    await expect(page.locator('#ta')).toHaveValue(/draft that must survive/);
+    await expectShown(page, /draft that must survive/);
     await expect(page.locator('.tab.active')).toHaveClass(/dirty/);
   });
 
@@ -303,15 +308,15 @@ Route::get('/', function () {
     await page.evaluate(() => window.cic.open('/resources/views/hist.blade.php'));
     await page.getByRole('tab', { name: 'History' }).click();
     await page.locator('#historyList .node').nth(1).click();
-    await expect(page.locator('#ta')).toHaveValue('version one');
-    await expect(page.locator('#ta')).toHaveJSProperty('readOnly', true);
+    await expect.poll(async () => (await shown(page)).content).toBe('version one');
+    expect((await shown(page)).readOnly).toBe(true);
     await expect(page.locator('#versionBar')).toBeVisible();
 
     // Restore it: it becomes current, and the restore is itself a version.
     await page.getByRole('button', { name: 'Restore this version' }).click();
     await page.locator('#modalOk').click();
     await expect(page.locator('#sbMsg')).toContainText('Restored /resources/views/hist.blade.php');
-    await expect(page.locator('#ta')).toHaveValue('version one');
+    await expect.poll(async () => (await shown(page)).content).toBe('version one');
     const after = await page.evaluate(() => window.cic.history('/resources/views/hist.blade.php'));
     expect(after.versions[0].message).toMatch(/^restore resources\/views\/hist\.blade\.php from [0-9a-f]{7}$/);
   });

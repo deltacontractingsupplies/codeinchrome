@@ -1,3 +1,4 @@
+import { monaco, languageFor } from './monaco.js';
 /*
  * The codeinchrome editor.
  *
@@ -46,9 +47,50 @@ const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
 const DRAFTS_KEY = `cic.drafts.${SITE.id}`;
 
 const $ = (id) => document.getElementById(id);
-const ta = $('ta');
-const hl = $('hl');
-const gutter = $('gutter');
+
+/* Monaco - the editor inside VS Code - one model per open tab. */
+const themeName = () => (document.documentElement.dataset.theme === 'light' ? 'vs' : 'vs-dark');
+const editor = monaco.editor.create($('monaco'), {
+  model: null,
+  readOnly: true,
+  automaticLayout: true,
+  theme: themeName(),
+  fontFamily: "ui-monospace, 'SF Mono', Menlo, Consolas, 'Liberation Mono', monospace",
+  fontSize: 13,
+  lineHeight: 20,
+  tabSize: 4,
+  insertSpaces: true,
+  minimap: { enabled: true, renderCharacters: false },
+  scrollBeyondLastLine: false,
+  smoothScrolling: true,
+  bracketPairColorization: { enabled: true },
+  guides: { bracketPairs: 'active', indentation: true },
+  stickyScroll: { enabled: true },
+  renderWhitespace: 'selection',
+  fixedOverflowWidgets: true,
+  padding: { top: 8 },
+});
+// The page's theme switch (light / dark / system) drives Monaco's.
+new MutationObserver(() => monaco.editor.setTheme(themeName()))
+  .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+/** tab key -> Monaco model */
+const models = new Map();
+/** True while the editor itself sets a model's text, so it is not taken as typing. */
+let applying = false;
+function modelFor(key, t) {
+  let m = models.get(key);
+  if (!m || m.isDisposed()) {
+    const realPath = t.version ? t.version.path : key;
+    m = monaco.editor.createModel(t.content, languageFor(realPath),
+      monaco.Uri.from({ scheme: 'cic', path: key.startsWith('/') ? key : `/${key}` }));
+    models.set(key, m);
+  }
+  return m;
+}
+function dropModel(key) {
+  models.get(key)?.dispose();
+  models.delete(key);
+}
 
 /** path -> { content, saved, revision, dirty, conflict } */
 const tabs = new Map();
@@ -247,60 +289,11 @@ async function refreshDir(path) {
 
 /* ───────────────────────── highlighting ───────────────────────── */
 
-const KW = /^(abstract|array|as|async|await|break|case|catch|class|const|continue|declare|default|do|echo|else|elseif|enum|export|extends|final|finally|fn|for|foreach|function|global|if|implements|import|include|instanceof|interface|let|match|namespace|new|print|private|protected|public|readonly|require|return|static|switch|throw|trait|try|use|var|while|yield|true|false|null|int|string|bool|void|self|parent|this)$/;
-const CTL = /^(if|else|elseif|foreach|for|while|return|switch|case|break|continue|match|try|catch|finally|throw|yield|do|await)$/;
-const esc = (s) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-function highlight(src, path) {
-  if (!/\.(php|js|mjs|ts|css|json|vue|jsx|tsx)$/.test(path) && !path.endsWith('.blade.php')) {
-    return esc(src);
-  }
-  const RX = /(\/\*[\s\S]*?\*\/|\/\/[^\n]*|#[^\n]*)|('(?:\\.|[^'\\])*'|"(?:\\.|[^"\\])*"|`(?:\\.|[^`\\])*`)|(\$[A-Za-z_]\w*)|(\b\d+\.?\d*\b)|(\{\{|\}\}|@[a-z]+)|\b([A-Za-z_]\w*)\b/g;
-  let out = '';
-  let last = 0;
-  let m;
-  while ((m = RX.exec(src)) !== null) {
-    out += esc(src.slice(last, m.index));
-    const t = m[0];
-    if (m[1]) out += `<span class="cmt">${esc(t)}</span>`;
-    else if (m[2]) out += `<span class="str">${esc(t)}</span>`;
-    else if (m[3]) out += `<span class="vr">${esc(t)}</span>`;
-    else if (m[4]) out += `<span class="num">${esc(t)}</span>`;
-    else if (m[5]) out += `<span class="ctl">${esc(t)}</span>`;
-    else {
-      const w = m[6];
-      if (CTL.test(w)) out += `<span class="ctl">${w}</span>`;
-      else if (KW.test(w)) out += `<span class="kw">${w}</span>`;
-      else if (/^[A-Z]/.test(w)) out += `<span class="typ">${w}</span>`;
-      else if (src[RX.lastIndex] === '(') out += `<span class="fn">${w}</span>`;
-      else out += esc(w);
-    }
-    last = RX.lastIndex;
-  }
-  return out + esc(src.slice(last));
-}
-
 /* ───────────────────────── editor ───────────────────────── */
 
 function paint() {
-  const value = ta.value;
-  hl.innerHTML = highlight(value, active || '') + '\n';
-  const lines = value.split('\n').length;
-  const curLine = value.slice(0, ta.selectionStart).split('\n').length;
-
-  const frag = document.createDocumentFragment();
-  for (let i = 1; i <= lines; i++) {
-    const d = document.createElement('div');
-    d.textContent = i;
-    if (i === curLine) d.className = 'cur';
-    frag.append(d);
-  }
-  gutter.replaceChildren(frag);
-  gutter.scrollTop = hl.scrollTop = ta.scrollTop;
-  hl.scrollLeft = ta.scrollLeft;
-
-  const col = ta.selectionStart - value.lastIndexOf('\n', ta.selectionStart - 1);
-  $('sbPos').textContent = active ? `Ln ${curLine}, Col ${col}` : '';
+  const p = active ? editor.getPosition() : null;
+  $('sbPos').textContent = p ? `Ln ${p.lineNumber}, Col ${p.column}` : '';
 }
 
 function renderTabs() {
@@ -336,12 +329,22 @@ function show(path) {
   const has = Boolean(t);
 
   $('empty').hidden = has;
-  ta.disabled = !has;
+  $('editorWrap').hidden = !has;
   // An earlier version is shown read-only; it changes only by restoring it.
-  ta.readOnly = Boolean(has && t.version);
+  editor.updateOptions({ readOnly: !has || Boolean(t.version) });
   $('versionBar').hidden = !(has && t.version);
   if (has && t.version) $('versionText').textContent = `Version of ${t.version.path} from ${when(t.version.at)} — ${t.version.message}. Read-only.`;
-  ta.value = has ? t.content : '';
+  if (has) {
+    const m = modelFor(path, t);
+    if (m.getValue() !== t.content) {
+      applying = true;
+      m.setValue(t.content);
+      applying = false;
+    }
+    if (editor.getModel() !== m) editor.setModel(m);
+  } else {
+    editor.setModel(null);
+  }
   $('crumb').textContent = has ? path.slice(1).split('/').join('  ›  ') : '';
   $('winTitle').textContent = has ? `${baseName(path)} — ${SITE.id}` : SITE.id;
   document.title = has ? `${baseName(path)} — ${SITE.id}` : `${SITE.id} — codeinchrome`;
@@ -408,6 +411,7 @@ function closeTab(path) {
   const keys = [...tabs.keys()];
   const index = keys.indexOf(path);
   tabs.delete(path);
+  dropModel(path);
   saveDrafts();
   if (active === path) {
     const next = keys[index + 1] ?? keys[index - 1] ?? null;
@@ -569,7 +573,7 @@ function ask(text, { input = null, okLabel = 'OK', validate = null } = {}) {
       $('modalForm').onsubmit = null;
       $('modalCancel').onclick = null;
       modal.onkeydown = null;
-      ta.focus();
+      editor.focus();
       resolve(value);
     };
     $('modalForm').onsubmit = (e) => {
@@ -591,28 +595,23 @@ function ask(text, { input = null, okLabel = 'OK', validate = null } = {}) {
 
 /* ───────────────────────── wiring ───────────────────────── */
 
-ta.addEventListener('input', () => {
+editor.onDidChangeModelContent(() => {
+  if (applying) return;
   const t = tabs.get(active);
-  if (!t) return;
-  t.content = ta.value;
+  if (!t || t.version) return;
+  t.content = editor.getValue();
   t.dirty = t.content !== t.saved;
   saveDrafts();
   renderTabs();
   paint();
 });
-ta.addEventListener('scroll', () => {
-  hl.scrollTop = gutter.scrollTop = ta.scrollTop;
-  hl.scrollLeft = ta.scrollLeft;
-});
-['keyup', 'click', 'select'].forEach((e) => ta.addEventListener(e, paint));
-ta.addEventListener('keydown', (e) => {
-  if (e.key === 'Tab' && !e.metaKey && !e.ctrlKey) {
-    e.preventDefault();
-    ta.setRangeText('    ', ta.selectionStart, ta.selectionEnd, 'end');
-    ta.dispatchEvent(new Event('input'));
-  }
+editor.onDidChangeCursorPosition(paint);
+editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+  if (active) save(active);
 });
 document.addEventListener('keydown', (e) => {
+  // Inside the code editor, Monaco's own ⌘S command handles it.
+  if (e.target?.closest?.('.monaco-editor')) return;
   if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
     e.preventDefault();
     if (active) save(active);
@@ -661,7 +660,7 @@ function setMode(next) {
     if (!dbLoaded) loadTables();
     $('sql').focus();
   } else {
-    ta.focus();
+    editor.focus();
   }
 }
 
@@ -1048,6 +1047,9 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
   cic.logs(source, lines)      source 'app' (storage/logs), 'access' (requests) or
                                'container' (PHP and Apache errors)  -> { ok, log: { lines } }
 
+  cic.buffer()                 the open file as shown, unsaved edits included
+                               -> { ok, path, content, dirty, readOnly }
+
   cic.db.tables()              the site's tables, with InnoDB row estimates
   cic.db.query(sql, { write }) run ONE statement as the site's own MySQL user
                                -> { ok, result: { columns, rows, truncated, rowsAffected, mode } }
@@ -1199,10 +1201,12 @@ async function showSearch(q) {
     row.addEventListener('click', async () => {
       const r = await openFile(hit.path);
       if (r.ok) {
-        const lines = ta.value.split('\n');
-        const at = lines.slice(0, hit.line - 1).join('\n').length + (hit.line > 1 ? 1 : 0);
-        ta.focus();
-        ta.setSelectionRange(at, at + (lines[hit.line - 1] ?? '').length);
+        const model = editor.getModel();
+        if (model && hit.line <= model.getLineCount()) {
+          editor.setSelection(new monaco.Range(hit.line, 1, hit.line, model.getLineMaxColumn(hit.line)));
+          editor.revealLineInCenter(hit.line);
+        }
+        editor.focus();
       }
     });
     box.append(row);
@@ -1539,6 +1543,12 @@ window.cic = Object.freeze({
     },
   }),
   open: (path) => openFile(path),
+  // What the person sees in the open file right now, saved or not.
+  buffer: () => {
+    const t = tabs.get(active);
+    return t ? { ok: true, path: active, content: editor.getValue(), dirty: t.dirty, readOnly: Boolean(t.version) }
+      : { ok: false, error: 'no_file', hint: 'No file is open.' };
+  },
 
   state() {
     return {
