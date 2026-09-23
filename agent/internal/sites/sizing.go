@@ -19,22 +19,29 @@ const (
 	sizingPerWorkerMB = 24
 	minWorkers        = 4
 	maxWorkers        = 150
-	// Beyond the web workers: artisan commands, a queue worker, the scheduler.
+	// Beyond the web workers: artisan commands and the like.
 	connectionHeadroom = 5
+	// Memory set aside for each background process a site runs (queue worker,
+	// scheduler, Reverb), taken from the web workers' budget.
+	backgroundMB = 48
 )
 
-// WorkersFor returns the Apache worker count for a memory limit ("512m", "2g").
-func WorkersFor(memLimit string) int {
+// WorkersFor returns the Apache worker count for a memory limit ("512m", "2g")
+// and the number of background processes the site runs.
+func WorkersFor(memLimit string, background int) int {
 	mb := memoryMB(memLimit)
 	if mb <= 0 {
 		mb = 1024
 	}
-	w := (mb - sizingBaseMB) / sizingPerWorkerMB
+	w := (mb - sizingBaseMB - background*backgroundMB) / sizingPerWorkerMB
 	return max(minWorkers, min(maxWorkers, w))
 }
 
-// ConnectionsFor is the site's database connection cap for a memory limit.
-func ConnectionsFor(memLimit string) int { return WorkersFor(memLimit) + connectionHeadroom }
+// ConnectionsFor is the site's database connection cap: every web worker and
+// every background process may hold one, plus headroom.
+func ConnectionsFor(memLimit string, background int) int {
+	return WorkersFor(memLimit, background) + background + connectionHeadroom
+}
 
 func memoryMB(limit string) int {
 	s := strings.ToLower(strings.TrimSpace(limit))
@@ -63,7 +70,7 @@ func memoryMB(limit string) int {
 }
 
 // setDBConnections sets the site's MySQL connection cap for its memory size.
-func (m *Manager) setDBConnections(ctx context.Context, id, memLimit string) error {
+func (m *Manager) setDBConnections(ctx context.Context, id, memLimit string, background int) error {
 	db, err := m.rootDB()
 	if err != nil {
 		return err
@@ -73,6 +80,6 @@ func (m *Manager) setDBConnections(ctx context.Context, id, memLimit string) err
 	if !safeIdent.MatchString(user) {
 		return fmt.Errorf("refusing unsafe user name %q", user)
 	}
-	_, err = db.ExecContext(ctx, fmt.Sprintf("ALTER USER '%s'@'%s' WITH MAX_USER_CONNECTIONS %d", user, containerHostPattern, ConnectionsFor(memLimit)))
+	_, err = db.ExecContext(ctx, fmt.Sprintf("ALTER USER '%s'@'%s' WITH MAX_USER_CONNECTIONS %d", user, containerHostPattern, ConnectionsFor(memLimit, background)))
 	return err
 }

@@ -410,6 +410,21 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"path": body.Path, "restoredFrom": body.Rev}))
 	})
 
+	// Background processes beside Apache: queue worker, scheduler, Reverb.
+	mux.HandleFunc("PUT /v1/sites/{id}/background", func(w http.ResponseWriter, r *http.Request) {
+		var b sites.Background
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&b); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {queue, scheduler, reverb}"))
+			return
+		}
+		applied, err := mgr.SetBackground(r.Context(), r.PathValue("id"), b)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_apply", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"applied": applied}))
+	})
+
 	mux.HandleFunc("PUT /v1/sites/{id}/aliases", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Aliases []string `json:"aliases"`

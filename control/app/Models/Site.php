@@ -14,7 +14,8 @@ class Site extends Model
 
     protected function casts(): array
     {
-        return ['provisioned_at' => 'datetime', 'usage_at' => 'datetime', 'limits_pending' => 'boolean'];
+        return ['provisioned_at' => 'datetime', 'usage_at' => 'datetime', 'limits_pending' => 'boolean',
+            'queue' => 'boolean', 'scheduler' => 'boolean', 'reverb' => 'boolean'];
     }
 
     /**

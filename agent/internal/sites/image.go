@@ -72,21 +72,29 @@ func (m *Manager) Recreate(ctx context.Context, id string) (string, error) {
 	if strings.TrimSpace(running) == current {
 		return "current", nil
 	}
-	// The container is replaced; its disk must be there for the new one.
-	if !isMounted(m.volume(id)) {
-		return "", fmt.Errorf("the disk for %s is not mounted; refusing to start a container on an empty directory", id)
-	}
-
-	if _, err := run(ctx, 60*time.Second, "docker", "rm", "-f", m.container(id)); err != nil {
-		return "", fmt.Errorf("remove old container: %w", err)
-	}
-	if err := m.startContainer(ctx, site); err != nil {
-		return "", fmt.Errorf("start new container (the site is DOWN until this is fixed): %w", err)
-	}
-	if err := waitForHTTP(ctx, site.Port, 60*time.Second); err != nil {
-		return "", fmt.Errorf("the new container did not answer (the site may be DOWN): %w", err)
+	if err := m.replaceContainer(ctx, site); err != nil {
+		return "", err
 	}
 	return "recreated", nil
+}
+
+// replaceContainer removes a site's container and starts a new one from its
+// stored settings, then waits for it to answer. Caller holds the lock.
+func (m *Manager) replaceContainer(ctx context.Context, site Site) error {
+	// The container is replaced; its disk must be there for the new one.
+	if !isMounted(m.volume(site.ID)) {
+		return fmt.Errorf("the disk for %s is not mounted; refusing to start a container on an empty directory", site.ID)
+	}
+	if _, err := run(ctx, 60*time.Second, "docker", "rm", "-f", m.container(site.ID)); err != nil {
+		return fmt.Errorf("remove old container: %w", err)
+	}
+	if err := m.startContainer(ctx, site); err != nil {
+		return fmt.Errorf("start new container (the site is DOWN until this is fixed): %w", err)
+	}
+	if err := waitForHTTP(ctx, site.Port, 60*time.Second); err != nil {
+		return fmt.Errorf("the new container did not answer (the site may be DOWN): %w", err)
+	}
+	return nil
 }
 
 // waitForHTTP returns once the site's port answers any HTTP response below

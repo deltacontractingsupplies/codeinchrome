@@ -213,6 +213,12 @@ class AgentClient
         return $this->send('post', "/v1/sites/$id/history/restore", ['rev' => $rev, 'path' => $path]);
     }
 
+    /** Switch the site's queue worker, scheduler and Reverb. Replaces the container. */
+    public function setBackground(string $id, bool $queue, bool $scheduler, bool $reverb): array
+    {
+        return $this->send('put', "/v1/sites/$id/background", ['queue' => $queue, 'scheduler' => $scheduler, 'reverb' => $reverb])['applied'] ?? [];
+    }
+
     // ── the file manager ──
 
     public function mkdir(string $id, string $path): array

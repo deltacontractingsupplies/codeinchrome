@@ -1,0 +1,88 @@
+#!/bin/sh
+# Start a codeinchrome site: size Apache to this container, and run the
+# background processes the site has switched on.
+#
+# Apache prefork's default (up to 150 workers) is far more than a 256 MB - 2 GB
+# container holds, and every worker may open a database connection: under a
+# burst the site failed with max_user_connections instead of queueing
+# (measured by tests/load). So the worker count is derived from this
+# container's own memory limit - ~24 MB per busy worker after 64 MB for the
+# rest - minus what the switched-on background processes need. The agent sets
+# the site's MySQL connection cap from the same formula (agent sizing.go; a
+# test fails if the two drift).
+#
+# Background processes, each switched on by the agent through the container's
+# environment, each run as www-data and restarted if they exit:
+#   CIC_QUEUE=1      php artisan queue:work   (recycled hourly and at 96 MB)
+#   CIC_SCHEDULER=1  php artisan schedule:work
+#   CIC_REVERB=1     php artisan reverb:start on :8081, if Reverb is installed
+# With none switched on, Apache starts exactly as it always has.
+set -eu
+
+max=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo max)
+if [ "$max" = max ]; then mb=1024; else mb=$((max / 1048576)); fi
+
+bg=0
+for on in "${CIC_QUEUE:-0}" "${CIC_SCHEDULER:-0}" "${CIC_REVERB:-0}"; do
+  [ "$on" = 1 ] && bg=$((bg + 48))
+done
+
+workers=$(( (mb - 64 - bg) / 24 ))
+[ "$workers" -lt 4 ] && workers=4
+[ "$workers" -gt 150 ] && workers=150
+spare=$workers; [ "$spare" -gt 8 ] && spare=8
+export CIC_WORKERS=$workers CIC_SPARE=$spare
+
+if [ "$bg" -eq 0 ]; then
+  exec docker-php-entrypoint apache2-foreground
+fi
+
+conf=/run/cic-supervisord.conf
+program() { # name command
+  cat <<EOF
+[program:$1]
+command=$2
+directory=/var/www/html
+user=www-data
+autorestart=true
+startsecs=5
+startretries=1000
+stopwaitsecs=30
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+
+EOF
+}
+{
+  cat <<EOF
+[supervisord]
+nodaemon=true
+user=root
+pidfile=/run/supervisord.pid
+logfile=/dev/null
+logfile_maxbytes=0
+
+[program:web]
+command=docker-php-entrypoint apache2-foreground
+autorestart=true
+stopsignal=WINCH
+stdout_logfile=/dev/stdout
+stdout_logfile_maxbytes=0
+stderr_logfile=/dev/stderr
+stderr_logfile_maxbytes=0
+
+EOF
+  [ "${CIC_QUEUE:-0}" = 1 ] && program queue "php artisan queue:work --sleep=3 --tries=3 --max-time=3600 --memory=96"
+  [ "${CIC_SCHEDULER:-0}" = 1 ] && program scheduler "php artisan schedule:work"
+  if [ "${CIC_REVERB:-0}" = 1 ]; then
+    if [ -d /var/www/html/vendor/laravel/reverb ]; then
+      program reverb "php artisan reverb:start --host=0.0.0.0 --port=8081"
+    else
+      echo "cic-start: CIC_REVERB is on but laravel/reverb is not installed (composer require laravel/reverb); not starting it" >&2
+    fi
+  fi
+} > "$conf"
+
+exec /usr/bin/supervisord -c "$conf"

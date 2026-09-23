@@ -51,3 +51,22 @@ func TestWithoutAnOriginCertEverythingStaysOnDemand(t *testing.T) {
 		t.Errorf("no origin cert configured must mean on-demand, as before:\n%s", out)
 	}
 }
+
+func TestReverbGetsTheWebSocketRouteAndItsAPIStaysPrivate(t *testing.T) {
+	cfg := Config{PlatformDomain: "codeinchrome.com", OriginCert: "c", OriginKey: "k"}
+	out := caddyConfig(cfg, Site{ID: "chat", Domain: "chat.codeinchrome.com", Reverb: true, WSPort: 21001}, "20001")
+	if !strings.Contains(out, "handle /app/* {\n\t\treverse_proxy 127.0.0.1:21001\n\t}") {
+		t.Errorf("the WebSocket endpoint must go to Reverb's port:\n%s", out)
+	}
+	if !strings.Contains(out, "handle {\n\t\treverse_proxy 127.0.0.1:20001\n\t}") {
+		t.Errorf("everything else must still go to the site:\n%s", out)
+	}
+	if strings.Contains(out, "/apps/") {
+		t.Errorf("Reverb's publishing API must never be routed publicly:\n%s", out)
+	}
+
+	plain := caddyConfig(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com"}, "20001")
+	if strings.Contains(plain, "handle") || strings.Contains(plain, "21001") {
+		t.Errorf("a site without Reverb gets no WebSocket route:\n%s", plain)
+	}
+}

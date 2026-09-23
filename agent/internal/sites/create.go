@@ -158,7 +158,7 @@ func (m *Manager) Create(ctx context.Context, o CreateOpts) (Site, error) {
 	}
 	site.Database, site.DBUser = DBName(o.ID), DBUser(o.ID)
 	// The connection cap for this site's size (sizing.go), not a flat 20.
-	if err := m.setDBConnections(ctx, o.ID, o.MemLimit); err != nil {
+	if err := m.setDBConnections(ctx, o.ID, o.MemLimit, 0); err != nil {
 		_ = m.dropDatabase(context.Background(), o.ID)
 		cleanup()
 		return Site{}, fmt.Errorf("size the database connections: %w", err)
@@ -195,8 +195,13 @@ func (m *Manager) allocatePort(ctx context.Context) (int, error) {
 		if !e.IsDir() {
 			continue
 		}
-		if s, err := m.load(e.Name()); err == nil && s.Port != 0 {
-			used[s.Port] = true
+		if s, err := m.load(e.Name()); err == nil {
+			if s.Port != 0 {
+				used[s.Port] = true
+			}
+			if s.WSPort != 0 {
+				used[s.WSPort] = true
+			}
 		}
 	}
 	for p := portMin; p <= portMax; p++ {
@@ -250,7 +255,7 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 		// Sites created before sizing.go had a flat cap of 20 connections;
 		// bring each in line with its memory. Idempotent.
 		if s.MemLimit != "" && m.cfg.MySQLPassword != "" {
-			if err := m.setDBConnections(ctx, s.ID, s.MemLimit); err != nil {
+			if err := m.setDBConnections(ctx, s.ID, s.MemLimit, s.background()); err != nil {
 				changed = append(changed, s.ID+": database connection cap not set: "+err.Error())
 			}
 		}
@@ -347,8 +352,16 @@ func (m *Manager) startContainer(ctx context.Context, s Site) error {
 		// Fixed, loopback-only. Not ephemeral: see Site.Port for the 502 that
 		// taught us the difference.
 		"--publish", fmt.Sprintf("127.0.0.1:%d:8080", s.Port),
-		laravelImage,
+		// The background processes cic-start runs (see background.go).
+		"--env", "CIC_QUEUE=" + boolEnv(s.Queue),
+		"--env", "CIC_SCHEDULER=" + boolEnv(s.Scheduler),
+		"--env", "CIC_REVERB=" + boolEnv(s.Reverb && s.WSPort != 0),
 	}
+	if s.Reverb && s.WSPort != 0 {
+		// Reverb's WebSocket port, loopback only; Caddy routes /app/* to it.
+		args = append(args, "--publish", fmt.Sprintf("127.0.0.1:%d:8081", s.WSPort))
+	}
+	args = append(args, laravelImage)
 	if _, err := run(ctx, 2*time.Minute, "docker", args...); err != nil {
 		return fmt.Errorf("start container for %s: %w", s.ID, err)
 	}
@@ -511,8 +524,14 @@ func caddyConfig(cfg Config, s Site, port string) string {
 		}
 	}
 
-	body := fmt.Sprintf(`	reverse_proxy 127.0.0.1:%s
-	encode gzip zstd
+	// Reverb's WebSocket endpoint (/app/{key}) goes to its own port; its
+	// /apps/* HTTP API, which the app uses to publish events, is NOT routed:
+	// the app reaches it inside the container, and it stays private.
+	route := fmt.Sprintf("	reverse_proxy 127.0.0.1:%s\n", port)
+	if s.Reverb && s.WSPort != 0 {
+		route = fmt.Sprintf("	handle /app/* {\n		reverse_proxy 127.0.0.1:%d\n	}\n	handle {\n		reverse_proxy 127.0.0.1:%s\n	}\n", s.WSPort, port)
+	}
+	body := route + fmt.Sprintf(`	encode gzip zstd
 	header {
 		-Server
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -524,7 +543,7 @@ func caddyConfig(cfg Config, s Site, port string) string {
 		output file /var/log/caddy/%s.log
 		format json
 	}
-`, port, s.ID)
+`, s.ID)
 
 	out := fmt.Sprintf("# codeinchrome site %s - generated, do not edit by hand\n", s.ID)
 	if len(platform) > 0 {
@@ -778,15 +797,15 @@ func (m *Manager) SetLimits(ctx context.Context, id string, o LimitsOpts) (map[s
 				// The database cap follows the memory (see sizing.go), and
 				// the container restarts so Apache re-sizes its workers to
 				// the new limit - a few seconds, on a plan change only.
-				if err := m.setDBConnections(ctx, id, o.MemLimit); err != nil {
+				if err := m.setDBConnections(ctx, id, o.MemLimit, site.background()); err != nil {
 					applied["dbConnections"] = "failed: " + err.Error()
 				} else {
-					applied["dbConnections"] = strconv.Itoa(ConnectionsFor(o.MemLimit))
+					applied["dbConnections"] = strconv.Itoa(ConnectionsFor(o.MemLimit, site.background()))
 				}
 				if _, err := run(ctx, 60*time.Second, "docker", "restart", "-t", "10", m.container(id)); err != nil {
 					applied["workers"] = "restart failed: " + err.Error()
 				} else {
-					applied["workers"] = strconv.Itoa(WorkersFor(o.MemLimit))
+					applied["workers"] = strconv.Itoa(WorkersFor(o.MemLimit, site.background()))
 				}
 			}
 		}

@@ -1,0 +1,6 @@
+{"plan":"free","rate":2,"requests":60,"achieved_rps":1.9999334382153091,"failed_ratio":0,"p50_ms":18.505406999999998,"p95_ms":25.453557800000002,"p99_ms":26.313801509999998,"dropped":0}
+{"plan":"free","rate":4,"requests":121,"achieved_rps":4.029697881749784,"failed_ratio":0,"p50_ms":18.222479,"p95_ms":26.054137,"p99_ms":59.948985999999906,"dropped":0}
+{"plan":"free","rate":6,"requests":181,"achieved_rps":6.028133412604984,"failed_ratio":0,"p50_ms":18.188027,"p95_ms":24.743598,"p99_ms":96.71895659999976,"dropped":0}
+{"plan":"free","rate":8,"requests":241,"achieved_rps":8.02630540961942,"failed_ratio":0,"p50_ms":18.089547,"p95_ms":24.95671,"p99_ms":132.0135921999999,"dropped":0}
+{"plan":"free","rate":10,"requests":300,"achieved_rps":9.999782603726215,"failed_ratio":0,"p50_ms":17.871868,"p95_ms":24.42320695,"p99_ms":133.37269612999998,"dropped":0}
+{"plan":"free","rate":15,"requests":451,"achieved_rps":13.510671645708573,"failed_ratio":0,"p50_ms":17.489661,"p95_ms":93.804459,"p99_ms":471.27588349999996,"dropped":0}

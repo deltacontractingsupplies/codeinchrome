@@ -37,12 +37,23 @@ class PlanLimits
             $site->update(['limits_pending' => true]);
             Log::warning('plan limits not applied', ['site' => $site->site_id, 'error' => $e->getMessage()]);
 
-            return 'pending: ' . $e->getMessage();
+            return 'pending: '.$e->getMessage();
         }
 
         // The disk only grows. Record what the host actually has, not what
         // the plan asked for: after a downgrade they differ, and the row must
         // describe the site as it is.
+        // A plan without background processes: switch any off (a downgrade).
+        if (! ($plan['background'] ?? false) && ($site->queue || $site->scheduler || $site->reverb)) {
+            try {
+                AgentClient::for($site->host)->setBackground($site->site_id, false, false, false);
+                $site->update(['queue' => false, 'scheduler' => false, 'reverb' => false]);
+            } catch (\Throwable $e) {
+                $site->update(['limits_pending' => true]);
+                Log::warning('background processes not switched off', ['site' => $site->site_id, 'error' => $e->getMessage()]);
+            }
+        }
+
         $site->update([
             'cpu_limit' => $plan['cpu'],
             'memory_limit' => $plan['memory'],

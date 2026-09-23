@@ -46,7 +46,7 @@ ssh_ 'bash -s' < infra/mysql.sh
 
 say "building the base image"
 ssh_ 'mkdir -p /opt/codeinchrome/images/laravel-8.3'
-scp -q infra/images/laravel-8.3/Dockerfile "root@$ip:/opt/codeinchrome/images/laravel-8.3/Dockerfile"
+scp -q infra/images/laravel-8.3/Dockerfile infra/images/laravel-8.3/cic-start "root@$ip:/opt/codeinchrome/images/laravel-8.3/"
 ssh_ 'cd /opt/codeinchrome/images/laravel-8.3 && docker build -q -t codeinchrome/laravel:8.3 . >/dev/null && echo "  image built and self-verified"'
 
 say "installing the agent"

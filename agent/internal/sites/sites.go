@@ -78,6 +78,15 @@ type Site struct {
 	// with a DNS TXT record; this list is also what /tls-ask approves.
 	Aliases []string `json:"aliases,omitempty"`
 
+	// Background processes run beside Apache (cic-start in the image), each
+	// switched on by the customer: a queue worker, the scheduler, and Laravel
+	// Reverb for WebSockets. WSPort is Reverb's loopback port, allocated the
+	// first time Reverb is switched on and fixed from then on, like Port.
+	Queue     bool `json:"queue,omitempty"`
+	Scheduler bool `json:"scheduler,omitempty"`
+	Reverb    bool `json:"reverb,omitempty"`
+	WSPort    int  `json:"wsPort,omitempty"`
+
 	DiskGB        int   `json:"diskGb"`
 	DiskUsedBytes int64 `json:"diskUsedBytes"`
 	DiskSizeBytes int64 `json:"diskSizeBytes"`

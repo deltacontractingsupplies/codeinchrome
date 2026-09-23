@@ -11,6 +11,7 @@ use App\Http\Controllers\FileManagerController;
 use App\Http\Controllers\HistoryController;
 use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\SiteController;
+use App\Http\Controllers\SiteSettingsController;
 use App\Http\Controllers\SocialLoginController;
 use App\Http\Controllers\StatusController;
 use App\Http\Controllers\TwoFactorController;
@@ -80,6 +81,8 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     // long-lived token to leak.
     Route::get('/sites/{site}/edit', [SiteController::class, 'edit'])->name('sites.edit');
 
+    Route::get('/sites/{site}/settings', [SiteSettingsController::class, 'show'])->name('sites.settings');
+    Route::put('/sites/{site}/background', [SiteSettingsController::class, 'background'])->middleware('throttle:provision')->name('sites.background');
     Route::get('/sites/{site}/domains', [DomainController::class, 'index'])->name('domains.index');
     Route::post('/sites/{site}/domains', [DomainController::class, 'store'])->middleware(['throttle:domains', VerifiedWhenMailEnabled::class])->name('domains.store');
     // Verification queries public DNS; throttled so it cannot be used to make

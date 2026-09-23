@@ -11,7 +11,7 @@ FROM php:8.3-apache
 # would take these with it.
 RUN set -eux; \
     apt-get update; \
-    apt-get install -y --no-install-recommends unzip git; \
+    apt-get install -y --no-install-recommends unzip git supervisor; \
     rm -rf /var/lib/apt/lists/*
 
 # Extensions a real Laravel app needs. Kept to the list that is actually
@@ -137,6 +137,11 @@ RUN { \
     } > /usr/local/etc/php/conf.d/zz-codeinchrome.ini
 
 # The rootfs is mounted read-only at runtime; Apache still needs these.
+# The start script (cic-start, beside this file) sizes Apache and runs the
+# site's background processes; read it for the reasoning.
+COPY cic-start /usr/local/bin/cic-start
+RUN chmod 0755 /usr/local/bin/cic-start && sh -n /usr/local/bin/cic-start && command -v supervisord
+
 # Apache sized to THIS container's memory. Prefork's default of up to 150
 # workers is far more than a 256 MB - 2 GB container holds, and every worker
 # may open a database connection: under a burst, the site failed with
@@ -157,20 +162,6 @@ RUN set -eux; \
       '</IfModule>' \
       > /etc/apache2/conf-available/cic-workers.conf; \
     a2enconf cic-workers; \
-    printf '%s\n' \
-      '#!/bin/sh' \
-      '# Size Apache to this container, then start it. See the Dockerfile.' \
-      'set -eu' \
-      'max=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo max)' \
-      'if [ "$max" = max ]; then mb=1024; else mb=$((max / 1048576)); fi' \
-      'workers=$(( (mb - 64) / 24 ))' \
-      '[ "$workers" -lt 4 ] && workers=4' \
-      '[ "$workers" -gt 150 ] && workers=150' \
-      'spare=$workers; [ "$spare" -gt 8 ] && spare=8' \
-      'export CIC_WORKERS=$workers CIC_SPARE=$spare' \
-      'exec docker-php-entrypoint apache2-foreground' \
-      > /usr/local/bin/cic-start; \
-    chmod 0755 /usr/local/bin/cic-start; \
     CIC_WORKERS=10 CIC_SPARE=4 apache2ctl -t
 
 VOLUME ["/var/www/html"]
