@@ -65,43 +65,54 @@ code exists.
 - [x] **Security headers and a strict Content-Security-Policy** on the control plane
 - [x] **Dependency vulnerability scanning** in CI, weekly as well as on push
       (composer audit, npm audit, govulncheck with the toolchain pinned)
-- [ ] **Email verification by one-time code**: a 6-digit code typed on the
+- [x] **Email verification by one-time code**: a 6-digit code typed on the
       site (expiring, attempt-limited, single use), not only a link
-- [ ] **Sign in with Google and Apple**: OAuth apps in the owner's Google Cloud
-      and Apple Developer accounts; an OAuth sign-in counts as a verified email;
-      linking to an existing account only through a verified address
-- [ ] **Themes**: light and dark, following the system by default, switchable,
+- [ ] **Sign in with Google and Apple**: built and tested (an OAuth sign-in
+      counts as a verified email; linking to an existing account only through a
+      verified address). Apple is configured; Google waits for its client
+      SECRET from the owner. A live round trip needs a person's own account.
+- [x] **Themes**: light and dark, following the system by default, switchable,
       remembered; every page including the editor
-- [ ] **Plans described in capacity, not CPU/RAM**: concurrent visitors on a
-      typical Laravel app and live WebSocket connections per plan, measured by
-      real load and stress tests on each plan's limits; disk stays; a "view
-      more" with the actual test results
-- [ ] **Out of stock**: a plan cannot be bought, or a site created, when the
-      fleet has no room for it; shown as out of stock rather than failing
-      after payment
+- [ ] **Plans described in capacity, not CPU/RAM**: page views and concurrent
+      visitors measured per plan (tests/load/run.sh) and shown with every step
+      of the test. WebSocket connections: harness built (tests/load/ws.sh,
+      ext-uv added to the image so Reverb is not capped at 1024 sockets) -
+      to be measured after the image is rolled out
+- [x] **Out of stock**: a plan cannot be bought, or a site created, when the
+      fleet has no room for it; fails closed on stale host figures
 - [x] **Behind Cloudflare's proxy**: site, app, apex and www records proxied;
       one Cloudflare Origin CA wildcard on the hosts (no per-site ACME, so no
       Let's Encrypt weekly limit); Full (strict); real visitor IP from
       CF-Connecting-IP trusted only from Cloudflare's ranges; __Host- session cookie
-- [ ] **Custom domains through Cloudflare for SaaS** (needs it switched on for
-      the zone): certificates from Cloudflare instead of on-demand ACME, and
-      then the hosts' ports 80/443 firewalled to Cloudflare's ranges only
+- [ ] **Custom domains through Cloudflare for SaaS** - the zone has no SaaS
+      quota yet (API: "No quota has been allocated"); the owner switches it on
+      in the dashboard (free for 100 hostnames). Then certificates from
+      Cloudflare instead of on-demand ACME, and ports 80/443 firewalled to
+      Cloudflare's ranges only. Customers' own domains work today via ACME;
+      only names under codeinchrome.com share the exhausted weekly quota.
 - [ ] **Background processes in the site container**: queue worker, scheduler
-      and Laravel Reverb under a small supervisor, WebSockets routed through
-      Caddy and Cloudflare; per-plan connection limits measured
+      and Laravel Reverb under supervisor; WebSockets routed through Caddy and
+      Cloudflare. Built and unit-tested; deploy + end-to-end pending
 - [ ] **Showcase store**, built live by Claude in Chrome through the editor and
       recorded step by step: a real-looking Laravel shop (products, cart,
       Stripe checkout in test mode) with an admin panel; the demo admin login
-      published on the page but READ-ONLY; test orders with Stripe's test card
-- [ ] **A home page that shows the product**: the editor, the agent driving it,
-      the showcase store and its recording, plans and what they really serve
-- [ ] **Editor parity with a hosting panel** (aaPanel as the yardstick): a
-      recycle bin (deleted files restorable for a period), upload/download,
-      zip/unzip, search, rename/move, permissions view, cron, and anything else
-      missing - each audited, built and tested
-- [ ] **Git in every site, every change committed automatically**: nothing lost,
-      any earlier version restorable from the editor; kept in the site's own
-      volume and backups; never served over HTTP
+      published on the page but READ-ONLY. Needs a Stripe TEST secret key from
+      the owner. The home page shows it as soon as SHOWCASE_URL is set.
+- [x] **A home page that shows the product**: the editor and the agent at work
+      (drawn in HTML, themed), what every site gets, measured capacity, plans
+- [ ] **Editor parity with a hosting panel** (aaPanel as the yardstick).
+      Done: recycle bin, upload/download, zip/unzip, search, rename/move/copy,
+      database export/import (the database before an import is kept),
+      customer backups with restore (backs up first, so undoable), queue/cron
+      (scheduler)/WebSockets. Left: a permissions view, PHP settings
+- [x] **Git in every site, every change committed automatically**: every save,
+      upload, move, delete, command and restore is a version; any earlier one
+      opens read-only and restores as a new version; outside the container,
+      never served, backed up with the site
+- [x] **Root file operations kernel-checked against symlink swaps**: every
+      read, write, upload, move, zip and unzip by the agent (root) goes through
+      openat2 RESOLVE_BENEATH|NO_SYMLINKS / renameat2 NOREPLACE, so a site
+      cannot race a folder into a link to the host. Tested as root on Linux.
 - [ ] **Repository on GitHub, PRIVATE** (owner's choice; blocked on `gh auth login`; then
       `infra/publish-repo.sh --private OWNER/NAME` pushes a history-cleaned
       copy and refuses if any .env secret, private key or artifact is in it)
