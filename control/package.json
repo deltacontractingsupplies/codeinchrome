@@ -19,6 +19,8 @@
         "@laravel/multiplex": "^0.4.1"
     },
     "dependencies": {
+        "dompurify": "^3.4.16",
+        "marked": "^18.0.14",
         "monaco-editor": "^0.56.0",
         "pdfjs-dist": "^6.3.289"
     }

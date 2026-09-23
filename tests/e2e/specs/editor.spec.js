@@ -459,6 +459,47 @@ Route::get('/', function () {
     expect((await page.evaluate(() => window.cic.rm('/app/ViewProbe.php'))).ok).toBe(true);
   });
 
+  await test.step("config('...') keys and <x-...> components complete from the site", async () => {
+    expect((await page.evaluate(() => window.cic.write('/resources/views/components/alert.blade.php', '<div>{{ $slot }}</div>\n'))).ok).toBe(true);
+    expect((await page.evaluate(() => window.cic.write('/app/ConfigProbe.php', "<?php\n\n$x = 1;\n"))).ok).toBe(true);
+    await page.evaluate(() => window.cic.open('/app/ConfigProbe.php'));
+    await page.locator('.monaco-editor .view-line span', { hasText: '$x' }).first().click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type("config('app.");
+    await expect(page.locator('.suggest-widget .monaco-list-row', { hasText: 'app.name' }).first()).toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press('Escape');
+
+    expect((await page.evaluate(() => window.cic.write('/resources/views/probe.blade.php', '<main>\n</main>\n'))).ok).toBe(true);
+    await page.evaluate(() => window.cic.open('/resources/views/probe.blade.php'));
+    await page.locator('.monaco-editor .view-line span', { hasText: '<main' }).first().click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type('<x-');
+    await expect(page.locator('.suggest-widget .monaco-list-row', { hasText: 'alert' }).first()).toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press('Escape');
+
+    for (const f of ['/app/ConfigProbe.php', '/resources/views/probe.blade.php', '/resources/views/components/alert.blade.php']) {
+      expect((await page.evaluate((p) => window.cic.rm(p), f)).ok).toBe(true);
+    }
+  });
+
+  await test.step('Markdown previews render, and nothing in them runs', async () => {
+    const md = '# Release notes\n\n- first\n- second\n\n<img src=x onerror="window.__pwned=9">\n<script>window.__pwned=8</script>\n\n[click](javascript:window.__pwned=7)\n';
+    expect((await page.evaluate((m) => window.cic.write('/NOTES.md', m), md)).ok).toBe(true);
+    await page.evaluate(() => window.cic.open('/NOTES.md'));
+    await page.getByRole('button', { name: 'Preview' }).click();
+    const article = page.locator('#preview article.markdown');
+    await expect(article.locator('h1')).toHaveText('Release notes');
+    await expect(article.locator('li')).toHaveCount(2);
+    expect(await article.locator('script, img, [onerror]').count()).toBe(0);
+    const href = await article.locator('a', { hasText: 'click' }).getAttribute('href').catch(() => null);
+    expect(href ?? '').not.toContain('javascript:');
+    expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
+    await page.getByRole('button', { name: 'Edit' }).click();
+    expect((await page.evaluate(() => window.cic.rm('/NOTES.md'))).ok).toBe(true);
+  });
+
   await test.step('a folder delete needs confirm, and then its files are in the bin', async () => {
     const refused = await page.evaluate(() => window.cic.rmdir('/app/Shop'));
     expect(refused.ok).toBe(false);

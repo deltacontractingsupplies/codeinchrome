@@ -2,6 +2,7 @@ import { monaco, languageFor } from './monaco.js';
 import { startPhpLanguageServer } from './lsp.js';
 import { previewKind, loadPreview, renderPreview } from './preview.js';
 import { installLaravelProviders } from './laravel.js';
+import { renderMarkdown } from './markdown.js';
 /*
  * The codeinchrome editor.
  *
@@ -99,11 +100,15 @@ const php = startPhpLanguageServer({
 
 // Laravel's string conventions: route and view names, and ⌘-click from a
 // view name to its Blade file (laravel.js). Quiet: no terminal output.
-installLaravelProviders({
+const laravel = installLaravelProviders({
   monaco,
   listDir: async (path) => {
     const r = await api('GET', { path });
     return r.ok ? r.listing.entries : [];
+  },
+  readFile: async (path) => {
+    const r = await api('GET', { read: 1, path });
+    return r.ok ? r.content : '';
   },
   runArtisan: async (args) => {
     const r = await apiAt(SITE.commandUrl, 'POST', {}, { tool: 'artisan', args });
@@ -128,6 +133,13 @@ monaco.editor.registerEditorOpener({
     editor.focus();
     return true;
   },
+});
+
+$('btnMdPreview').addEventListener('click', () => {
+  const t = tabs.get(active);
+  if (!t) return;
+  t.mdPreview = !t.mdPreview;
+  show(active);
 });
 
 /** tab key -> Monaco model */
@@ -438,8 +450,14 @@ function show(path) {
 
   $('empty').hidden = has;
   const isPreview = Boolean(has && t.preview);
-  $('editorWrap').hidden = !has || isPreview;
-  $('preview').hidden = !isPreview;
+  const isMd = Boolean(has && !t.preview && /\.(md|markdown)$/i.test(path));
+  $('btnMdPreview').hidden = !isMd;
+  $('btnMdPreview').setAttribute('aria-pressed', String(Boolean(isMd && t.mdPreview)));
+  $('btnMdPreview').textContent = isMd && t.mdPreview ? 'Edit' : 'Preview';
+  const showMd = isMd && t.mdPreview;
+  $('editorWrap').hidden = !has || isPreview || showMd;
+  $('preview').hidden = !isPreview && !showMd;
+  if (showMd) renderMarkdown($('preview'), t.content);
   if (isPreview) {
     t.free?.();
     renderPreview($('preview'), t.preview, t.loaded, path).then((free) => { t.free = free; });
@@ -1073,6 +1091,13 @@ async function runCommand(tool, args, { confirm = false, interactive = true } = 
   showPanel('terminal');
   termLine(`$ ${tool} ${args.join(' ')}`, 't-cmd');
   let res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm });
+  // One command at a time per site. If another is finishing (a background
+  // lookup, a migration someone started), wait for it rather than fail.
+  for (let i = 0; i < 10 && res.status === 409 && res.error === 'busy'; i++) {
+    if (i === 0) termLine('Another command is running; waiting for it to finish…', 't-dim');
+    await new Promise((r) => setTimeout(r, 1500));
+    res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm });
+  }
 
   if (res.status === 409 && res.error === 'needs_confirm' && interactive) {
     const yes = await ask(`"${tool} ${args[0]}" destroys data in this site. Run it?`, { okLabel: 'Run it' });
@@ -1188,6 +1213,9 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
   cic.logs(source, lines)      source 'app' (storage/logs), 'access' (requests) or
                                'container' (PHP and Apache errors)  -> { ok, log: { lines } }
 
+  cic.laravel.routes() / .views() / .config() / .components()
+                               the site's route names, view names, config keys and Blade
+                               components -> { ok, names } (what the editor completes)
   cic.mcp.tools()              Laravel Boost's tools for this site: routes, schema, read-only queries,
                                config, last error, logs, version-specific docs -> { ok, tools }
   cic.mcp.call(name, args)     run one, answered by the site's own app -> { ok, text, result }
@@ -1694,6 +1722,13 @@ window.cic = Object.freeze({
     },
   }),
   open: (path) => openFile(path),
+  // The Laravel names the editor completes, straight from the site.
+  laravel: Object.freeze({
+    routes: async () => ({ ok: true, names: await laravel.routeNames() }),
+    views: async () => ({ ok: true, names: await laravel.viewNames() }),
+    config: async () => ({ ok: true, names: await laravel.configNames() }),
+    components: async () => ({ ok: true, names: await laravel.componentNames() }),
+  }),
   // Laravel Boost's MCP tools, answered by the site's own application.
   mcp: Object.freeze({
     tools: async () => {

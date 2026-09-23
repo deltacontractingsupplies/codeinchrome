@@ -108,7 +108,8 @@
                 <button type="button" id="btnRestoreVersion">Restore this version</button>
                 <button type="button" id="btnCloseVersion">Close</button>
             </div>
-            <div id="crumb" class="crumb"></div>
+            <div class="crumbbar"><div id="crumb" class="crumb"></div>
+                <button type="button" id="btnMdPreview" class="crumb-btn" hidden aria-pressed="false">Preview</button></div>
             <div id="preview" class="preview" hidden></div>
             <div class="editor" id="editorWrap">
                 {{-- Monaco, the editor inside VS Code, mounts here (resources/js/monaco.js). --}}
