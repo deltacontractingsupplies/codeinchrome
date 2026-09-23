@@ -88,6 +88,10 @@ setting() { cf PATCH "/zones/$CLOUDFLARE_ZONE_ID/settings/$1" "{\"value\":\"$2\"
 setting ssl strict
 setting always_use_https on
 setting min_tls_version 1.2
+# Off: Cloudflare hides email addresses behind an inline decoder script, which
+# our Content-Security-Policy (rightly) blocks - so the support address and
+# the showcase login read "[email protected]" to every visitor.
+setting email_obfuscation off
 setting tls_1_3 on
 ok "zone: SSL Full (strict), HTTPS always, TLS 1.2 minimum, TLS 1.3 on"
 
