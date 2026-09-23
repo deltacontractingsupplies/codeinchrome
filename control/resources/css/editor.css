@@ -118,6 +118,11 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg
 .tbl { display: flex; justify-content: space-between; gap: 8px; padding: 3px 12px 3px 20px; cursor: pointer; font: 12px var(--mono); }
 .tbl:hover { background: var(--list-hover); }
 .tbl.active { background: var(--list-active); }
+.dbtransfer { display: flex; flex-direction: column; gap: 6px; padding: 6px 12px 12px 20px; }
+.dbtransfer button { text-align: left; color: var(--editor-fg); padding: 3px 0; }
+.dbtransfer button:hover, .dbtransfer a:hover { text-decoration: underline; }
+.dbtransfer button:focus-visible, .dbtransfer a:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+.dbtransfer a { color: var(--accent); font-size: 12px; }
 .tbl .rows { color: var(--desc); }
 .dbpanel { position: absolute; inset: 0; display: flex; flex-direction: column; background: var(--editor-bg); z-index: 2; }
 .sqlbar { display: flex; gap: 8px; padding: 10px; border-bottom: 1px solid var(--border); }

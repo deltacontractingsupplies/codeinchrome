@@ -299,6 +299,49 @@ class AgentClient
         return ['name' => $m[1] ?? 'download', 'body' => $response->toPsrResponse()->getBody()];
     }
 
+    /**
+     * The site's whole database as .sql.gz, streamed. With $beforeImport, the
+     * copy the last import saved instead.
+     *
+     * @return array{name: string, body: StreamInterface}
+     */
+    public function dbExport(string $id, bool $beforeImport = false): array
+    {
+        try {
+            $response = Http::timeout(1900)->withToken($this->token)->withOptions(['stream' => true])
+                ->get($this->baseUrl."/v1/sites/$id/db/export".($beforeImport ? '?saved=before-import' : ''));
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}].", previous: $e);
+        }
+        if (str_contains((string) $response->header('Content-Type'), 'json')) {
+            $json = json_decode((string) $response->body(), true) ?? [];
+            throw new AgentRefused(sprintf('Agent on [%s] refused the export: %s (%s)', $this->host,
+                $json['error'] ?? 'unknown_error', $json['hint'] ?? 'no hint given'), detail: $json);
+        }
+        preg_match('/filename="([^"]+)"/', (string) $response->header('Content-Disposition'), $m);
+
+        return ['name' => $m[1] ?? "$id.sql.gz", 'body' => $response->toPsrResponse()->getBody()];
+    }
+
+    /** Loads a .sql or .sql.gz dump; the agent saves the current database first. */
+    public function dbImport(string $id, $stream): array
+    {
+        try {
+            $response = Http::timeout(1900)->acceptJson()->withToken($this->token)
+                ->withBody(Utils::streamFor($stream), 'application/octet-stream')
+                ->put($this->baseUrl."/v1/sites/$id/db/import?confirm=1");
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}]. Whether the import took effect is UNKNOWN.", previous: $e);
+        }
+        $json = $response->json() ?? [];
+        if (($json['ok'] ?? false) !== true) {
+            throw new AgentRefused(sprintf('Agent on [%s] refused the import: %s (%s)', $this->host,
+                $json['error'] ?? 'unknown_error', $json['hint'] ?? 'no hint given'), detail: $json);
+        }
+
+        return $json;
+    }
+
     /** @return array{database: string, tables: array} */
     public function dbTables(string $id): array
     {

@@ -548,6 +548,66 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"result": result}))
 	})
 
+	// Database export: the whole database as .sql.gz, streamed - a dump can be
+	// gigabytes and is never buffered. A failure after the first byte cannot
+	// change the status code; what protects the customer is gzip itself - a
+	// dump cut off part-way has no trailer and fails its checksum on
+	// decompression, so it cannot be mistaken for a complete one. The outcome
+	// is also sent as an HTTP trailer (X-Export-Status) for any client that
+	// reads trailers.
+	// ?saved=before-import returns the copy the last import saved instead.
+	mux.HandleFunc("GET /v1/sites/{id}/db/export", func(w http.ResponseWriter, r *http.Request) {
+		// The server's 5-minute write timeout is for API calls, not a dump.
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(35 * time.Minute))
+		id := r.PathValue("id")
+		name := sites.DBName(id) + ".sql.gz"
+		if r.URL.Query().Get("saved") == "before-import" {
+			f, err := mgr.BeforeImport(id)
+			if err != nil {
+				writeJSON(w, http.StatusNotFound, fail("no_saved_copy", err.Error()))
+				return
+			}
+			defer f.Close()
+			w.Header().Set("Trailer", "X-Export-Status")
+			w.Header().Set("Content-Type", "application/gzip")
+			w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", sites.DBName(id)+"-before-import.sql.gz"))
+			if _, err := io.Copy(w, f); err == nil {
+				w.Header().Set("X-Export-Status", "ok")
+			}
+			return
+		}
+		w.Header().Set("Trailer", "X-Export-Status")
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+		if err := mgr.ExportDB(r.Context(), id, w); err != nil {
+			w.Header().Set("X-Export-Status", "failed: "+err.Error())
+			return
+		}
+		w.Header().Set("X-Export-Status", "ok")
+	})
+
+	mux.HandleFunc("PUT /v1/sites/{id}/db/import", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("confirm") != "1" {
+			writeJSON(w, http.StatusConflict, fail("needs_confirm",
+				"An import replaces data in the site's database. The current database is saved first. Send confirm=1 to go ahead."))
+			return
+		}
+		rc := http.NewResponseController(w)
+		_ = rc.SetReadDeadline(time.Now().Add(20 * time.Minute))
+		_ = rc.SetWriteDeadline(time.Now().Add(35 * time.Minute))
+		body := http.MaxBytesReader(w, r.Body, sites.MaxImportSize+1)
+		err := mgr.ImportDB(r.Context(), r.PathValue("id"), body)
+		if errors.Is(err, sites.ErrBusy) {
+			writeJSON(w, http.StatusConflict, fail("busy", "Another import or command is running on this site. Try again when it finishes."))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("import_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"imported": true, "saved": "before-import"}))
+	})
+
 	mux.HandleFunc("DELETE /v1/sites/{id}", func(w http.ResponseWriter, r *http.Request) {
 		done, err := mgr.Delete(r.Context(), r.PathValue("id"))
 		if err != nil {

@@ -18,6 +18,8 @@
      data-files="{{ route('files.index', $site) }}"
      data-db-tables="{{ route('db.tables', $site) }}"
      data-db-query="{{ route('db.query', $site) }}"
+     data-db-export="{{ route('db.export', $site) }}"
+     data-db-import="{{ route('db.import', $site) }}"
      data-command="{{ route('console.run', $site) }}"
      data-logs="{{ route('console.logs', $site) }}"
      data-history="{{ route('history.index', $site) }}"
@@ -71,6 +73,13 @@
                     <span class="side-actions"><button type="button" id="btnDbRefresh" title="Refresh">⟳</button></span>
                 </div>
                 <div id="dbTables"></div>
+                <div class="side-head"><span>BACKUP</span></div>
+                <div class="dbtransfer">
+                    <button type="button" id="btnDbExport" title="Download the whole database as a .sql.gz file">Export database</button>
+                    <button type="button" id="btnDbImport" title="Load a .sql or .sql.gz file (up to 95 MB). The current database is saved first.">Import a .sql file</button>
+                    <input type="file" id="dbImportFile" accept=".sql,.gz,application/sql,application/gzip" hidden>
+                    <a id="dbUndoImport" href="#" hidden>Download the database from before the last import</a>
+                </div>
             </div>
             <div id="historySide" class="tree" hidden>
                 <div class="side-head"><span id="historyTitle">THIS FILE</span>

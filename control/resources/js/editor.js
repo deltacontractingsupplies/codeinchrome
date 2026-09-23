@@ -25,6 +25,8 @@ const SITE = {
   filesUrl: root.dataset.files,
   dbTablesUrl: root.dataset.dbTables,
   dbQueryUrl: root.dataset.dbQuery,
+  dbExportUrl: root.dataset.dbExport,
+  dbImportUrl: root.dataset.dbImport,
   commandUrl: root.dataset.command,
   logsUrl: root.dataset.logs,
   historyUrl: root.dataset.history,
@@ -700,6 +702,75 @@ async function loadTables() {
   return res;
 }
 
+/** Starts the browser's download of the database (or of the pre-import copy). */
+function exportDb({ beforeImport = false } = {}) {
+  const url = new URL(SITE.dbExportUrl, location.origin);
+  if (beforeImport) url.searchParams.set('saved', 'before-import');
+  const a = document.createElement('a');
+  a.href = url.toString();
+  a.download = '';
+  document.body.append(a);
+  a.click();
+  a.remove();
+  return { ok: true, url: url.toString() };
+}
+
+/**
+ * Loads a .sql / .sql.gz file into the database. It replaces data, so a person
+ * is asked in-page; an agent must pass { confirm: true } itself. Either way the
+ * agent on the host saves the current database first, and the link to that
+ * copy is shown afterwards - that is the undo.
+ */
+async function importDb(file, { confirm = false, interactive = true } = {}) {
+  if (!(file instanceof Blob)) return { ok: false, error: 'invalid', hint: 'Pass a File or Blob holding SQL.' };
+  if (file.size > 95 * 1024 * 1024) return { ok: false, error: 'too_large', hint: 'The file is larger than 95 MB.' };
+  if (!confirm) {
+    if (!interactive) {
+      return { ok: false, error: 'needs_confirm', hint: 'An import replaces data. Call again with { confirm: true }; the current database is saved first.' };
+    }
+    const yes = await ask(`Import ${file.name ?? 'this file'} into ${$('dbName').textContent.toLowerCase()}? Tables in the file replace the ones you have. The current database is saved first, so this can be undone.`, { okLabel: 'Import' });
+    if (!yes) return { ok: false, error: 'cancelled', hint: 'Nothing was imported.' };
+  }
+  const form = new FormData();
+  form.append('file', file, file.name ?? 'import.sql');
+  form.append('confirm', '1');
+  dbMeta(`Importing ${file.name ?? 'SQL'}… large files can take a few minutes.`);
+  let res;
+  try {
+    const r = await fetch(SITE.dbImportUrl, { method: 'POST', body: form, credentials: 'same-origin',
+      headers: { Accept: 'application/json', 'X-CSRF-TOKEN': CSRF, 'X-Requested-With': 'XMLHttpRequest' } });
+    res = await r.json().catch(() => ({ ok: false, error: `http_${r.status}`,
+      hint: r.status === 524 || r.status === 504
+        ? 'The page stopped waiting, but the import keeps running on the server. Refresh the tables in a minute.'
+        : `HTTP ${r.status}` }));
+    if (r.status === 413) res = { ok: false, error: 'too_large', hint: 'The file is larger than 95 MB.' };
+  } catch (error) {
+    res = { ok: false, error: 'network', hint: error.message };
+  }
+  if (res.ok) {
+    dbMeta('Imported. The database from before is saved - use the link on the left to download it.');
+    $('dbUndoImport').hidden = false;
+    dbLoaded = false;
+    await loadTables();
+  } else {
+    dbMeta(res.hint ?? res.message ?? 'Import failed.', true);
+    if (/saved/.test(res.hint ?? '')) $('dbUndoImport').hidden = false;
+  }
+  return res;
+}
+
+$('btnDbExport').addEventListener('click', () => exportDb());
+$('btnDbImport').addEventListener('click', () => $('dbImportFile').click());
+$('dbImportFile').addEventListener('change', async (e) => {
+  const file = e.target.files?.[0];
+  e.target.value = '';
+  if (file) await importDb(file);
+});
+$('dbUndoImport').addEventListener('click', (e) => {
+  e.preventDefault();
+  exportDb({ beforeImport: true });
+});
+
 function dbMeta(text, isError = false) {
   $('dbMeta').textContent = text;
   $('dbMeta').classList.toggle('error', isError);
@@ -984,6 +1055,11 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
                                transaction. Anything else is refused with status 409 /
                                error "needs_write" and NOTHING runs, unless you pass
                                write: true. 500 rows and 10 s per read at most.
+  cic.db.export()              download the whole database as .sql.gz
+  cic.db.import(blob, { confirm }) load a .sql or .sql.gz File/Blob (95 MB at most).
+                               Refused with "needs_confirm" unless confirm: true. The current
+                               database is saved first; it can be downloaded from the
+                               Database view to undo the import.
 
   Limits: text files only (binary files are refused rather than corrupted), 2 MB per file,
   paths are confined to this site. Anything outside it is refused with one vague message.`;
@@ -1446,6 +1522,13 @@ window.cic = Object.freeze({
 
   db: Object.freeze({
     tables: () => loadTables(),
+    // The whole database as .sql.gz, downloaded by the browser.
+    export: () => exportDb(),
+    // file: a File or Blob of SQL, e.g. new Blob(['INSERT ...'], {type: 'application/sql'}).
+    import: (file, options = {}) => {
+      if (mode !== 'db') setMode('db');
+      return importDb(file, { confirm: options.confirm === true, interactive: false });
+    },
     query: (sql, options = {}) => {
       if (typeof sql !== 'string') return Promise.resolve({ ok: false, error: 'invalid', hint: 'sql must be a string' });
       // Shown to the person watching, but never auto-confirmed: an agent must
