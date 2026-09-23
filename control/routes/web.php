@@ -7,6 +7,7 @@ use App\Http\Controllers\ConsoleController;
 use App\Http\Controllers\DatabaseController;
 use App\Http\Controllers\DomainController;
 use App\Http\Controllers\FileController;
+use App\Http\Controllers\HistoryController;
 use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\SocialLoginController;
@@ -87,6 +88,10 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::get('/sites/{site}/files', [FileController::class, 'index'])->name('files.index');
     Route::put('/sites/{site}/files', [FileController::class, 'store'])->name('files.store');
     Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->name('files.destroy');
+    // Every version of every file, the bin of deleted ones, and restore.
+    Route::get('/sites/{site}/history', [HistoryController::class, 'index'])->name('history.index');
+    Route::get('/sites/{site}/bin', [HistoryController::class, 'bin'])->name('history.bin');
+    Route::post('/sites/{site}/history/restore', [HistoryController::class, 'restore'])->middleware('throttle:command')->name('history.restore');
 
     // Commands can run for minutes and cost CPU on a shared host.
     Route::post('/sites/{site}/command', [ConsoleController::class, 'run'])->middleware('throttle:command')->name('console.run');

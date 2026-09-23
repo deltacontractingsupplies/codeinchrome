@@ -111,6 +111,9 @@ if [[ -n ${CIC_HOST_NAME:-} ]]; then
   cat > "$CIC/caddy/sites/_host.caddy" <<HOSTSITE
 # This host's own address - keeps the proxy's listeners alive. Managed.
 ${CIC_HOST_NAME}.codeinchrome.com {
+	# DNS-only, so it needs a publicly trusted certificate of its own rather
+	# than the Cloudflare origin wildcard that matches it (see the backups vhost).
+	tls force_automate
 	respond "codeinchrome host ${CIC_HOST_NAME}" 200
 }
 HOSTSITE

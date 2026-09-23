@@ -187,6 +187,30 @@ class AgentClient
         return (bool) ($this->send('delete', "/v1/sites/$id/files", query: ['path' => $path])['deleted'] ?? false);
     }
 
+    /** Versions of a file, newest first; an empty path lists every change. */
+    public function history(string $id, string $path = '', int $limit = 100): array
+    {
+        return $this->send('get', "/v1/sites/$id/history", query: ['path' => $path, 'limit' => $limit])['versions'] ?? [];
+    }
+
+    /** A file's contents at one version (a full 40-character commit id). */
+    public function fileAt(string $id, string $rev, string $path): string
+    {
+        return (string) ($this->send('get', "/v1/sites/$id/history", query: ['rev' => $rev, 'path' => $path])['content'] ?? '');
+    }
+
+    /** Deleted files not since re-created, with the version to restore from. */
+    public function bin(string $id, int $limit = 100): array
+    {
+        return $this->send('get', "/v1/sites/$id/bin", query: ['limit' => $limit])['bin'] ?? [];
+    }
+
+    /** Put a file back as it was at $rev; the restore is itself a new version. */
+    public function restore(string $id, string $rev, string $path): array
+    {
+        return $this->send('post', "/v1/sites/$id/history/restore", ['rev' => $rev, 'path' => $path]);
+    }
+
     /** @return array{database: string, tables: array} */
     public function dbTables(string $id): array
     {

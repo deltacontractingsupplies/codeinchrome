@@ -381,6 +381,10 @@ pub() {
 check "the bare domain redirects to the app" "[ \"\$(pub -sS -o /dev/null -w '%{http_code} %{redirect_url}' --retry 10 --retry-all-errors --retry-delay 6 https://$zone/pricing)\" = '301 https://$domain/pricing' ]"
 check "www redirects to the app" "[ \"\$(pub -sS -o /dev/null -w '%{http_code}' --retry 10 --retry-all-errors --retry-delay 6 https://www.$zone/)\" = 301 ]"
 check "the session cookie is __Host- (no sibling subdomain can set it)" "pub -sS -D - -o /dev/null https://$domain/login | grep -i '^set-cookie: __Host-codeinchrome-session=' | grep -iv 'domain='"
+# Hosts verify this certificate on every nightly upload. The proxy's origin
+# wildcard once took its place (Caddy prefers a loaded matching certificate),
+# which only Cloudflare trusts - backups would have failed that night.
+check "backups endpoint has a publicly trusted certificate" "[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 15 https://backups.$zone/)\" = 401 ]"
 check "php-fpm running"        "ssh root@$ip 'systemctl is-active php$PHP_VERSION-fpm'"
 check "caddy can read the docroot" "ssh root@$ip 'sudo -u caddy test -r /srv/control/public/index.php'"
 check "caddy can reach the fpm socket" "ssh root@$ip 'sudo -u caddy test -w /run/php/codeinchrome.sock'"

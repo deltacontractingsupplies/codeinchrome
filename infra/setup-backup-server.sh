@@ -87,6 +87,11 @@ systemctl restart rest-server
 cat > /opt/codeinchrome/caddy/sites/_backups.caddy <<CADDY
 # restic rest-server, append-only. TLS here; the server itself binds loopback.
 $DOMAIN {
+	# A publicly trusted certificate of its own: hosts verify it when they
+	# upload. Without force_automate, Caddy serves the Cloudflare origin
+	# wildcard (loaded for the proxied sites) here instead, which only
+	# Cloudflare trusts - and every host's backup fails its TLS check.
+	tls force_automate
 	reverse_proxy 127.0.0.1:8000
 	request_body {
 		max_size 256MB

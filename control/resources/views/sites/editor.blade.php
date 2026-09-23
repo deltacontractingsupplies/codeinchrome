@@ -20,6 +20,9 @@
      data-db-query="{{ route('db.query', $site) }}"
      data-command="{{ route('console.run', $site) }}"
      data-logs="{{ route('console.logs', $site) }}"
+     data-history="{{ route('history.index', $site) }}"
+     data-bin="{{ route('history.bin', $site) }}"
+     data-restore="{{ route('history.restore', $site) }}"
      data-back="{{ route('dashboard') }}">
 
     <header class="titlebar">
@@ -34,6 +37,7 @@
             <div class="side-modes" role="tablist">
                 <button type="button" id="modeFiles" class="on" role="tab">Files</button>
                 <button type="button" id="modeDb" role="tab">Database</button>
+                <button type="button" id="modeHistory" role="tab">History</button>
             </div>
             <div class="side-head" id="filesHead">
                 <span>EXPLORER</span>
@@ -50,6 +54,14 @@
                 </div>
                 <div id="dbTables"></div>
             </div>
+            <div id="historySide" class="tree" hidden>
+                <div class="side-head"><span id="historyTitle">THIS FILE</span>
+                    <span class="side-actions"><button type="button" id="btnHistoryRefresh" title="Refresh">⟳</button></span>
+                </div>
+                <div id="historyList"></div>
+                <div class="side-head"><span>BIN - DELETED FILES</span></div>
+                <div id="binList"></div>
+            </div>
         </aside>
 
         <main class="editor-area">
@@ -58,6 +70,11 @@
                 <span id="conflictText"></span>
                 <button type="button" id="btnTheirs">Load the saved version</button>
                 <button type="button" id="btnMine">Keep mine and overwrite</button>
+            </div>
+            <div id="versionBar" class="conflict" hidden>
+                <span id="versionText"></span>
+                <button type="button" id="btnRestoreVersion">Restore this version</button>
+                <button type="button" id="btnCloseVersion">Close</button>
             </div>
             <div id="crumb" class="crumb"></div>
             <div class="editor" id="editorWrap">

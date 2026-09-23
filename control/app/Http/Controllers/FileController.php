@@ -81,7 +81,7 @@ class FileController extends Controller
      * 404, not 403. A 403 confirms the site exists and belongs to someone
      * else, which lets anyone enumerate which names are taken and by whom.
      */
-    private function authorizeSite(Request $request, Site $site): void
+    protected function authorizeSite(Request $request, Site $site): void
     {
         abort_unless($site->user_id === $request->user()->id, 404);
         abort_unless($site->status === 'live', 409, 'This site is not live yet.');
@@ -93,7 +93,7 @@ class FileController extends Controller
      * different responses from the panel: one is worth retrying, the other
      * never is until the request changes.
      */
-    private function attempt(callable $work): JsonResponse
+    protected function attempt(callable $work): JsonResponse
     {
         try {
             return response()->json(['ok' => true] + $work());

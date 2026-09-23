@@ -156,3 +156,9 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg
   .sidebar { border-right: 0; border-bottom: 1px solid var(--border); }
   .titlebar .title { display: none; }
 }
+
+/* History panel: versions and the bin. */
+.node.version { height: auto; min-height: 22px; padding: 2px 8px 2px 20px; }
+.node.version .nm { white-space: normal; font-size: 12px; }
+.node.version .del { opacity: .8; font-size: 11px; color: var(--link); }
+.node.version:hover .del { opacity: 1; }

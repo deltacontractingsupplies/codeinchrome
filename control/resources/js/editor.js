@@ -27,6 +27,9 @@ const SITE = {
   dbQueryUrl: root.dataset.dbQuery,
   commandUrl: root.dataset.command,
   logsUrl: root.dataset.logs,
+  historyUrl: root.dataset.history,
+  binUrl: root.dataset.bin,
+  restoreUrl: root.dataset.restore,
 };
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
 const DRAFTS_KEY = `cic.drafts.${SITE.id}`;
@@ -105,7 +108,7 @@ const baseName = (p) => norm(p).split('/').pop();
 function saveDrafts() {
   const drafts = {};
   for (const [path, t] of tabs) {
-    if (t.dirty) drafts[path] = { content: t.content, revision: t.revision };
+    if (t.dirty && !t.version) drafts[path] = { content: t.content, revision: t.revision };
   }
   try {
     sessionStorage.setItem(DRAFTS_KEY, JSON.stringify(drafts));
@@ -324,6 +327,10 @@ function show(path) {
 
   $('empty').hidden = has;
   ta.disabled = !has;
+  // An earlier version is shown read-only; it changes only by restoring it.
+  ta.readOnly = Boolean(has && t.version);
+  $('versionBar').hidden = !(has && t.version);
+  if (has && t.version) $('versionText').textContent = `Version of ${t.version.path} from ${when(t.version.at)} — ${t.version.message}. Read-only.`;
   ta.value = has ? t.content : '';
   $('crumb').textContent = has ? path.slice(1).split('/').join('  ›  ') : '';
   $('winTitle').textContent = has ? `${baseName(path)} — ${SITE.id}` : SITE.id;
@@ -407,6 +414,7 @@ function closeTab(path) {
 async function save(path = active, { overwrite = false } = {}) {
   const t = tabs.get(path);
   if (!t) return { ok: false, error: 'not_open', hint: `${path} is not open` };
+  if (t.version) return { ok: false, error: 'read_only', hint: 'An earlier version is read-only. Restore it to make it current.' };
 
   let expect = t.revision || 'absent';
   if (overwrite) {
@@ -527,7 +535,7 @@ async function removeFile(path) {
 }
 
 async function confirmDelete(path) {
-  if (await ask(`Delete ${path}? This cannot be undone.`, { okLabel: 'Delete' })) {
+  if (await ask(`Delete ${path}? It goes to the bin (History), where it can be restored.`, { okLabel: 'Delete' })) {
     removeFile(path);
   }
 }
@@ -631,6 +639,9 @@ function setMode(next) {
   mode = next;
   $('modeFiles').classList.toggle('on', next === 'files');
   $('modeDb').classList.toggle('on', next === 'db');
+  $('modeHistory').classList.toggle('on', next === 'history');
+  $('historySide').hidden = next !== 'history';
+  if (next === 'history') loadHistory();
   $('tree').hidden = next !== 'files';
   $('filesHead').hidden = next !== 'files';
   document.querySelector('.side-site').hidden = next !== 'files';
@@ -755,6 +766,13 @@ async function runSql(sql, { write = false, interactive = true } = {}) {
 
 $('modeFiles').addEventListener('click', () => setMode('files'));
 $('modeDb').addEventListener('click', () => setMode('db'));
+$('modeHistory').addEventListener('click', () => setMode('history'));
+$('btnHistoryRefresh').addEventListener('click', () => loadHistory());
+$('btnRestoreVersion').addEventListener('click', () => {
+  const t = tabs.get(active);
+  if (t?.version) confirmRestore(t.version.path, t.version.rev, t.version.at);
+});
+$('btnCloseVersion').addEventListener('click', () => closeVersionTab(active));
 $('btnDbRefresh').addEventListener('click', loadTables);
 $('btnRun').addEventListener('click', () => runSql($('sql').value));
 $('sql').addEventListener('keydown', (e) => {
@@ -917,6 +935,12 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
                                expect: 'absent' to create only if missing, or '' to write
                                unconditionally (the result then says so in "note").
   cic.rm(path)                 delete a file (not recursive)    -> { ok, deleted }
+                               It goes to the bin and can be restored.
+  cic.history(path)            every version of a file, newest  -> { ok, versions: [{ commit, at, message }] }
+  cic.versionAt(path, commit)  a file as it was at one version  -> { ok, content }
+  cic.bin()                    deleted files and where from     -> { ok, bin: [{ path, deletedAt, from }] }
+  cic.restore(path, commit)    put a version back; the restore is itself a new version,
+                               so it can be undone the same way  -> { ok, restoredFrom }
   cic.open(path)               open a file in the editor for the person watching
   cic.state()                  what is open, which tabs are unsaved or in conflict
 
@@ -942,6 +966,146 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
 
   Limits: text files only (binary files are refused rather than corrupted), 2 MB per file,
   paths are confined to this site. Anything outside it is refused with one vague message.`;
+
+/* ───────────────────────── history & bin ─────────────────────────
+ * Every save, delete and command is a version on the host (vol/history.git).
+ * Earlier versions open read-only; restoring one makes it current and is
+ * itself a new version, so nothing - including the restore - is ever lost.
+ */
+
+function when(iso) {
+  const d = new Date(iso);
+  const s = Math.round((Date.now() - d.getTime()) / 1000);
+  if (s < 60) return 'just now';
+  if (s < 3600) return `${Math.floor(s / 60)} min ago`;
+  if (s < 86400) return `${Math.floor(s / 3600)} h ago`;
+  return d.toLocaleString();
+}
+
+/** The real file behind the active tab (a version tab points at its file). */
+function historySubject() {
+  const t = tabs.get(active);
+  return t?.version ? t.version.path : active;
+}
+
+async function fileHistory(path) {
+  return apiAt(SITE.historyUrl, 'GET', { path: norm(path), limit: 100 });
+}
+
+async function loadHistory() {
+  const list = $('historyList');
+  const bin = $('binList');
+  const path = historySubject();
+  list.replaceChildren();
+  bin.replaceChildren();
+  $('historyTitle').textContent = path ? `THIS FILE - ${baseName(path)}` : 'THIS FILE';
+
+  if (path) {
+    const res = await fileHistory(path);
+    if (!res.ok) list.append(note(res.hint, 0));
+    else if (res.versions.length === 0) list.append(note('No versions yet. Every save from now on is one.', 0));
+    else res.versions.forEach((v, i) => list.append(versionRow(path, v, i === 0)));
+  } else {
+    list.append(note('Open a file to see its versions.', 0));
+  }
+
+  const b = await apiAt(SITE.binUrl, 'GET');
+  if (!b.ok) bin.append(note(b.hint, 0));
+  else if (b.bin.length === 0) bin.append(note('Empty. Deleted files appear here.', 0));
+  else b.bin.forEach((item) => bin.append(binRow(item)));
+}
+
+function versionRow(path, v, current) {
+  const row = document.createElement('div');
+  row.className = 'node version';
+  const label = document.createElement('span');
+  label.className = 'nm';
+  label.textContent = `${when(v.at)} · ${v.message}${current ? ' (current)' : ''}`;
+  label.title = `${v.commit.slice(0, 12)} · ${new Date(v.at).toLocaleString()}`;
+  row.append(label);
+  row.addEventListener('click', () => viewVersion(path, v));
+  if (!current) {
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.className = 'del';
+    restore.textContent = 'Restore';
+    restore.addEventListener('click', (e) => { e.stopPropagation(); confirmRestore(path, v.commit, v.at); });
+    row.append(restore);
+  }
+  return row;
+}
+
+function binRow(item) {
+  const row = document.createElement('div');
+  row.className = 'node version';
+  const label = document.createElement('span');
+  label.className = 'nm';
+  label.textContent = `${item.path} · deleted ${when(item.deletedAt)}`;
+  row.append(label);
+  const restore = document.createElement('button');
+  restore.type = 'button';
+  restore.className = 'del';
+  restore.textContent = 'Restore';
+  restore.addEventListener('click', () => confirmRestore('/' + item.path, item.from, item.deletedAt));
+  row.append(restore);
+  return row;
+}
+
+async function versionAt(path, rev) {
+  return apiAt(SITE.historyUrl, 'GET', { path: norm(path), rev });
+}
+
+async function viewVersion(path, v) {
+  path = norm(path);
+  const key = `${path} @ ${v.commit.slice(0, 7)}`;
+  if (!tabs.has(key)) {
+    const res = await versionAt(path, v.commit);
+    if (!res.ok) {
+      status(`${path}: ${res.hint}`, true);
+      return res;
+    }
+    tabs.set(key, { content: res.content, saved: res.content, revision: '', dirty: false, conflict: null,
+      version: { path, rev: v.commit, at: v.at, message: v.message } });
+  }
+  show(key);
+  return { ok: true, path, rev: v.commit };
+}
+
+function closeVersionTab(key) {
+  if (!tabs.get(key)?.version) return;
+  tabs.delete(key);
+  show([...tabs.keys()][0] ?? null);
+}
+
+async function restoreVersion(path, rev) {
+  path = norm(path);
+  const res = await apiAt(SITE.restoreUrl, 'POST', {}, { rev, path });
+  if (!res.ok) {
+    status(`${path}: ${res.hint}`, true);
+    return res;
+  }
+  // Drop any version tabs of this file and reload the file itself.
+  for (const key of [...tabs.keys()]) if (tabs.get(key).version?.path === path) tabs.delete(key);
+  const open = tabs.get(path);
+  if (open && open.dirty) {
+    open.conflict = 'An earlier version was just restored. Your unsaved edits would overwrite it.';
+    open.revision = '';
+  } else {
+    tabs.delete(path);
+  }
+  await refreshAncestors(path);
+  await openFile(path);
+  if (mode === 'history') loadHistory();
+  status(`Restored ${path} from ${rev.slice(0, 7)} (the restore is itself a new version)`);
+  return res;
+}
+
+async function confirmRestore(path, rev, at) {
+  if (await ask(`Restore ${path} to the version from ${when(at)}? What it holds now stays in its history.`, { okLabel: 'Restore' })) {
+    return restoreVersion(path, rev);
+  }
+  return { ok: false, error: 'cancelled', hint: 'Not restored.' };
+}
 
 window.cic = Object.freeze({
   version: '1.0',
@@ -992,6 +1156,12 @@ window.cic = Object.freeze({
   },
 
   rm: (path) => removeFile(path),
+
+  // History: every save is a version; deleted files wait in the bin.
+  history: (path) => fileHistory(path),
+  versionAt: (path, rev) => versionAt(path, rev),
+  bin: () => apiAt(SITE.binUrl, 'GET'),
+  restore: (path, rev) => restoreVersion(path, rev),
 
   run: (tool, args = [], options = {}) => {
     if (!Array.isArray(args)) args = splitArgs(String(args));
