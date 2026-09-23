@@ -9,3 +9,5 @@
 {"plan":"pro","rate":40,"requests":1200,"achieved_rps":39.99829696984421,"failed_ratio":0,"p50_ms":16.332991,"p95_ms":18.974739500000002,"p99_ms":21.92366646,"dropped":0}
 {"plan":"pro","rate":50,"requests":1501,"achieved_rps":50.00450417653503,"failed_ratio":0,"p50_ms":15.988101,"p95_ms":18.583075,"p99_ms":22.797003,"dropped":0}
 {"plan":"pro","rate":60,"requests":1801,"achieved_rps":59.99975716122716,"failed_ratio":0,"p50_ms":15.386063,"p95_ms":18.398855,"p99_ms":22.160713,"dropped":0}
+{"plan":"pro","rate":80,"requests":2401,"achieved_rps":79.98548033203106,"failed_ratio":0,"p50_ms":16.313463,"p95_ms":19.801334,"p99_ms":26.809041,"dropped":0}
+{"plan":"pro","rate":100,"requests":2967,"achieved_rps":86.214128464018,"failed_ratio":0.07448601280754971,"p50_ms":275.40141,"p95_ms":10000.1637335,"p99_ms":10000.82875468,"dropped":34}
