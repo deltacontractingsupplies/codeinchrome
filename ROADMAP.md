@@ -79,6 +79,16 @@ code exists.
 - [ ] **Out of stock**: a plan cannot be bought, or a site created, when the
       fleet has no room for it; shown as out of stock rather than failing
       after payment
+- [x] **Behind Cloudflare's proxy**: site, app, apex and www records proxied;
+      one Cloudflare Origin CA wildcard on the hosts (no per-site ACME, so no
+      Let's Encrypt weekly limit); Full (strict); real visitor IP from
+      CF-Connecting-IP trusted only from Cloudflare's ranges; __Host- session cookie
+- [ ] **Custom domains through Cloudflare for SaaS** (needs it switched on for
+      the zone): certificates from Cloudflare instead of on-demand ACME, and
+      then the hosts' ports 80/443 firewalled to Cloudflare's ranges only
+- [ ] **Background processes in the site container**: queue worker, scheduler
+      and Laravel Reverb under a small supervisor, WebSockets routed through
+      Caddy and Cloudflare; per-plan connection limits measured
 - [ ] **Repository on GitHub, PRIVATE** (owner's choice; blocked on `gh auth login`; then
       `infra/publish-repo.sh --private OWNER/NAME` pushes a history-cleaned
       copy and refuses if any .env secret, private key or artifact is in it)
