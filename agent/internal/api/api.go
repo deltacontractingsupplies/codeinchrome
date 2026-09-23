@@ -608,6 +608,56 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"imported": true, "saved": "before-import"}))
 	})
 
+	// Backups: the nightly snapshots, a backup now, and a restore - which
+	// backs the site up first, so it can be undone. Both run in the
+	// background; GET .../backups reports progress as "operation".
+	mux.HandleFunc("GET /v1/sites/{id}/backups", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		list, err := mgr.Backups(r.Context(), id)
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, fail("backups_unavailable", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"backups": list, "operation": mgr.BackupStatus(id)}))
+	})
+	mux.HandleFunc("POST /v1/sites/{id}/backups", func(w http.ResponseWriter, r *http.Request) {
+		op, err := mgr.StartBackup(r.PathValue("id"))
+		if errors.Is(err, sites.ErrBackupRunning) {
+			writeJSON(w, http.StatusConflict, fail("busy", err.Error()))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_backup", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusAccepted, ok(resp{"operation": op}))
+	})
+	mux.HandleFunc("POST /v1/sites/{id}/backups/restore", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Snapshot string `json:"snapshot"`
+			Confirm  bool   `json:"confirm"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {snapshot, confirm}"))
+			return
+		}
+		if !body.Confirm {
+			writeJSON(w, http.StatusConflict, fail("needs_confirm",
+				"A restore replaces the site's files and database and takes it offline for a few minutes. The site is backed up first. Send confirm: true to go ahead."))
+			return
+		}
+		op, err := mgr.StartRestore(r.Context(), r.PathValue("id"), body.Snapshot)
+		if errors.Is(err, sites.ErrBackupRunning) {
+			writeJSON(w, http.StatusConflict, fail("busy", err.Error()))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_restore", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusAccepted, ok(resp{"operation": op}))
+	})
+
 	mux.HandleFunc("DELETE /v1/sites/{id}", func(w http.ResponseWriter, r *http.Request) {
 		done, err := mgr.Delete(r.Context(), r.PathValue("id"))
 		if err != nil {

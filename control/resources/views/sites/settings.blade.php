@@ -3,6 +3,7 @@
 @section('content')
 <p class="text-sm"><a href="{{ route('dashboard') }}" class="text-neutral-500 hover:text-neutral-300">Sites</a> <span class="text-neutral-600">/</span> {{ $site->domain }}</p>
 <h1 class="mt-2 text-2xl font-semibold text-white">Settings</h1>
+<p class="mt-2 text-sm text-neutral-400"><a href="{{ route('sites.backups', $site) }}" class="text-teal-300 underline">Backups</a> - nightly copies of the files and database, and restore.</p>
 
 <section class="mt-8 max-w-2xl">
     <h2 class="text-lg font-medium text-neutral-100">Background processes</h2>

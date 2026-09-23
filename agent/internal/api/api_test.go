@@ -107,3 +107,11 @@ func TestAnUnknownRouteIsAJSONNotFound(t *testing.T) {
 		t.Fatalf("unknown route: %d %v", res.StatusCode, j)
 	}
 }
+
+func TestARestoreNeedsConfirmBeforeAnythingRuns(t *testing.T) {
+	srv, _ := server(t)
+	res, j := call(t, "POST", srv.URL+"/v1/sites/shop/backups/restore", `{"snapshot":"a0000001"}`)
+	if res.StatusCode != http.StatusConflict || j["error"] != "needs_confirm" {
+		t.Fatalf("restore without confirm: %d %v", res.StatusCode, j)
+	}
+}

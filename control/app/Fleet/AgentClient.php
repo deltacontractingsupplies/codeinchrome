@@ -219,6 +219,28 @@ class AgentClient
         return $this->send('put', "/v1/sites/$id/background", ['queue' => $queue, 'scheduler' => $scheduler, 'reverb' => $reverb])['applied'] ?? [];
     }
 
+    // ── backups ──
+
+    /** @return array{backups: array, operation: ?array} newest first; operation is the current or last backup/restore */
+    public function backups(string $id): array
+    {
+        $r = $this->send('get', "/v1/sites/$id/backups");
+
+        return ['backups' => $r['backups'] ?? [], 'operation' => $r['operation'] ?? null];
+    }
+
+    /** Starts a backup now, in the background. */
+    public function backupNow(string $id): array
+    {
+        return $this->send('post', "/v1/sites/$id/backups")['operation'] ?? [];
+    }
+
+    /** Backs the site up as it is, then restores $snapshot (files and database), in the background. */
+    public function restoreBackup(string $id, string $snapshot): array
+    {
+        return $this->send('post', "/v1/sites/$id/backups/restore", ['snapshot' => $snapshot, 'confirm' => true])['operation'] ?? [];
+    }
+
     // ── the file manager ──
 
     public function mkdir(string $id, string $path): array

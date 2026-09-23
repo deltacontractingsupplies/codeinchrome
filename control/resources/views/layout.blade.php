@@ -12,6 +12,7 @@
     {{-- Blocking on purpose: sets the theme before the first paint. --}}
     <script src="/theme.js"></script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
+    @stack('head')
 </head>
 <body class="h-full bg-neutral-950 text-neutral-200 antialiased">
 <div class="min-h-full flex flex-col">

@@ -105,6 +105,8 @@
                        class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-neutral-500">Domains</a>
                     <a href="{{ route('sites.settings', $site) }}"
                        class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-neutral-500">Settings</a>
+                    <a href="{{ route('sites.backups', $site) }}"
+                       class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-neutral-500">Backups</a>
                 @endif
                 {{-- A two-step delete with no JavaScript and no confirm().
                      A native dialog freezes the page for a browser-driving
