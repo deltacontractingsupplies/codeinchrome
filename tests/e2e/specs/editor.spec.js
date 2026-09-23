@@ -85,6 +85,21 @@ test('a person and an agent can both edit a real site, without erasing each othe
 
   });
 
+  await test.step('Laravel Boost MCP answers the agent from the site itself, read-only', async () => {
+    const tools = await page.evaluate(() => window.cic.mcp.tools());
+    expect(tools.ok, tools.hint).toBe(true);
+    expect(tools.tools.map((t) => t.name)).toEqual(expect.arrayContaining(['application-info', 'database-schema', 'database-query', 'last-error', 'search-docs']));
+
+    const info = await page.evaluate(() => window.cic.mcp.call('application-info', {}));
+    expect(info.ok).toBe(true);
+    expect(JSON.parse(info.text).database_engine).toBe('mysql');
+
+    const write = await page.evaluate(() => window.cic.mcp.call('database-query', { query: 'drop table migrations' }));
+    expect(write.ok).toBe(false);
+    const still = await page.evaluate(() => window.cic.db.query('select count(*) as n from migrations'));
+    expect(still.ok).toBe(true);
+  });
+
   await test.step('the explorer shows the real Laravel tree, with the open file revealed', async () => {
     await expect(page.locator('.node.active .nm')).toHaveText('web.php');
     for (const name of ['app', 'public', 'routes', 'artisan', 'composer.json']) {

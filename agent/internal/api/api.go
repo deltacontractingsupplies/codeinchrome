@@ -688,6 +688,28 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"closed": true}))
 	})
 
+	// Laravel Boost's MCP tools, answered by the site's own application.
+	mux.HandleFunc("POST /v1/sites/{id}/mcp", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Method string          `json:"method"`
+			Params json.RawMessage `json:"params"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {method, params}"))
+			return
+		}
+		res, err := mgr.MCP(r.Context(), r.PathValue("id"), body.Method, body.Params)
+		if errors.Is(err, sites.ErrMCPNotInstalled) {
+			writeJSON(w, http.StatusConflict, fail("boost_not_installed", err.Error()))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("mcp_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"result": res}))
+	})
+
 	mux.HandleFunc("DELETE /v1/sites/{id}", func(w http.ResponseWriter, r *http.Request) {
 		done, err := mgr.Delete(r.Context(), r.PathValue("id"))
 		if err != nil {

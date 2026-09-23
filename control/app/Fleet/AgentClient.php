@@ -219,6 +219,27 @@ class AgentClient
         return $this->send('put', "/v1/sites/$id/background", ['queue' => $queue, 'scheduler' => $scheduler, 'reverb' => $reverb])['applied'] ?? [];
     }
 
+    // ── Laravel Boost MCP ──
+
+    /** One MCP request (tools/list or tools/call); params and result are raw JSON. */
+    public function mcp(string $id, string $method, string $paramsJson): string
+    {
+        try {
+            $response = Http::timeout(75)->acceptJson()->withToken($this->token)
+                ->withBody('{"method":'.json_encode($method, JSON_UNESCAPED_SLASHES).',"params":'.$paramsJson.'}', 'application/json')
+                ->post($this->baseUrl."/v1/sites/$id/mcp");
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}].", previous: $e);
+        }
+        $json = json_decode($response->body());
+        if (! is_object($json) || ($json->ok ?? false) !== true) {
+            throw new AgentRefused(sprintf('Agent on [%s] refused the MCP call: %s', $this->host, $json->error ?? 'unknown_error'),
+                detail: ['error' => $json->error ?? 'unknown_error', 'hint' => $json->hint ?? 'no hint given']);
+        }
+
+        return json_encode($json->result ?? null, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
+
     // ── the editor's language server ──
 
     /**

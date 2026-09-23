@@ -22,6 +22,7 @@
      data-db-query="{{ route('db.query', $site) }}"
      data-db-export="{{ route('db.export', $site) }}"
      data-lsp="{{ route('lsp.exchange', $site) }}"
+     data-mcp="{{ route('mcp.call', $site) }}"
      data-lsp-close="{{ url('/sites/'.$site->site_id.'/lsp') }}"
      data-db-import="{{ route('db.import', $site) }}"
      data-command="{{ route('console.run', $site) }}"

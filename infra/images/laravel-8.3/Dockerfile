@@ -104,6 +104,13 @@ RUN set -eux; \
 RUN set -eux; \
     COMPOSER_ALLOW_SUPERUSER=1 composer create-project laravel/laravel /opt/cic-skeleton \
         --no-interaction --prefer-dist --no-progress --quiet; \
+    # Laravel Boost (MIT, dev only): its MCP server gives the editor's agent
+    # routes, schema, logs, the last error and version-specific docs
+    # (window.cic.mcp). -W: its HTTP libraries need versions the skeleton's
+    # lock does not have.
+    COMPOSER_ALLOW_SUPERUSER=1 composer --working-dir=/opt/cic-skeleton require --dev -W \
+        --no-interaction --no-progress --quiet laravel/boost; \
+    php /opt/cic-skeleton/artisan list --raw | grep -q '^boost:mcp'; \
     rm -f /opt/cic-skeleton/.env; \
     rm -rf /opt/cic-skeleton/.git /root/.composer /tmp/*; \
     php /opt/cic-skeleton/artisan --version; \

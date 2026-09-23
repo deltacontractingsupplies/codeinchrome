@@ -29,6 +29,7 @@ const SITE = {
   dbQueryUrl: root.dataset.dbQuery,
   dbExportUrl: root.dataset.dbExport,
   lspUrl: root.dataset.lsp,
+  mcpUrl: root.dataset.mcp,
   lspCloseUrl: root.dataset.lspClose,
   dbImportUrl: root.dataset.dbImport,
   commandUrl: root.dataset.command,
@@ -1118,6 +1119,10 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
   cic.logs(source, lines)      source 'app' (storage/logs), 'access' (requests) or
                                'container' (PHP and Apache errors)  -> { ok, log: { lines } }
 
+  cic.mcp.tools()              Laravel Boost's tools for this site: routes, schema, read-only queries,
+                               config, last error, logs, version-specific docs -> { ok, tools }
+  cic.mcp.call(name, args)     run one, answered by the site's own app -> { ok, text, result }
+                               e.g. cic.mcp.call('database-schema'), cic.mcp.call('search-docs', { queries: ['queues'] })
   cic.php.status()             PHP IntelliSense: { initialized, capabilities, openPhpFiles, lastError }
   cic.php.complete(path, line, col)   PHP completions at a position (1-based) -> { ok, items: [{ label, kind, detail }] }
   cic.php.hover(path, line, col)      what the symbol there is, with its docs  -> { ok, text }
@@ -1620,6 +1625,20 @@ window.cic = Object.freeze({
     },
   }),
   open: (path) => openFile(path),
+  // Laravel Boost's MCP tools, answered by the site's own application.
+  mcp: Object.freeze({
+    tools: async () => {
+      const r = await apiAt(SITE.mcpUrl, 'POST', {}, { method: 'tools/list', params: {} });
+      return r.ok ? { ok: true, tools: (r.result?.tools ?? []).map((t) => ({ name: t.name, description: t.description, input: t.inputSchema })) } : r;
+    },
+    call: async (name, args = {}) => {
+      if (typeof name !== 'string') return { ok: false, error: 'invalid', hint: 'name must be a tool name from cic.mcp.tools()' };
+      const r = await apiAt(SITE.mcpUrl, 'POST', {}, { method: 'tools/call', params: { name, arguments: args && typeof args === 'object' && !Array.isArray(args) ? args : {} } });
+      if (!r.ok) return r;
+      const text = (r.result?.content ?? []).filter((c) => c.type === 'text').map((c) => c.text).join('\n');
+      return { ok: !r.result?.isError, text, result: r.result };
+    },
+  }),
   // PHP IntelliSense (Phpactor in the site's container): is it running?
   php: Object.freeze({
     status: () => php.status(),

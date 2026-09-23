@@ -13,6 +13,7 @@ use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\SiteController;
 use App\Http\Controllers\BackupController;
 use App\Http\Controllers\LspController;
+use App\Http\Controllers\McpController;
 use App\Http\Controllers\SiteSettingsController;
 use App\Http\Controllers\SocialLoginController;
 use App\Http\Controllers\StatusController;
@@ -131,6 +132,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::get('/sites/{site}/db', [DatabaseController::class, 'tables'])->name('db.tables');
     Route::post('/sites/{site}/db/query', [DatabaseController::class, 'query'])->middleware('throttle:db')->name('db.query');
     Route::post('/sites/{site}/lsp', [LspController::class, 'exchange'])->middleware('throttle:lsp')->name('lsp.exchange');
+    Route::post('/sites/{site}/mcp', [McpController::class, 'call'])->middleware('throttle:mcp')->name('mcp.call');
     Route::delete('/sites/{site}/lsp/{session}', [LspController::class, 'close'])->name('lsp.close');
     Route::get('/sites/{site}/db/export', [DatabaseController::class, 'export'])->middleware('throttle:db')->name('db.export');
     Route::post('/sites/{site}/db/import', [DatabaseController::class, 'import'])->middleware('throttle:db')->name('db.import');
