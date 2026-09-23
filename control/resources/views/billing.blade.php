@@ -22,7 +22,9 @@
             <div class="mt-1 text-2xl font-semibold text-white">${{ $plan['price'] }}<span class="text-sm font-normal text-neutral-500">/mo</span></div>
             <ul class="mt-3 space-y-1 text-sm text-neutral-400">
                 <li>{{ $plan['sites'] }} {{ Str::plural('site', $plan['sites']) }}</li>
-                <li>{{ $plan['cpu'] }} CPU · {{ $plan['memory'] }} RAM</li>
+                @if ($cap = app(\App\Billing\Capacity::class)->forPlan($key))
+                    <li>~{{ number_format($cap['concurrent_visitors']) }} visitors at once</li>
+                @endif
                 <li>{{ $plan['disk_gb'] }} GB disk</li>
                 <li>{{ $plan['custom_domains'] ? 'Custom domains' : 'Free subdomain' }}</li>
             </ul>

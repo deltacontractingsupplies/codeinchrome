@@ -35,3 +35,4 @@ playwright-report/
 
 # infra/publish-repo.sh builds the cleaned public copy here.
 /.publish/
+/.tmp-*

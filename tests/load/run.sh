@@ -104,6 +104,28 @@ for plan in $PLANS; do
   ok "$plan: $best page views/s within the bar"
 done
 
+# Machine-readable for the pricing page (control/resources/capacity.json):
+# only measured numbers are ever shown to customers.
+python3 - "$out" "$stamp" > "$out/capacity.json" <<'PY'
+import json, sys, glob, os
+out, stamp = sys.argv[1], sys.argv[2]
+plans = {}
+for f in glob.glob(os.path.join(out, "*.jsonl")):
+    rows = [json.loads(l) for l in open(f) if l.strip()]
+    ok = [r for r in rows if (r.get("p95_ms") or 1e9) <= 500 and r.get("failed_ratio", 1) <= 0.01 and r.get("dropped", 0) <= r["rate"] * 30 * 0.01]
+    if not rows:
+        continue
+    best = max(ok, key=lambda r: r["rate"]) if ok else None
+    plans[rows[0]["plan"]] = {
+        "page_views_per_second": best["rate"] if best else 0,
+        "p95_ms": round(best["p95_ms"]) if best else None,
+        "steps": [{k: r[k] for k in ("rate", "achieved_rps", "p95_ms", "failed_ratio", "dropped")} for r in rows],
+    }
+json.dump({"measured_at": stamp, "bar": {"p95_ms": 500, "errors": 0.01},
+           "workload": "Laravel storefront page: session, 2 MySQL queries over 200 products, Blade render (tests/load/app)",
+           "plans": plans}, sys.stdout, indent=2)
+PY
+cp "$out/capacity.json" control/resources/capacity.json
 echo; cat "$summary"
 if [[ ${KEEP:-0} != 1 ]]; then
   artisan "site:reap $SITE" >/dev/null && ok "bench site removed"

@@ -7,7 +7,10 @@
             </div>
             <ul class="mt-4 space-y-1 text-sm text-neutral-400">
                 <li>{{ $plan['sites'] }} {{ Str::plural('site', $plan['sites']) }}</li>
-                <li>{{ $plan['cpu'] }} CPU &middot; {{ $plan['memory'] }} RAM</li>
+                @if ($cap = app(\App\Billing\Capacity::class)->forPlan($key))
+                    <li>~{{ number_format($cap['concurrent_visitors']) }} visitors at once</li>
+                    <li class="text-neutral-500">{{ $cap['page_views_per_second'] }} page views/s, measured</li>
+                @endif
                 <li>{{ $plan['disk_gb'] }} GB disk</li>
                 <li>{{ $plan['custom_domains'] ? 'Custom domains' : 'Free subdomain' }}</li>
             </ul>

@@ -288,4 +288,94 @@ Route::get('/', function () {
     expect(res.ok).toBe(false);
     expect(res.hint).toContain('binary');
   });
+
+  await test.step('every save is a version; an old one opens read-only and can be restored', async () => {
+    await page.evaluate(async () => {
+      await window.cic.write('/resources/views/hist.blade.php', 'version one', { expect: 'absent' });
+      await window.cic.read('/resources/views/hist.blade.php');
+      await window.cic.write('/resources/views/hist.blade.php', 'version two');
+    });
+    const h = await page.evaluate(() => window.cic.history('/resources/views/hist.blade.php'));
+    expect(h.ok).toBe(true);
+    expect(h.versions.map((v) => v.message)).toEqual(['save resources/views/hist.blade.php', 'save resources/views/hist.blade.php']);
+
+    // A person looks at the first version in the History panel.
+    await page.evaluate(() => window.cic.open('/resources/views/hist.blade.php'));
+    await page.getByRole('tab', { name: 'History' }).click();
+    await page.locator('#historyList .node').nth(1).click();
+    await expect(page.locator('#ta')).toHaveValue('version one');
+    await expect(page.locator('#ta')).toHaveJSProperty('readOnly', true);
+    await expect(page.locator('#versionBar')).toBeVisible();
+
+    // Restore it: it becomes current, and the restore is itself a version.
+    await page.getByRole('button', { name: 'Restore this version' }).click();
+    await page.locator('#modalOk').click();
+    await expect(page.locator('#sbMsg')).toContainText('Restored /resources/views/hist.blade.php');
+    await expect(page.locator('#ta')).toHaveValue('version one');
+    const after = await page.evaluate(() => window.cic.history('/resources/views/hist.blade.php'));
+    expect(after.versions[0].message).toMatch(/^restore resources\/views\/hist\.blade\.php from [0-9a-f]{7}$/);
+  });
+
+  await test.step('a deleted file waits in the bin and comes back', async () => {
+    await page.evaluate(() => window.cic.rm('/resources/views/hist.blade.php'));
+    const bin = await page.evaluate(() => window.cic.bin());
+    const item = bin.bin.find((b) => b.path === 'resources/views/hist.blade.php');
+    expect(item, 'the deleted file should be in the bin').toBeTruthy();
+    const r = await page.evaluate(({ from }) => window.cic.restore('/resources/views/hist.blade.php', from), { from: item.from });
+    expect(r.ok).toBe(true);
+    const back = await page.evaluate(() => window.cic.read('/resources/views/hist.blade.php'));
+    expect(back.content).toBe('version one');
+  });
+
+  await test.step('.env never enters history', async () => {
+    const r = await page.evaluate(() => window.cic.history('/.env'));
+    expect(r.ok).toBe(false);
+    expect(r.hint).toContain('secrets are not kept in history');
+  });
+
+  await test.step('folders, move, copy and search work on the real site', async () => {
+    expect((await page.evaluate(() => window.cic.mkdir('/app/Shop'))).ok).toBe(true);
+    expect((await page.evaluate(() => window.cic.write('/app/Shop/Cart.php', '<?php // the shopping cart', { expect: 'absent' }))).ok).toBe(true);
+    expect((await page.evaluate(() => window.cic.cp('/app/Shop/Cart.php', '/app/Shop/Basket.php'))).ok).toBe(true);
+    expect((await page.evaluate(() => window.cic.mv('/app/Shop/Basket.php', '/app/Shop/Trolley.php'))).ok).toBe(true);
+    // Never overwrites.
+    expect((await page.evaluate(() => window.cic.mv('/app/Shop/Trolley.php', '/app/Shop/Cart.php'))).ok).toBe(false);
+
+    const hits = await page.evaluate(() => window.cic.search('the shopping cart'));
+    expect(hits.ok).toBe(true);
+    expect(hits.hits.map((x) => x.path).sort()).toEqual(['/app/Shop/Cart.php', '/app/Shop/Trolley.php']);
+    // Search never reads the site's secrets.
+    const secret = await page.evaluate(() => window.cic.search('DB_PASSWORD'));
+    expect(secret.hits.filter((x) => x.path.includes('.env'))).toEqual([]);
+  });
+
+  await test.step('a binary upload round-trips byte for byte', async () => {
+    const bytes = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0xff, 0x10, 0x80];
+    const up = await page.evaluate(async (b) => {
+      const file = new File([new Uint8Array(b)], 'logo.png', { type: 'image/png' });
+      return window.cic.upload('/public/img', [file]);
+    }, bytes);
+    expect(up.ok).toBe(true);
+    const got = await page.evaluate(async () => {
+      const url = new URL(document.getElementById('cic-app').dataset.download, location.origin);
+      url.searchParams.set('path', '/public/img/logo.png');
+      const r = await fetch(url, { credentials: 'same-origin' });
+      return { type: r.headers.get('content-type'), disp: r.headers.get('content-disposition'), csp: r.headers.get('content-security-policy'),
+        bytes: [...new Uint8Array(await r.arrayBuffer())] };
+    });
+    expect(got.bytes).toEqual(bytes);
+    expect(got.disp).toBe('attachment; filename="logo.png"');
+    expect(got.csp).toBe('sandbox');
+  });
+
+  await test.step('a folder delete needs confirm, and then its files are in the bin', async () => {
+    const refused = await page.evaluate(() => window.cic.rmdir('/app/Shop'));
+    expect(refused.ok).toBe(false);
+    expect(refused.error).toBe('needs_confirm');
+    expect((await page.evaluate(() => window.cic.ls('/app'))).listing.entries.some((e) => e.name === 'Shop')).toBe(true);
+
+    expect((await page.evaluate(() => window.cic.rmdir('/app/Shop', { confirm: true }))).ok).toBe(true);
+    const bin = await page.evaluate(() => window.cic.bin());
+    expect(bin.bin.map((b) => b.path)).toEqual(expect.arrayContaining(['app/Shop/Cart.php', 'app/Shop/Trolley.php']));
+  });
 });
