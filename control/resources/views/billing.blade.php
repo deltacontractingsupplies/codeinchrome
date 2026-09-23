@@ -25,7 +25,7 @@
                 @if ($cap = app(\App\Billing\Capacity::class)->forPlan($key))
                     <li>~{{ number_format($cap['concurrent_visitors']) }} visitors at once</li>
                 @endif
-                <li>{{ $plan['disk_gb'] }} GB disk</li>
+                <li>{{ $plan['disk_gb'] }} GB disk {{ $plan['sites'] > 1 ? 'per site' : '' }}</li>
                 <li>{{ $plan['custom_domains'] ? 'Custom domains' : 'Free subdomain' }}</li>
             </ul>
             <div class="mt-4">

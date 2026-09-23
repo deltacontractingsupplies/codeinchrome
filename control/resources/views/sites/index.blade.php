@@ -10,8 +10,11 @@
     <div>
         <h1 class="text-2xl font-semibold text-white">Your sites</h1>
         <p class="mt-1 text-sm text-neutral-400">
-            {{ $plan['name'] }} plan &middot; {{ $sites->count() }} of {{ $plan['sites'] }} used
-            &middot; {{ $plan['cpu'] }} CPU, {{ $plan['memory'] }} RAM each
+            {{ $plan['name'] }} plan, {{ $sites->count() }} of {{ $plan['sites'] }} {{ Str::plural('site', $plan['sites']) }} used.
+            {{-- Capacity as it was measured, never CPU or RAM figures. --}}
+            @if ($cap = app(\App\Billing\Capacity::class)->forPlan(auth()->user()->plan ?? 'free'))
+                Each site handles about {{ number_format($cap['concurrent_visitors']) }} visitors at once<a href="{{ route('pricing') }}#capacity" class="underline">*</a>.
+            @endif
         </p>
     </div>
     @if ($sites->count() < $plan['sites'])

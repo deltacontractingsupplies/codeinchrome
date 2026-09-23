@@ -14,7 +14,7 @@
                         <li>~{{ number_format($cap['websocket_connections']) }} live WebSocket connections</li>
                     @endif
                 @endif
-                <li>{{ $plan['disk_gb'] }} GB disk</li>
+                <li>{{ $plan['disk_gb'] }} GB disk {{ $plan['sites'] > 1 ? 'per site' : '' }}</li>
                 <li>{{ $plan['custom_domains'] ? 'Custom domains' : 'Free subdomain' }}</li>
             </ul>
             @include('partials.stock', ['left' => $stock[$key] ?? null])
