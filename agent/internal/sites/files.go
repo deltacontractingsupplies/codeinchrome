@@ -322,7 +322,8 @@ func (m *Manager) WriteFile(ctx context.Context, id, rel, content string) error 
 // Written to a temporary file in the same directory and renamed, so a failure
 // part-way leaves the previous version intact rather than a truncated one.
 func (m *Manager) WriteFileIf(ctx context.Context, id, rel, content, expect string) (string, error) {
-	return m.writeFileIf(ctx, id, rel, content, expect, "save "+rel)
+	// The same form as every other version message: site-relative, no leading slash.
+	return m.writeFileIf(ctx, id, rel, content, expect, "save "+strings.TrimPrefix(filepath.Clean("/"+rel), "/"))
 }
 
 // writeFileIf is WriteFileIf with the history message to record ("" records
