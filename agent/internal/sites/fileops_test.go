@@ -183,3 +183,44 @@ func TestNoWalkFollowsASymlinkOutOfTheSite(t *testing.T) {
 		t.Fatalf("download read a host file through a symlink: %q", out.String())
 	}
 }
+
+// The site's own code can create symlinks. One planted inside an unzip or
+// copy destination, pointing at a host directory, must not let the agent
+// (root) write there.
+func TestUnzipAndCopyNeverWriteThroughAPlantedSymlink(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	app := m.appDir(id)
+	hostDir := t.TempDir() // stands in for /etc on the host
+
+	// An archive with theme/owned.txt, and a destination whose "theme" is a
+	// symlink the site planted, pointing out.
+	var buf bytes.Buffer
+	zw := zip.NewWriter(&buf)
+	w, _ := zw.Create("theme/owned.txt")
+	w.Write([]byte("written by the agent"))
+	zw.Close()
+	m.Upload(ctx, id, "/a.zip", bytes.NewReader(buf.Bytes()))
+	os.MkdirAll(filepath.Join(app, "dest"), 0o755)
+	os.Symlink(hostDir, filepath.Join(app, "dest/theme"))
+
+	err := m.Unzip(ctx, id, "/a.zip", "/dest")
+	if _, statErr := os.Stat(filepath.Join(hostDir, "owned.txt")); statErr == nil {
+		t.Fatal("unzip wrote OUTSIDE the site through a planted symlink")
+	}
+	if err == nil {
+		t.Fatal("unzip through a symlinked folder should be refused")
+	}
+
+	// Copy: a destination parent that is a planted symlink.
+	m.WriteFile(ctx, id, "/src/x.txt", "x")
+	os.Symlink(hostDir, filepath.Join(app, "cdest"))
+	if err := m.Copy(ctx, id, "/src", "/cdest/src"); err == nil {
+		if _, statErr := os.Stat(filepath.Join(hostDir, "src/x.txt")); statErr == nil {
+			t.Fatal("copy wrote OUTSIDE the site through a planted symlink")
+		}
+	}
+	if _, statErr := os.Stat(filepath.Join(hostDir, "src")); statErr == nil {
+		t.Fatal("copy created something outside the site")
+	}
+}

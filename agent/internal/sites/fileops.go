@@ -11,6 +11,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 	"time"
 )
 
@@ -62,12 +63,8 @@ func (m *Manager) Mkdir(_ context.Context, id, rel string) error {
 	if err != nil {
 		return err
 	}
-	if err := os.MkdirAll(abs, 0o750); err != nil {
-		return fmt.Errorf("cannot create that folder")
-	}
 	root, _ := m.realRoot(id)
-	chownPath(root, abs)
-	return nil
+	return mkdirBeneath(root, strings.TrimPrefix(abs, root))
 }
 
 // Rename moves a file or folder. The destination must not exist: a move
@@ -94,10 +91,9 @@ func (m *Manager) Rename(ctx context.Context, id, from, to string) error {
 	if _, err := os.Lstat(dst); err == nil {
 		return fmt.Errorf("something already exists at the destination")
 	}
-	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
-		return fmt.Errorf("cannot create the destination folder")
+	if err := mkdirBeneath(root, strings.TrimPrefix(filepath.Dir(dst), root)); err != nil {
+		return err
 	}
-	chownPath(root, filepath.Dir(dst))
 	if err := os.Rename(src, dst); err != nil {
 		return fmt.Errorf("cannot move that")
 	}
@@ -136,7 +132,9 @@ func (m *Manager) Copy(ctx context.Context, id, from, to string) error {
 		return fmt.Errorf("a folder cannot be copied into itself")
 	}
 	root, _ := m.realRoot(id)
+	dstRel := strings.TrimPrefix(dst, root)
 	budget := treeBudget{}
+	created := false
 	err = filepath.WalkDir(src, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil {
 			return werr
@@ -144,9 +142,10 @@ func (m *Manager) Copy(ctx context.Context, id, from, to string) error {
 		if d.Type()&fs.ModeSymlink != 0 {
 			return nil // never followed, never copied
 		}
-		target := filepath.Join(dst, strings.TrimPrefix(p, src))
+		rel := filepath.Join(dstRel, strings.TrimPrefix(p, src))
 		if d.IsDir() {
-			return os.MkdirAll(target, 0o750)
+			created = true
+			return mkdirBeneath(root, rel)
 		}
 		info, err := d.Info()
 		if err != nil {
@@ -155,14 +154,15 @@ func (m *Manager) Copy(ctx context.Context, id, from, to string) error {
 		if err := budget.add(info.Size()); err != nil {
 			return err
 		}
-		return copyFile(p, target)
+		created = true
+		return copyFileBeneath(root, p, rel)
 	})
 	if err != nil {
-		os.RemoveAll(dst)
+		if created {
+			m.removeBeneath(root, dst)
+		}
 		return fmt.Errorf("copy failed: %v", err)
 	}
-	_ = filepath.WalkDir(dst, func(p string, _ fs.DirEntry, _ error) error { _ = chownAsWWW(p); return nil })
-	chownPath(root, filepath.Dir(dst))
 	m.record(ctx, id, fmt.Sprintf("copy %s to %s", m.relativeTo(id, src), m.relativeTo(id, dst)))
 	return nil
 }
@@ -181,16 +181,15 @@ func (b *treeBudget) add(size int64) error {
 	return nil
 }
 
-func copyFile(src, dst string) error {
-	in, err := os.Open(src)
+// copyFileBeneath copies src (a regular file, already inside the site) to a
+// NEW file at rel under root, through the kernel-enforced helpers.
+func copyFileBeneath(root, src, rel string) error {
+	in, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
 	if err != nil {
 		return err
 	}
 	defer in.Close()
-	if err := os.MkdirAll(filepath.Dir(dst), 0o750); err != nil {
-		return err
-	}
-	out, err := os.OpenFile(dst, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
+	out, err := createBeneath(root, rel, 0o640)
 	if err != nil {
 		return err
 	}
@@ -199,6 +198,14 @@ func copyFile(src, dst string) error {
 		return err
 	}
 	return out.Close()
+}
+
+// removeBeneath undoes a partial copy or unzip - only if the path is still a
+// real folder inside the site (never through a link planted since).
+func (m *Manager) removeBeneath(root, abs string) {
+	if info, err := os.Lstat(abs); err == nil && info.IsDir() && strings.HasPrefix(abs, root+string(os.PathSeparator)) {
+		_ = os.RemoveAll(abs)
+	}
 }
 
 // Upload writes any file - binary included - up to MaxUploadSize. Written to
@@ -212,11 +219,10 @@ func (m *Manager) Upload(ctx context.Context, id, rel string, body io.Reader) er
 		return fmt.Errorf("that is a folder")
 	}
 	dir := filepath.Dir(abs)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return fmt.Errorf("cannot create the folder")
-	}
 	root, _ := m.realRoot(id)
-	chownPath(root, dir)
+	if err := mkdirBeneath(root, strings.TrimPrefix(dir, root)); err != nil {
+		return err
+	}
 	tmp, err := os.CreateTemp(dir, ".cic-upload-*")
 	if err != nil {
 		return fmt.Errorf("cannot write there")
@@ -467,22 +473,21 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 	}
 
 	root, _ := m.realRoot(id)
+	intoRel := strings.TrimPrefix(dstRoot, root)
 	for _, f := range zr.File {
-		target := filepath.Join(dstRoot, filepath.Clean("/"+f.Name))
+		rel := filepath.Join(intoRel, filepath.Clean("/"+f.Name))
 		if f.FileInfo().IsDir() {
-			if err := os.MkdirAll(target, 0o750); err != nil {
+			if err := mkdirBeneath(root, rel); err != nil {
 				return err
 			}
 			continue
-		}
-		if err := os.MkdirAll(filepath.Dir(target), 0o750); err != nil {
-			return err
 		}
 		rc, err := f.Open()
 		if err != nil {
 			return err
 		}
-		out, err := os.OpenFile(target, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o640)
+		// Kernel-enforced: no symlink anywhere on the way, nothing replaced.
+		out, err := createBeneath(root, rel, 0o640)
 		if err != nil {
 			rc.Close()
 			return err
@@ -495,8 +500,6 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 			return err
 		}
 	}
-	_ = filepath.WalkDir(dstRoot, func(p string, _ fs.DirEntry, _ error) error { _ = chownAsWWW(p); return nil })
-	chownPath(root, dstRoot)
 	m.record(ctx, id, fmt.Sprintf("unzip %s into %s", m.relativeTo(id, src), m.relativeTo(id, dstRoot)))
 	return nil
 }
