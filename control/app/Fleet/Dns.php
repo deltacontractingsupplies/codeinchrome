@@ -39,19 +39,22 @@ class Dns
     /**
      * Point a subdomain at a host. Returns the record id.
      *
-     * Proxied is FALSE and must stay false. Caddy on the host answers the
-     * ACME HTTP-01 challenge to get the certificate; with Cloudflare's proxy
-     * in front, the challenge terminates at Cloudflare and the host never
-     * gets a certificate of its own. The customer's site would then depend on
-     * Cloudflare's edge for TLS, which is the opposite of "your code, your
-     * server, take it with you".
+     * Proxied through Cloudflare. Visitors' TLS ends at Cloudflare (its
+     * Universal SSL covers every *.zone name) and the host answers Cloudflare
+     * with the Origin CA wildcard - so no per-site ACME certificate, and no
+     * public CA rate limit: Let's Encrypt's 50 a week per registered domain
+     * left new sites without HTTPS once the fleet reached it. The proxy also
+     * keeps the host's address out of visitors' reach.
+     *
+     * The code is still the customer's to take: the site is plain Laravel,
+     * and moving it means pointing a name elsewhere.
      */
     public function upsert(string $name, string $ip): string
     {
         $fqdn = str_ends_with($name, $this->zone) ? $name : "$name.{$this->zone}";
 
         $existing = $this->records($fqdn);
-        $payload = ['type' => 'A', 'name' => $fqdn, 'content' => $ip, 'proxied' => false, 'ttl' => 120];
+        $payload = ['type' => 'A', 'name' => $fqdn, 'content' => $ip, 'proxied' => true, 'ttl' => 1];
 
         if ($existing) {
             $id = $existing[0]['id'];

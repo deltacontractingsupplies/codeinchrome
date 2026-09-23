@@ -285,14 +285,49 @@ for record in "$zone" "www.$zone"; do
 done
 ok "$zone and www.$zone point at $ip"
 
+# h2's Caddyfile, managed here (it used to be left from an old agent install
+# and drifted). Same rule as the hosts: CF-Connecting-IP is believed only from
+# Cloudflare's own ranges.
+cf_ranges=$(curl -fsS --retry 3 https://api.cloudflare.com/client/v4/ips \
+  | python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; print(" ".join(r["ipv4_cidrs"] + r["ipv6_cidrs"]))')
+[[ $cf_ranges == *"/"* ]] || die "could not fetch Cloudflare's IP ranges"
+ssh_ "cat > /etc/caddy/Caddyfile.new" <<CADDYFILE
+# Managed by codeinchrome infra/deploy-control.sh.
+{
+	admin localhost:2019
+	email ops@codeinchrome.com
+	grace_period 10s
+	servers {
+		trusted_proxies static private_ranges $cf_ranges
+		trusted_proxies_strict
+		client_ip_headers CF-Connecting-IP
+	}
+}
+import /opt/codeinchrome/caddy/sites/*.caddy
+CADDYFILE
+ssh_ 'caddy validate --config /etc/caddy/Caddyfile.new --adapter caddyfile >/dev/null 2>&1 && mv /etc/caddy/Caddyfile.new /etc/caddy/Caddyfile' \
+  || die "the new Caddyfile does not validate; the old one was kept"
+
+# Proxied through Cloudflare: served with the origin certificate once
+# setup-cloudflare-proxy.sh has installed it.
+origin_tls=""
+ssh_ 'test -s /etc/caddy/origin/cert.pem' && origin_tls="tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem"
+
 ssh_ "set -e
 cat > /opt/codeinchrome/caddy/sites/_control.caddy <<CADDY
 # The control plane. Named with a leading underscore so it sorts before
 # customer vhosts and is never mistaken for one.
 $domain {
+	$origin_tls
 	root * /srv/control/public
 	encode gzip zstd
-	php_fastcgi unix//run/php/codeinchrome.sock
+	# PHP sees the VISITOR's address as REMOTE_ADDR - Caddy's client_ip,
+	# resolved from CF-Connecting-IP on Cloudflare's connections only. Without
+	# this every request came from a Cloudflare address, and per-IP rate
+	# limits, lockouts and the audit log saw a handful of shared IPs.
+	php_fastcgi unix//run/php/codeinchrome.sock {
+		env REMOTE_ADDR {client_ip}
+	}
 	file_server
 	header {
 		-Server
@@ -314,6 +349,7 @@ $domain {
 # so they redirect there rather than serving a second copy of it. One origin
 # keeps sessions, CSRF and the CSP simple, and nothing is served here at all.
 $zone, www.$zone {
+	$origin_tls
 	header -Server
 	redir https://$domain{uri} 301
 }

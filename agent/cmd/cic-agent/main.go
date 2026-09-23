@@ -37,6 +37,9 @@ func main() {
 		root     = flag.String("root", "/srv/customers", "customer data root")
 		caddyDir = flag.String("caddy", "/opt/codeinchrome/caddy/sites", "per-site Caddy config directory")
 		hostFile = flag.String("host-id", "/opt/codeinchrome/etc/host.id", "file holding this host's id")
+		platform = flag.String("platform-domain", "", "sites under this domain are served through Cloudflare with the origin certificate")
+		origCert = flag.String("origin-cert", "", "Cloudflare Origin CA certificate for *.platform-domain (empty: on-demand ACME for every name)")
+		origKey  = flag.String("origin-key", "", "private key for -origin-cert")
 	)
 	flag.Parse()
 
@@ -60,7 +63,10 @@ func main() {
 		// From /opt/codeinchrome/etc/mysql.env via the systemd unit. Read
 		// from the environment rather than a flag so it never appears in
 		// `ps` output.
-		MySQLPassword: os.Getenv("CIC_MYSQL_ROOT_PASSWORD"),
+		MySQLPassword:  os.Getenv("CIC_MYSQL_ROOT_PASSWORD"),
+		PlatformDomain: *platform,
+		OriginCert:     *origCert,
+		OriginKey:      *origKey,
 	})
 	if err != nil {
 		fatal("cannot start site manager: %v", err)

@@ -48,6 +48,12 @@ chmod 0700 "$CIC/etc"
 # silently never applied, and the reload kept failing for a reason that had
 # already been corrected in source.
 cp -n /etc/caddy/Caddyfile /etc/caddy/Caddyfile.orig 2>/dev/null || true
+# Cloudflare's published ranges: the only addresses whose CF-Connecting-IP
+# header is believed. Fetched every run; refusing to write the file without
+# them, because an empty list would make every visitor look like Cloudflare.
+cf_ranges=$(curl -fsS --retry 3 https://api.cloudflare.com/client/v4/ips \
+  | python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; print(" ".join(r["ipv4_cidrs"] + r["ipv6_cidrs"]))')
+[[ $cf_ranges == *"/"* ]] || { echo "could not fetch Cloudflare's IP ranges" >&2; exit 1; }
 cat > /etc/caddy/Caddyfile <<'CADDY'
 # Managed by codeinchrome. Per-site configuration lives in its own file under
 # /opt/codeinchrome/caddy/sites and is written by cic-agent.
@@ -75,8 +81,14 @@ cat > /etc/caddy/Caddyfile <<'CADDY'
 	# scanner, say) held port 80 open and the next reload failed with
 	# "bind: address already in use".
 	grace_period 10s
+	# Visitors arrive through Cloudflare. The real address is CF-Connecting-IP,
+	# believed ONLY on connections from Cloudflare's own ranges (strict: the
+	# right-most untrusted hop), so nobody can claim an address by sending the
+	# header directly. Access logs and rate limits then see the visitor.
 	servers {
-		trusted_proxies static private_ranges
+		trusted_proxies static private_ranges __CF_RANGES__
+		trusted_proxies_strict
+		client_ip_headers CF-Connecting-IP
 	}
 }
 
@@ -87,7 +99,8 @@ cat > /etc/caddy/Caddyfile <<'CADDY'
 # handshake without revealing which customers are on this host.
 import /opt/codeinchrome/caddy/sites/*.caddy
 CADDY
-ok "Caddyfile written (managed)"
+sed -i "s|__CF_RANGES__|$cf_ranges|" /etc/caddy/Caddyfile
+ok "Caddyfile written (managed; $(wc -w <<<"$cf_ranges") Cloudflare ranges trusted)"
 
 # The host's own site, permanently. With it, Caddy's HTTP and HTTPS servers
 # exist even when the host has no customer sites, so a reload always REUSES
@@ -172,6 +185,12 @@ ok "base image rebuilt weekly"
 
 # ─────────────────────────────────────────────────────────────────────────────
 log "service"
+# Sites under the platform domain use the Cloudflare origin certificate once
+# infra/setup-cloudflare-proxy.sh has installed it; until then, on-demand ACME.
+origin_flags=""
+if [[ -s /etc/caddy/origin/cert.pem && -s /etc/caddy/origin/key.pem ]]; then
+  origin_flags="-platform-domain ${CIC_PLATFORM_DOMAIN:-codeinchrome.com} -origin-cert /etc/caddy/origin/cert.pem -origin-key /etc/caddy/origin/key.pem"
+fi
 cat > /etc/systemd/system/cic-agent.service <<UNIT
 [Unit]
 Description=codeinchrome host agent
@@ -184,7 +203,7 @@ EnvironmentFile=$CIC/etc/agent.env
 # The leading "-" makes it optional: a host without MySQL still runs the agent,
 # and creating a site there fails with that reason instead.
 EnvironmentFile=-$CIC/etc/mysql.env
-ExecStart=$CIC/bin/cic-agent -addr 127.0.0.1:9440
+ExecStart=$CIC/bin/cic-agent -addr 127.0.0.1:9440 $origin_flags
 Restart=always
 RestartSec=3
 

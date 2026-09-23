@@ -92,7 +92,7 @@ return [
      */
     'mail_enabled' => ! in_array(env('MAIL_MAILER', 'log'), ['log', 'array'], true),
 
-    'min_agent_version' => '0.15.0',
+    'min_agent_version' => '0.16.0',
 
     /*
      * The zone every free subdomain is created under, and the hosts that are

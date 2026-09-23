@@ -26,6 +26,16 @@ type Config struct {
 	// Empty means this host has no database server, and creating a site fails
 	// with that reason rather than producing a site without a database.
 	MySQLPassword string
+
+	// Sites under PlatformDomain (name.<PlatformDomain>) are reached through
+	// Cloudflare's proxy and served with the Cloudflare Origin CA certificate
+	// at OriginCert/OriginKey: one wildcard, trusted only by Cloudflare, so no
+	// per-site ACME order and no public CA rate limit (Let's Encrypt allows
+	// 50 certificates a week per registered domain, and the fleet hit it).
+	// Empty OriginCert keeps every name on on-demand ACME, as before.
+	PlatformDomain string
+	OriginCert     string
+	OriginKey      string
 }
 
 type Manager struct {

@@ -4,6 +4,8 @@ return [
     'store_id' => env('LEMONSQUEEZY_STORE_ID'),
     'api_key' => env('LEMONSQUEEZY_API_KEY'),
     'webhook_secret' => env('LEMONSQUEEZY_WEBHOOK_SECRET'),
+    // Pause between retries of a dropped connection to the API. 0 in tests.
+    'retry_sleep_ms' => (int) env('LEMONSQUEEZY_RETRY_SLEEP_MS', 500),
 
     /*
      * Lemon Squeezy cannot create products over its API - POST /v1/products

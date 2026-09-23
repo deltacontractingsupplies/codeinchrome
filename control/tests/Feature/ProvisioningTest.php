@@ -393,4 +393,18 @@ class ProvisioningTest extends TestCase
         );
         $this->assertSame('deleting', Site::find($site->id)->status);
     }
+
+    public function test_a_site_record_is_proxied_through_cloudflare(): void
+    {
+        Http::fake(['api.cloudflare.com/*' => Http::sequence()
+            ->push(['success' => true, 'errors' => [], 'result' => []])
+            ->push(['success' => true, 'errors' => [], 'result' => ['id' => 'rec1']])]);
+
+        (new Dns('t', 'z', 'codeinchrome.com'))->upsert('shop', '10.0.0.1');
+
+        // Proxied, so visitors reach Cloudflare (Universal SSL, no per-site
+        // ACME certificate) and never the host's own address.
+        Http::assertSent(fn ($r) => $r->method() === 'POST'
+            && $r['name'] === 'shop.codeinchrome.com' && $r['proxied'] === true && $r['ttl'] === 1);
+    }
 }

@@ -467,17 +467,38 @@ func (m *Manager) renderCaddy(ctx context.Context, s Site) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	// Every name the site answers to. validDomain has already refused braces,
-	// quotes, whitespace and newlines in each of them, so none can close this
-	// block and open another.
-	names := append([]string{s.Domain}, s.Aliases...)
-	return fmt.Sprintf(`# codeinchrome site %s - generated, do not edit by hand
-%s {
-	# Certificate requested on first connection, not at load; see /tls-ask.
-	tls {
-		on_demand
+	return caddyConfig(m.cfg, s, port), nil
+}
+
+// onPlatform reports whether name is a direct subdomain of the platform
+// domain - the only names the origin wildcard covers.
+func onPlatform(cfg Config, name string) bool {
+	if cfg.PlatformDomain == "" {
+		return false
 	}
-	reverse_proxy 127.0.0.1:%s
+	label, ok := strings.CutSuffix(name, "."+cfg.PlatformDomain)
+	return ok && label != "" && !strings.Contains(label, ".")
+}
+
+// caddyConfig renders a site's vhost. validDomain has already refused braces,
+// quotes, whitespace and newlines in every name, so none can close a block
+// and open another.
+//
+// With an origin certificate configured, the platform name and the customer's
+// own domains are separate blocks: the platform name is served with the
+// origin certificate, custom domains keep an on-demand certificate of their
+// own (see /tls-ask). Both proxy to the same container and log to the same file.
+func caddyConfig(cfg Config, s Site, port string) string {
+	var platform, custom []string
+	for _, name := range append([]string{s.Domain}, s.Aliases...) {
+		if cfg.OriginCert != "" && onPlatform(cfg, name) {
+			platform = append(platform, name)
+		} else {
+			custom = append(custom, name)
+		}
+	}
+
+	body := fmt.Sprintf(`	reverse_proxy 127.0.0.1:%s
 	encode gzip zstd
 	header {
 		-Server
@@ -490,8 +511,27 @@ func (m *Manager) renderCaddy(ctx context.Context, s Site) (string, error) {
 		output file /var/log/caddy/%s.log
 		format json
 	}
-}
-`, s.ID, strings.Join(names, ", "), port, s.ID), nil
+`, port, s.ID)
+
+	out := fmt.Sprintf("# codeinchrome site %s - generated, do not edit by hand\n", s.ID)
+	if len(platform) > 0 {
+		out += fmt.Sprintf(`%s {
+	# Reached through Cloudflare; the origin certificate is trusted by
+	# Cloudflare only. No ACME order, no public CA rate limit.
+	tls %s %s
+%s}
+`, strings.Join(platform, ", "), cfg.OriginCert, cfg.OriginKey, body)
+	}
+	if len(custom) > 0 {
+		out += fmt.Sprintf(`%s {
+	# Certificate requested on first connection, not at load; see /tls-ask.
+	tls {
+		on_demand
+	}
+%s}
+`, strings.Join(custom, ", "), body)
+	}
+	return out
 }
 
 func (m *Manager) writeCaddy(ctx context.Context, s Site) error {

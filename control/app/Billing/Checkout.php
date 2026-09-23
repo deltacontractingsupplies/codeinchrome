@@ -45,7 +45,7 @@ class Checkout
             $response = Http::withToken(config('billing.api_key'))
                 ->withHeaders(['Accept' => 'application/vnd.api+json', 'Content-Type' => 'application/vnd.api+json'])
                 ->timeout(20)
-                ->retry(3, 500, fn ($e) => $e instanceof ConnectionException, throw: false)
+                ->retry(3, (int) config('billing.retry_sleep_ms', 500), fn ($e) => $e instanceof ConnectionException, throw: false)
                 ->post('https://api.lemonsqueezy.com/v1/checkouts', [
                     'data' => [
                         'type' => 'checkouts',

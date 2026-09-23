@@ -1,6 +1,14 @@
 import { test, expect } from '@playwright/test';
 import { waitForDns } from '../helpers/dns.js';
 import { httpsGet } from '../helpers/https.js';
+import { readFileSync } from 'node:fs';
+
+/** The customer hosts' addresses, from infra/hosts.env. */
+function fleetHostIps() {
+  const env = readFileSync(new URL('../../../infra/hosts.env', import.meta.url), 'utf8');
+  const hosts = env.match(/^CIC_HOSTS="([^"]+)"/m)[1];
+  return hosts.split(/\s+/).map((h) => h.split(':')[1]);
+}
 import { destroySite } from '../helpers/cleanup.js';
 import { setPlan, dnsCreate, dnsDeleteUnder, confirmSignup } from '../helpers/fixtures.js';
 
@@ -45,7 +53,8 @@ test('a customer can prove, attach, serve and remove their own domain', async ({
     await page.getByPlaceholder('my-shop').fill(siteName);
     await page.getByRole('button', { name: 'Create' }).click();
     await expect(page.getByText(/is building/)).toBeVisible();
-    [hostIp] = await waitForDns(`${siteName}.codeinchrome.com`);
+    // Proxied through Cloudflare: this resolves to Cloudflare, not the host.
+    await waitForDns(`${siteName}.codeinchrome.com`);
   });
 
   let txtName, txtValue;
@@ -59,7 +68,10 @@ test('a customer can prove, attach, serve and remove their own domain', async ({
     txtName = (await row.locator('[data-txt-name]').textContent()).trim();
     txtValue = (await row.locator('[data-txt-value]').textContent()).trim();
     expect(txtName).toBe(`_codeinchrome-challenge.${custom}`);
-    expect(await row.locator('[data-a-value]').textContent()).toBe(hostIp);
+    // A customer's own domain points at the HOST (it is not in our zone, so
+    // not behind our proxy); the page must name one of the fleet's hosts.
+    hostIp = (await row.locator('[data-a-value]').textContent()).trim();
+    expect(fleetHostIps()).toContain(hostIp);
   });
 
   await test.step('verifying before publishing anything is refused', async () => {
