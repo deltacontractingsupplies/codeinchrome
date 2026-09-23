@@ -56,9 +56,18 @@ class HomePageTest extends TestCase
             'admin_email' => 'demo@shop.test',
             'admin_password' => 'read-only-demo',
             'recording' => '/showcase/build.gif',
+            'checkout' => false,
         ]]);
         $this->get('/')->assertOk()->assertSee('A store the agent built')
             ->assertSee('shop.codeinchrome.com')->assertSee('demo@shop.test')
             ->assertSee('read-only-demo')->assertSee('/showcase/build.gif', false);
+    }
+
+    public function test_the_test_card_is_only_offered_when_checkout_works(): void
+    {
+        config(['showcase.url' => 'https://shop.codeinchrome.com', 'showcase.checkout' => false]);
+        $this->get('/')->assertOk()->assertDontSee('4242 4242 4242 4242');
+        config(['showcase.checkout' => true]);
+        $this->get('/')->assertOk()->assertSee('4242 4242 4242 4242');
     }
 }

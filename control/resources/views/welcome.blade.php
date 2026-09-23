@@ -93,8 +93,12 @@
 <section class="mt-24" aria-labelledby="showcase-heading">
     <h2 id="showcase-heading" class="text-2xl font-semibold text-white">A store the agent built</h2>
     <p class="mt-3 max-w-2xl text-neutral-400">
-        A full shop with products, a cart, Stripe checkout in test mode and an admin panel, built through this editor.
-        Place an order with Stripe's test card 4242 4242 4242 4242, then look at it in the admin panel.
+        A coffee shop with products, a cart, Stripe checkout and an admin panel, written into a new site by the agent through this editor.
+        @if (config('showcase.checkout'))
+            Place an order with Stripe's test card 4242 4242 4242 4242 - nothing is charged - then find it in the admin panel.
+        @else
+            Browse it, fill a bag, and look around the admin panel.
+        @endif
     </p>
     <div class="mt-6 grid gap-8 lg:grid-cols-[1fr_20rem]">
         @if (config('showcase.recording'))

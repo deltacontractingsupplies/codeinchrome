@@ -13,4 +13,7 @@ return [
     'admin_password' => env('SHOWCASE_ADMIN_PASSWORD'),
     // A recording of the build, served from public/ (e.g. /showcase/build.gif).
     'recording' => env('SHOWCASE_RECORDING'),
+    // True once the store has its Stripe TEST key, so the home page only
+    // invites visitors to pay when paying actually works.
+    'checkout' => (bool) env('SHOWCASE_CHECKOUT', false),
 ];
