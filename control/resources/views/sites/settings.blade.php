@@ -39,7 +39,7 @@
     <details class="mt-8 text-sm text-neutral-400">
         <summary class="cursor-pointer text-neutral-200">Setting up Reverb in your app</summary>
         <ol class="mt-3 list-decimal space-y-2 pl-6">
-            <li>In the editor's terminal: <code class="text-neutral-200">composer require laravel/reverb</code></li>
+            <li>In the editor's terminal: <code class="text-neutral-200">composer require -W laravel/reverb</code> (-W lets Composer move the shared HTTP libraries to versions Reverb supports)</li>
             <li>Turn on <em>WebSockets</em> above and save.</li>
             <li>In <code class="text-neutral-200">.env</code>, where your app sends events - Reverb inside the same container:
                 <code class="text-neutral-200">BROADCAST_CONNECTION=reverb</code>,

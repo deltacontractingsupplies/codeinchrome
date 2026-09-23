@@ -68,7 +68,7 @@ in_site() { on "$site_ip" "docker exec -u 33:33 -e HOME=/tmp -e COMPOSER_HOME=/t
 
 # ── Reverb, installed and switched on the way a customer would ───────────────
 COPYFILE_DISABLE=1 tar --no-xattrs -C tests/load/app -cf - . | on "$site_ip" "docker exec -i -u 33:33 cic-$SITE tar -xf - -C /var/www/html"
-in_site '[ -d vendor/laravel/reverb ] || composer require -q --no-interaction laravel/reverb'
+in_site '[ -d vendor/laravel/reverb ] || composer require -q --no-interaction -W laravel/reverb'
 key=$(in_site 'grep -s "^REVERB_APP_KEY=" .env | cut -d= -f2')
 if [[ -z $key ]]; then
   key=$(openssl rand -hex 10)
