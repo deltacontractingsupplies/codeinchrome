@@ -87,6 +87,11 @@ type Site struct {
 	Reverb    bool `json:"reverb,omitempty"`
 	WSPort    int  `json:"wsPort,omitempty"`
 
+	// PHP settings the owner chose (php.go). Zero values mean the image's
+	// defaults; anything set is written to an ini file the container mounts
+	// read-only, so the site's own code cannot change or widen it.
+	PHP PHPSettings `json:"php,omitzero"`
+
 	DiskGB        int   `json:"diskGb"`
 	DiskUsedBytes int64 `json:"diskUsedBytes"`
 	DiskSizeBytes int64 `json:"diskSizeBytes"`

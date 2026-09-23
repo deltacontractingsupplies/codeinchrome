@@ -15,7 +15,7 @@ class Site extends Model
     protected function casts(): array
     {
         return ['provisioned_at' => 'datetime', 'usage_at' => 'datetime', 'limits_pending' => 'boolean',
-            'queue' => 'boolean', 'scheduler' => 'boolean', 'reverb' => 'boolean'];
+            'queue' => 'boolean', 'scheduler' => 'boolean', 'reverb' => 'boolean', 'php_settings' => 'array'];
     }
 
     /**

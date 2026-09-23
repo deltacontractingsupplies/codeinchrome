@@ -102,11 +102,13 @@ code exists.
       the owner. The home page shows it as soon as SHOWCASE_URL is set.
 - [x] **A home page that shows the product**: the editor and the agent at work
       (drawn in HTML, themed), what every site gets, measured capacity, plans
-- [ ] **Editor parity with a hosting panel** (aaPanel as the yardstick).
+- [x] **Editor parity with a hosting panel** (aaPanel as the yardstick).
       Done: recycle bin, upload/download, zip/unzip, search, rename/move/copy,
       database export/import (the database before an import is kept),
       customer backups with restore (backs up first, so undoable), queue/cron
-      (scheduler)/WebSockets. Left: a permissions view, PHP settings
+      (scheduler)/WebSockets, PHP settings (memory, execution time, uploads;
+      bounded by the plan, mounted read-only - e2e-tested), and a properties
+      view (permissions, size, modified; cic.stat for agents).
 - [x] **Git in every site, every change committed automatically** (deployed; e2e-tested: save, restore, bin, backup restore recorded): every save,
       upload, move, delete, command and restore is a version; any earlier one
       opens read-only and restores as a new version; outside the container,

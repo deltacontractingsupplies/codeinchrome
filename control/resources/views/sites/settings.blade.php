@@ -54,4 +54,32 @@
         </ol>
     </details>
 </section>
+
+<section class="mt-12 max-w-2xl" aria-labelledby="php-heading">
+    <h2 id="php-heading" class="text-lg font-medium text-neutral-100">PHP</h2>
+    <p class="mt-1 text-sm text-neutral-400">
+        Leave a field empty for the default. Saving restarts the site, which takes a few seconds.
+        Error display stays off: it would show your visitors stack traces. Your app's errors are in the editor's Logs.
+    </p>
+    @php($php = $site->php_settings ?? [])
+    <form method="POST" action="{{ route('sites.php', $site) }}" class="mt-6 grid gap-4 sm:grid-cols-3">@csrf @method('PUT')
+        @foreach ([
+            ['memory_mb', 'memoryMB', 'Memory limit', 'MB', 'Default 256 MB'],
+            ['max_execution_seconds', 'maxExecutionSeconds', 'Maximum execution time', 'seconds', 'Default 30 s'],
+            ['upload_mb', 'uploadMB', 'Largest upload', 'MB', 'Default 32 MB'],
+        ] as [$field, $key, $label, $unit, $hint])
+            <label class="block text-sm">
+                <span class="text-neutral-200">{{ $label }}</span>
+                <span class="mt-1 flex items-center gap-2">
+                    <input type="number" name="{{ $field }}" min="0" value="{{ old($field, $php[$key] ?? '') }}" placeholder="{{ $hint }}"
+                           class="w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100">
+                    <span class="text-neutral-500">{{ $unit }}</span>
+                </span>
+            </label>
+        @endforeach
+        <div class="sm:col-span-3">
+            <button class="rounded-md bg-teal-500 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-teal-400">Save PHP settings</button>
+        </div>
+    </form>
+</section>
 @endsection

@@ -710,6 +710,20 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"result": res}))
 	})
 
+	mux.HandleFunc("PUT /v1/sites/{id}/php", func(w http.ResponseWriter, r *http.Request) {
+		var body sites.PHPSettings
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {memoryMB, maxExecutionSeconds, uploadMB}"))
+			return
+		}
+		applied, err := mgr.SetPHP(r.Context(), r.PathValue("id"), body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_apply", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"applied": applied}))
+	})
+
 	mux.HandleFunc("DELETE /v1/sites/{id}", func(w http.ResponseWriter, r *http.Request) {
 		done, err := mgr.Delete(r.Context(), r.PathValue("id"))
 		if err != nil {

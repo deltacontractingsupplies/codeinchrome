@@ -84,7 +84,34 @@ Route::get('/queue-probe', function () {
     }).toPass({ timeout: 60_000, intervals: [3_000] });
   });
 
+  await test.step('PHP settings from the settings page reach PHP, read-only to the site', async () => {
+    await page.goto(`/sites/${siteName}/edit`);
+    await expect(page.locator('#sbMsg')).toHaveText('Ready');
+    const web = (await page.evaluate(() => window.cic.read('/routes/web.php'))).content;
+    expect((await page.evaluate((c) => window.cic.write('/routes/web.php', c), web + `
+Route::get('/php-probe', fn () => ini_get('memory_limit').' '.ini_get('upload_max_filesize').' '.ini_get('post_max_size'));
+`)).ok).toBe(true);
+    await page.goto(`/sites/${siteName}/settings`);
+    await page.getByLabel('Memory limit').fill('200');
+    await page.getByLabel('Largest upload').fill('48');
+    await page.getByRole('button', { name: 'Save PHP settings' }).click();
+    await expect(page.getByText('Applied. The site restarted with its new PHP settings.')).toBeVisible({ timeout: 120_000 });
+    await expect(async () => {
+      const r = await httpsGet(`${siteName}.codeinchrome.com`, '/php-probe', address);
+      expect(r.body).toBe('200M 48M 49M');
+    }).toPass({ timeout: 60_000, intervals: [3_000] });
+
+    // A plan-busting value is refused with the reason, and nothing changes.
+    await page.getByLabel('Memory limit').fill('1000');
+    await page.getByRole('button', { name: 'Save PHP settings' }).click();
+    await expect(page.getByText(/memory limit must be 64 to 448 MB/)).toBeVisible({ timeout: 30_000 });
+    const r = await httpsGet(`${siteName}.codeinchrome.com`, '/php-probe', address);
+    expect(r.body).toBe('200M 48M 49M');
+  });
+
   await test.step('the scheduler runs the task on its own within the minute', async () => {
+    await page.goto(`/sites/${siteName}/edit`);
+    await expect(page.locator('#sbMsg')).toHaveText('Ready');
     await expect(async () => {
       const f = await page.evaluate(() => window.cic.read('/storage/app/scheduled.txt'));
       expect(f.ok, f.hint).toBe(true);

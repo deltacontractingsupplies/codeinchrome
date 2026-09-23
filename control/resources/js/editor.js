@@ -1275,6 +1275,7 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
   cic.php.definition(path, line, col) where it is defined -> { ok, locations: [{ path, line }] }
                                Phpactor runs in this site's container and sees its vendor/. The
                                first answers after opening the editor can take ~15 s (indexing).
+  cic.stat(path)               permissions, size and modified time -> { ok, dir, size, mode, modified }
   cic.buffer()                 the open file as shown, unsaved edits included
                                -> { ok, path, content, dirty, readOnly }
 
@@ -1458,6 +1459,13 @@ function openNodeMenu(entry, anchor) {
     menu.append(b);
   };
   const p = entry.path;
+  item('Properties', async () => {
+    // What a hosting panel shows. Everything in a site belongs to the site's
+    // own user (www-data), set by the platform; there is nothing to chown.
+    const when = entry.mtime ? new Date(entry.mtime * 1000).toLocaleString() : 'unknown';
+    const size = entry.dir ? 'folder' : `${entry.size.toLocaleString()} bytes`;
+    await ask(`${p}\n\nPermissions: ${entry.mode} (owner www-data, the site's own user)\nSize: ${size}\nModified: ${when}`, { okLabel: 'Close' });
+  });
   item('Rename / move…', async () => {
     const to = await ask(`Move ${p} to:`, { input: p.slice(1), okLabel: 'Move', validate: (v) => (!v.trim() ? 'Give a path.' : null) });
     if (to) movePath(p, to.trim());
@@ -1800,6 +1808,14 @@ window.cic = Object.freeze({
     hover: async (path, line, column) => { await openFile(path); return php.hover(path, line, column); },
     definition: async (path, line, column) => { await openFile(path); return php.definition(path, line, column); },
   }),
+  // A file's or folder's properties, as the explorer shows them.
+  stat: async (path) => {
+    const n = norm(path);
+    const r = await api('GET', { path: parentOf(n) });
+    if (!r.ok) return r;
+    const e = r.listing.entries.find((x) => x.path === n || `/${x.path}` === n || x.name === n.split('/').pop());
+    return e ? { ok: true, path: n, dir: e.dir, size: e.size, mode: e.mode, modified: e.mtime } : { ok: false, error: 'not_found', hint: `${n} does not exist` };
+  },
   // What the person sees in the open file right now, saved or not.
   buffer: () => {
     const t = tabs.get(active);

@@ -229,3 +229,4 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg
 .tab .tab-name { color: inherit; font: inherit; padding: 0; background: none; border: 0; cursor: pointer; white-space: nowrap; }
 .tab .tab-name:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+#modalText { white-space: pre-line; }

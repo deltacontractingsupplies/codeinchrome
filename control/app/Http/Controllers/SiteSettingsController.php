@@ -57,4 +57,35 @@ class SiteSettingsController extends Controller
             ? 'Nothing changed.'
             : 'Applied. The site restarted with its new processes'.(isset($applied['workers']) ? " ({$applied['workers']} web workers)." : '.'));
     }
+
+    /**
+     * PHP settings: memory limit, maximum execution time, upload size. The
+     * bounds are the agent's (it knows the container's memory); this layer
+     * checks the shape and passes on the agent's reason when it refuses.
+     */
+    public function php(Request $request, Site $site): RedirectResponse
+    {
+        $this->authorizeSite($request, $site);
+        abort_unless($site->status === 'live', 409, 'This site is not live yet.');
+        $d = $request->validate([
+            'memory_mb' => ['nullable', 'integer', 'min:0', 'max:1024'],
+            'max_execution_seconds' => ['nullable', 'integer', 'min:0', 'max:300'],
+            'upload_mb' => ['nullable', 'integer', 'min:0', 'max:96'],
+        ]);
+        $want = [
+            'memoryMB' => (int) ($d['memory_mb'] ?? 0),
+            'maxExecutionSeconds' => (int) ($d['max_execution_seconds'] ?? 0),
+            'uploadMB' => (int) ($d['upload_mb'] ?? 0),
+        ];
+
+        try {
+            $applied = AgentClient::for($site->host)->setPhp($site->site_id, ...array_values($want));
+        } catch (AgentRefused|AgentUnreachable $e) {
+            return back()->withInput()->with('error', 'The PHP settings were not applied: '.($e instanceof AgentRefused ? ($e->detail['hint'] ?? $e->getMessage()) : 'the host is not responding.'));
+        }
+        $site->update(['php_settings' => array_filter($want) ?: null]);
+        Audit::record('site.php', site: $site, detail: $want);
+
+        return back()->with('status', ($applied['changed'] ?? '') === 'no' ? 'Nothing changed.' : 'Applied. The site restarted with its new PHP settings.');
+    }
 }

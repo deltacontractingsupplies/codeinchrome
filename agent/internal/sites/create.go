@@ -365,6 +365,11 @@ func (m *Manager) runArgs(s Site) []string {
 		"--env", "CIC_SCHEDULER=" + boolEnv(s.Scheduler),
 		"--env", "CIC_REVERB=" + boolEnv(s.Reverb && s.WSPort != 0),
 	}
+	if s.PHP != (PHPSettings{}) {
+		// The owner's PHP settings: mounted read-only over the image's, so
+		// the site's own code cannot change or widen them (php.go).
+		args = append(args, "-v", m.phpIni(s.ID)+":/usr/local/etc/php/conf.d/zz-site.ini:ro")
+	}
 	if s.Reverb && s.WSPort != 0 {
 		// Reverb's WebSocket port, loopback only; Caddy routes /app/* to it.
 		args = append(args, "--publish", fmt.Sprintf("127.0.0.1:%d:8081", s.WSPort))

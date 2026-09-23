@@ -213,6 +213,14 @@ class AgentClient
         return $this->send('post', "/v1/sites/$id/history/restore", ['rev' => $rev, 'path' => $path]);
     }
 
+    /** Apply the site's PHP settings (0 = the image's default). Replaces the container. */
+    public function setPhp(string $id, int $memoryMB, int $maxExecutionSeconds, int $uploadMB): array
+    {
+        return $this->send('put', "/v1/sites/$id/php", [
+            'memoryMB' => $memoryMB, 'maxExecutionSeconds' => $maxExecutionSeconds, 'uploadMB' => $uploadMB,
+        ])['applied'] ?? [];
+    }
+
     /** Switch the site's queue worker, scheduler and Reverb. Replaces the container. */
     public function setBackground(string $id, bool $queue, bool $scheduler, bool $reverb): array
     {
