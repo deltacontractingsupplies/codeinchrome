@@ -7,6 +7,7 @@ import (
 	"database/sql"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -209,8 +210,18 @@ func SetEnv(content, key, value string) string {
 // configureAppDatabase points the site's .env at its database and runs the
 // application's migrations, which is also the proof that the credentials work.
 func (m *Manager) configureAppDatabase(ctx context.Context, s Site, password string) error {
-	envPath := filepath.Join(m.appDir(s.ID), ".env")
-	raw, err := os.ReadFile(envPath)
+	// Through the *Beneath helpers like every other root write into a site:
+	// a .env that is a symlink is refused rather than followed to the host.
+	root, err := m.realRoot(s.ID)
+	if err != nil {
+		return fmt.Errorf("read .env: %w", err)
+	}
+	f, err := openBeneath(root, "/.env")
+	if err != nil {
+		return fmt.Errorf("read .env: %w", err)
+	}
+	raw, err := io.ReadAll(io.LimitReader(f, MaxFileSize))
+	f.Close()
 	if err != nil {
 		return fmt.Errorf("read .env: %w", err)
 	}
@@ -230,11 +241,11 @@ func (m *Manager) configureAppDatabase(ctx context.Context, s Site, password str
 	} {
 		content = SetEnv(content, kv[0], kv[1])
 	}
-	if err := os.WriteFile(envPath, []byte(content), 0o640); err != nil {
+	if err := replaceBeneath(root, "/.env", 0o640, func(f *os.File) error {
+		_, werr := f.WriteString(content)
+		return werr
+	}); err != nil {
 		return fmt.Errorf("write .env: %w", err)
-	}
-	if err := chownAsWWW(envPath); err != nil {
-		return fmt.Errorf("chown .env: %w", err)
 	}
 
 	// The skeleton's SQLite file holds the tables Laravel created at build
