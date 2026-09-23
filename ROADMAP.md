@@ -90,9 +90,11 @@ code exists.
       Cloudflare instead of on-demand ACME, and ports 80/443 firewalled to
       Cloudflare's ranges only. Customers' own domains work today via ACME;
       only names under codeinchrome.com share the exhausted weekly quota.
-- [ ] **Background processes in the site container**: queue worker, scheduler
+- [x] **Background processes in the site container**: queue worker, scheduler
       and Laravel Reverb under supervisor; WebSockets routed through Caddy and
-      Cloudflare. Built and unit-tested; deploy + end-to-end pending
+      Cloudflare. Proven end to end: a queued job run by the worker and a
+      scheduled task firing (tests/e2e/specs/background.spec.js); Reverb by
+      the WebSocket load test
 - [ ] **Showcase store**, built live by Claude in Chrome through the editor and
       recorded step by step: a real-looking Laravel shop (products, cart,
       Stripe checkout in test mode) with an admin panel; the demo admin login
