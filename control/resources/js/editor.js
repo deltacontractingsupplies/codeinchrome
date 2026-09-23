@@ -1,4 +1,5 @@
 import { monaco, languageFor } from './monaco.js';
+import { startPhpLanguageServer } from './lsp.js';
 /*
  * The codeinchrome editor.
  *
@@ -27,6 +28,8 @@ const SITE = {
   dbTablesUrl: root.dataset.dbTables,
   dbQueryUrl: root.dataset.dbQuery,
   dbExportUrl: root.dataset.dbExport,
+  lspUrl: root.dataset.lsp,
+  lspCloseUrl: root.dataset.lspClose,
   dbImportUrl: root.dataset.dbImport,
   commandUrl: root.dataset.command,
   logsUrl: root.dataset.logs,
@@ -76,6 +79,21 @@ new MutationObserver(() => {
   if (listings.size) renderTree();
 })
   .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+// PHP IntelliSense from Phpactor in the site's container (lsp.js).
+startPhpLanguageServer({
+  url: SITE.lspUrl,
+  closeUrl: SITE.lspCloseUrl,
+  csrf: CSRF,
+  onStatus: (text, bad) => {
+    const el = document.getElementById('sbLsp');
+    if (el) {
+      el.textContent = bad ? 'PHP: unavailable' : 'PHP';
+      el.title = bad ? text : 'PHP IntelliSense (Phpactor) is running in this site';
+      el.classList.toggle('bad', bad);
+    }
+  },
+});
+
 /** tab key -> Monaco model */
 const models = new Map();
 /** True while the editor itself sets a model's text, so it is not taken as typing. */

@@ -21,6 +21,8 @@
      data-db-tables="{{ route('db.tables', $site) }}"
      data-db-query="{{ route('db.query', $site) }}"
      data-db-export="{{ route('db.export', $site) }}"
+     data-lsp="{{ route('lsp.exchange', $site) }}"
+     data-lsp-close="{{ url('/sites/'.$site->site_id.'/lsp') }}"
      data-db-import="{{ route('db.import', $site) }}"
      data-command="{{ route('console.run', $site) }}"
      data-logs="{{ route('console.logs', $site) }}"
@@ -156,7 +158,7 @@
     <footer class="statusbar">
         <span id="sbSite">{{ $site->domain }}</span>
         <span id="sbMsg" role="status" aria-live="polite"></span>
-        <span class="right"><button type="button" id="sbPanel" class="sb-btn" title="Terminal and logs (Ctrl `)">⌨ Terminal</button><span id="sbPos"></span><span id="sbRev"></span></span>
+        <span class="right"><button type="button" id="sbPanel" class="sb-btn" title="Terminal and logs (Ctrl `)">⌨ Terminal</button><span id="sbLsp" title="PHP IntelliSense (Phpactor), starting">PHP</span><span id="sbPos"></span><span id="sbRev"></span></span>
     </footer>
 
     {{-- In-page dialog. Never alert/confirm/prompt: a native dialog freezes

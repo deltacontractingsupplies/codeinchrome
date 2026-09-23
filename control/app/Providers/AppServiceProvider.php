@@ -74,6 +74,8 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('domains', fn (Request $r) => Limit::perMinute(20)->by($by($r)));
         RateLimiter::for('command', fn (Request $r) => Limit::perMinute(20)->by($by($r)));
         RateLimiter::for('db', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
+        // Completion fires as someone types: generous, but still bounded.
+        RateLimiter::for('lsp', fn (Request $r) => Limit::perMinute(600)->by($by($r)));
         RateLimiter::for('logs', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
         RateLimiter::for('billing', fn (Request $r) => Limit::perMinute(10)->by($by($r)));
         RateLimiter::for('two-factor', fn (Request $r) => Limit::perMinute(30)->by($r->ip()));

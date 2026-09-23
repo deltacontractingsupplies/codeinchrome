@@ -643,6 +643,7 @@ func (m *Manager) Delete(ctx context.Context, id string) (map[string]string, err
 	if err := ValidID(id); err != nil {
 		return nil, err
 	}
+	m.LSPCloseSite(id)
 	m.mu.Lock()
 	defer m.mu.Unlock()
 

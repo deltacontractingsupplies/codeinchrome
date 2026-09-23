@@ -658,6 +658,36 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusAccepted, ok(resp{"operation": op}))
 	})
 
+	// The editor's language server (Phpactor, inside the site's container):
+	// a batch of JSON-RPC messages in, the responses and anything queued out.
+	mux.HandleFunc("POST /v1/sites/{id}/lsp/{session}", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Messages []json.RawMessage `json:"messages"`
+			WaitMs   int               `json:"waitMs"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<20)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {messages: [...], waitMs}"))
+			return
+		}
+		out, err := mgr.LSPExchange(r.Context(), r.PathValue("id"), r.PathValue("session"), body.Messages, time.Duration(body.WaitMs)*time.Millisecond)
+		if errors.Is(err, sites.ErrLSPSessions) {
+			writeJSON(w, http.StatusConflict, fail("too_many_sessions", err.Error()))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadGateway, fail("lsp_failed", err.Error()))
+			return
+		}
+		if out == nil {
+			out = []json.RawMessage{}
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"messages": out}))
+	})
+	mux.HandleFunc("DELETE /v1/sites/{id}/lsp/{session}", func(w http.ResponseWriter, r *http.Request) {
+		mgr.LSPClose(r.PathValue("id"), r.PathValue("session"))
+		writeJSON(w, http.StatusOK, ok(resp{"closed": true}))
+	})
+
 	mux.HandleFunc("DELETE /v1/sites/{id}", func(w http.ResponseWriter, r *http.Request) {
 		done, err := mgr.Delete(r.Context(), r.PathValue("id"))
 		if err != nil {

@@ -58,6 +58,18 @@ RUN set -eux; \
 
 COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
+# Phpactor (MIT), the PHP language server behind the editor's IntelliSense:
+# completion, hover, go to definition, diagnostics. It runs inside the site's
+# own container, as the site's user, so it sees that site's vendor/ and
+# nothing else. Pinned and checksummed: an unverified binary is not installed.
+ARG PHPACTOR_VERSION=2026.06.23.0
+ARG PHPACTOR_SHA256=25645647d9aa2dc69536fb4f75c976e33ef1a7b5533534a8456736e5e6fd5079
+RUN set -eux; \
+    curl -fsSLo /usr/local/bin/phpactor "https://github.com/phpactor/phpactor/releases/download/${PHPACTOR_VERSION}/phpactor.phar"; \
+    echo "${PHPACTOR_SHA256}  /usr/local/bin/phpactor" | sha256sum -c -; \
+    chmod 0755 /usr/local/bin/phpactor; \
+    php /usr/local/bin/phpactor --version
+
 # PROVE the extensions load. A build that installs an extension it cannot load
 # is the failure this image already shipped once; an assertion here is the only
 # thing that turns it from a silent runtime surprise into a red build.

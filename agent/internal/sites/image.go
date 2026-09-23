@@ -85,6 +85,8 @@ func (m *Manager) replaceContainer(ctx context.Context, site Site) error {
 	if !isMounted(m.volume(site.ID)) {
 		return fmt.Errorf("the disk for %s is not mounted; refusing to start a container on an empty directory", site.ID)
 	}
+	// Its language servers ran inside the old container.
+	m.LSPCloseSite(site.ID)
 	if _, err := run(ctx, 60*time.Second, "docker", "rm", "-f", m.container(site.ID)); err != nil {
 		return fmt.Errorf("remove old container: %w", err)
 	}

@@ -219,6 +219,36 @@ class AgentClient
         return $this->send('put', "/v1/sites/$id/background", ['queue' => $queue, 'scheduler' => $scheduler, 'reverb' => $reverb])['applied'] ?? [];
     }
 
+    // ── the editor's language server ──
+
+    /**
+     * Sends JSON-RPC messages (already-encoded JSON, passed through untouched)
+     * to the site's language server for one editor session; returns the raw
+     * JSON of what came back.
+     */
+    public function lsp(string $id, string $session, string $messagesJson, int $waitMs): string
+    {
+        try {
+            $response = Http::timeout(25)->acceptJson()->withToken($this->token)
+                ->withBody('{"messages":'.$messagesJson.',"waitMs":'.$waitMs.'}', 'application/json')
+                ->post($this->baseUrl."/v1/sites/$id/lsp/$session");
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}].", previous: $e);
+        }
+        $json = json_decode($response->body());
+        if (! is_object($json) || ($json->ok ?? false) !== true) {
+            throw new AgentRefused(sprintf('Agent on [%s] refused the language server exchange: %s', $this->host, $json->error ?? 'unknown_error'),
+                detail: ['error' => $json->error ?? 'unknown_error', 'hint' => $json->hint ?? 'no hint given']);
+        }
+
+        return json_encode($json->messages ?? [], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    }
+
+    public function lspClose(string $id, string $session): void
+    {
+        $this->send('delete', "/v1/sites/$id/lsp/$session");
+    }
+
     // ── backups ──
 
     /** @return array{backups: array, operation: ?array} newest first; operation is the current or last backup/restore */
