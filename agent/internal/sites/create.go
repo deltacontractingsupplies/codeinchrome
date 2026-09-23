@@ -157,6 +157,12 @@ func (m *Manager) Create(ctx context.Context, o CreateOpts) (Site, error) {
 		return Site{}, fmt.Errorf("store database credentials: %w", err)
 	}
 	site.Database, site.DBUser = DBName(o.ID), DBUser(o.ID)
+	// The connection cap for this site's size (sizing.go), not a flat 20.
+	if err := m.setDBConnections(ctx, o.ID, o.MemLimit); err != nil {
+		_ = m.dropDatabase(context.Background(), o.ID)
+		cleanup()
+		return Site{}, fmt.Errorf("size the database connections: %w", err)
+	}
 	if err := m.save(site); err != nil {
 		_ = m.dropDatabase(context.Background(), o.ID)
 		cleanup()
@@ -240,6 +246,13 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 		}
 		if s.State != "running" {
 			continue
+		}
+		// Sites created before sizing.go had a flat cap of 20 connections;
+		// bring each in line with its memory. Idempotent.
+		if s.MemLimit != "" && m.cfg.MySQLPassword != "" {
+			if err := m.setDBConnections(ctx, s.ID, s.MemLimit); err != nil {
+				changed = append(changed, s.ID+": database connection cap not set: "+err.Error())
+			}
 		}
 		want, err := m.renderCaddy(ctx, s)
 		if err != nil {
@@ -761,6 +774,21 @@ func (m *Manager) SetLimits(ctx context.Context, id string, o LimitsOpts) (map[s
 				site.MemLimit = o.MemLimit
 			}
 			applied["cpuMemory"] = "applied"
+			if o.MemLimit != "" {
+				// The database cap follows the memory (see sizing.go), and
+				// the container restarts so Apache re-sizes its workers to
+				// the new limit - a few seconds, on a plan change only.
+				if err := m.setDBConnections(ctx, id, o.MemLimit); err != nil {
+					applied["dbConnections"] = "failed: " + err.Error()
+				} else {
+					applied["dbConnections"] = strconv.Itoa(ConnectionsFor(o.MemLimit))
+				}
+				if _, err := run(ctx, 60*time.Second, "docker", "restart", "-t", "10", m.container(id)); err != nil {
+					applied["workers"] = "restart failed: " + err.Error()
+				} else {
+					applied["workers"] = strconv.Itoa(WorkersFor(o.MemLimit))
+				}
+			}
 		}
 	}
 

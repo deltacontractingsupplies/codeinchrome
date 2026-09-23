@@ -203,6 +203,10 @@ func (m *Manager) RunCommand(ctx context.Context, id, tool string, args []string
 		res.ExitCode = -1
 		return res, nil
 	}
+	// composer and artisan change files (composer.json, migrations, make:*):
+	// whatever they changed becomes a version, successful or not.
+	m.record(context.WithoutCancel(ctx), id, tool+" "+strings.Join(args, " "))
+
 	var exitErr *exec.ExitError
 	switch {
 	case runErr == nil:

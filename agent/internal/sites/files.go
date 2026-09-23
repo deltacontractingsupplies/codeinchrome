@@ -300,7 +300,21 @@ func (m *Manager) WriteFile(ctx context.Context, id, rel, content string) error 
 //
 // Written to a temporary file in the same directory and renamed, so a failure
 // part-way leaves the previous version intact rather than a truncated one.
-func (m *Manager) WriteFileIf(_ context.Context, id, rel, content, expect string) (string, error) {
+func (m *Manager) WriteFileIf(ctx context.Context, id, rel, content, expect string) (string, error) {
+	return m.writeFileIf(ctx, id, rel, content, expect, "save "+rel)
+}
+
+// writeFileIf is WriteFileIf with the history message to record ("" records
+// nothing: the caller records its own, as a restore does).
+func (m *Manager) writeFileIf(ctx context.Context, id, rel, content, expect, note string) (string, error) {
+	rev, err := m.writeLocked(id, rel, content, expect)
+	if err == nil && note != "" {
+		m.record(ctx, id, note)
+	}
+	return rev, err
+}
+
+func (m *Manager) writeLocked(id, rel, content, expect string) (string, error) {
 	// Held across check-and-rename, or two writers could both pass the check.
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -372,7 +386,7 @@ func (m *Manager) WriteFileIf(_ context.Context, id, rel, content, expect string
 // Deliberately NOT recursive. A recursive delete behind a browser API is one
 // mistaken path away from destroying a customer's whole application, and the
 // panel has no use for it that a sequence of explicit deletes cannot cover.
-func (m *Manager) DeleteFile(_ context.Context, id, rel string) error {
+func (m *Manager) DeleteFile(ctx context.Context, id, rel string) error {
 	abs, err := m.resolve(id, rel)
 	if err != nil {
 		return err
@@ -393,5 +407,7 @@ func (m *Manager) DeleteFile(_ context.Context, id, rel string) error {
 		return fmt.Errorf("no such file")
 	}
 
+	// Into the bin: the last version stays in history, restorable.
+	m.record(ctx, id, "delete "+m.relativeTo(id, abs))
 	return nil
 }

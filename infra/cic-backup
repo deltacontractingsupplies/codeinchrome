@@ -47,10 +47,14 @@ backup_site() {
   local app=$ROOT/$id/vol/app
   mountpoint -q "$ROOT/$id/vol" || die "$id: disk is not mounted; refusing to back up an empty directory as if it were the site"
 
+  # The site's version history (vol/history.git) goes with its files, so a
+  # lost host loses no history either.
+  local history=$ROOT/$id/vol/history.git paths=("$app")
+  [[ -d $history ]] && paths+=("$history")
   restic backup --quiet --host "$HOST_ID" --tag "site:$id" --tag kind:files \
     --exclude "$app/storage/framework/cache" \
     --exclude "$app/storage/framework/views" \
-    "$app"
+    "${paths[@]}"
 
   # --single-transaction: a consistent InnoDB snapshot without locking the
   # site's tables while it runs. pipefail makes a failed dump fail the backup
@@ -120,7 +124,7 @@ print(dbs[0]["short_id"] if dbs else "")' "$which")
 
   staging=$vol/.restore-$$
   rm -rf "$staging"
-  restic restore "$files_snap" --target "$staging" --include "$app" >/dev/null
+  restic restore "$files_snap" --target "$staging" --include "$app" --include "$vol/history.git" >/dev/null
   [[ -d $staging$app ]] || die "$id: snapshot $files_snap restored nothing for $app"
 
   # Whatever happens from here, the container comes back. A failure before
@@ -148,8 +152,33 @@ print(dbs[0]["short_id"] if dbs else "")' "$which")
   stage="swapping in the restored files"
   mv "$app" "$vol/.replaced-$$"
   mv "$staging$app" "$app"
+  # History: the one on disk is newer than any snapshot and only ever grows,
+  # so it is kept. Only when there is none (a rebuilt host) does the
+  # snapshot's copy come back.
+  if [[ ! -d $vol/history.git && -d $staging$vol/history.git ]]; then
+    mv "$staging$vol/history.git" "$vol/history.git"
+    chmod 0700 "$vol/history.git"
+  fi
   rm -rf "$staging" "$vol/.replaced-$$"
   chown -R 33:33 "$app"
+
+  # The restore is itself a version: what the site held before it stays one
+  # click away in the editor's history. Same hardening as the agent's calls:
+  # no hooks, no fsmonitor, no system or global config.
+  if [[ -d $vol/history.git ]]; then
+    env -i PATH=/usr/bin:/bin HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      GIT_AUTHOR_NAME=codeinchrome GIT_AUTHOR_EMAIL=history@codeinchrome.com \
+      GIT_COMMITTER_NAME=codeinchrome GIT_COMMITTER_EMAIL=history@codeinchrome.com \
+      git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c safe.directory='*' \
+        --git-dir="$vol/history.git" --work-tree="$app" add -A -- . ':(exclude,glob).env' ':(exclude,glob).env.*' \
+        ':(exclude,glob)**/.env' ':(exclude,glob)**/.env.*' ':(exclude)storage' ':(exclude)vendor' ':(exclude)node_modules' \
+        ':(exclude)bootstrap/cache' >/dev/null 2>&1 \
+    && env -i PATH=/usr/bin:/bin HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+      GIT_AUTHOR_NAME=codeinchrome GIT_AUTHOR_EMAIL=history@codeinchrome.com \
+      GIT_COMMITTER_NAME=codeinchrome GIT_COMMITTER_EMAIL=history@codeinchrome.com \
+      git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c safe.directory='*' \
+        --git-dir="$vol/history.git" --work-tree="$app" commit -q --no-verify -m "restore site from backup $files_snap" >/dev/null 2>&1 || true
+  fi
 
   docker start "cic-$id" >/dev/null
   echo "restored $id from files $files_snap and database $db_snap"

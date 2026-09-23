@@ -137,8 +137,46 @@ RUN { \
     } > /usr/local/etc/php/conf.d/zz-codeinchrome.ini
 
 # The rootfs is mounted read-only at runtime; Apache still needs these.
+# Apache sized to THIS container's memory. Prefork's default of up to 150
+# workers is far more than a 256 MB - 2 GB container holds, and every worker
+# may open a database connection: under a burst, the site failed with
+# "max_user_connections" instead of queueing (measured by tests/load). At start
+# the container reads its own memory limit and sets the worker count to fit -
+# ~24 MB per busy worker after 64 MB for the rest - so excess requests wait in
+# the listen queue rather than fail. The agent sets the site's database
+# connection cap from the same formula (sites.WorkersFor), plus headroom.
+RUN set -eux; \
+    printf '%s\n' \
+      '<IfModule mpm_prefork_module>' \
+      '  StartServers 2' \
+      '  MinSpareServers 1' \
+      '  MaxSpareServers ${CIC_SPARE}' \
+      '  ServerLimit ${CIC_WORKERS}' \
+      '  MaxRequestWorkers ${CIC_WORKERS}' \
+      '  MaxConnectionsPerChild 2000' \
+      '</IfModule>' \
+      > /etc/apache2/conf-available/cic-workers.conf; \
+    a2enconf cic-workers; \
+    printf '%s\n' \
+      '#!/bin/sh' \
+      '# Size Apache to this container, then start it. See the Dockerfile.' \
+      'set -eu' \
+      'max=$(cat /sys/fs/cgroup/memory.max 2>/dev/null || echo max)' \
+      'if [ "$max" = max ]; then mb=1024; else mb=$((max / 1048576)); fi' \
+      'workers=$(( (mb - 64) / 24 ))' \
+      '[ "$workers" -lt 4 ] && workers=4' \
+      '[ "$workers" -gt 150 ] && workers=150' \
+      'spare=$workers; [ "$spare" -gt 8 ] && spare=8' \
+      'export CIC_WORKERS=$workers CIC_SPARE=$spare' \
+      'exec docker-php-entrypoint apache2-foreground' \
+      > /usr/local/bin/cic-start; \
+    chmod 0755 /usr/local/bin/cic-start; \
+    CIC_WORKERS=10 CIC_SPARE=4 apache2ctl -t
+
 VOLUME ["/var/www/html"]
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
   CMD php -r 'exit(@file_get_contents("http://127.0.0.1:8080/") === false ? 1 : 0);'
+
+CMD ["cic-start"]

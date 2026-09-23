@@ -222,6 +222,11 @@ func (m *Manager) configureAppDatabase(ctx context.Context, s Site, password str
 		{"DB_DATABASE", DBName(s.ID)},
 		{"DB_USERNAME", DBUser(s.ID)},
 		{"DB_PASSWORD", password},
+		// Daily log files kept for 14 days, not one file that grows forever:
+		// a burst of errors under load wrote 157 MB into one site's
+		// laravel.log in half an hour, on the site's own disk quota.
+		{"LOG_STACK", "daily"},
+		{"LOG_DAILY_DAYS", "14"},
 	} {
 		content = SetEnv(content, kv[0], kv[1])
 	}

@@ -264,6 +264,54 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"path": path, "deleted": true}))
 	})
 
+	// History: every version of every file, the bin of deleted files, and
+	// restore (itself a new version - history is never rewritten).
+	mux.HandleFunc("GET /v1/sites/{id}/history", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		if rev := q.Get("rev"); rev != "" {
+			content, err := mgr.FileAt(r.Context(), r.PathValue("id"), rev, q.Get("path"))
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, fail("cannot_read", err.Error()))
+				return
+			}
+			writeJSON(w, http.StatusOK, ok(resp{"path": q.Get("path"), "rev": rev, "content": content}))
+			return
+		}
+		versions, err := mgr.History(r.Context(), r.PathValue("id"), q.Get("path"), limit)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_list", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"path": q.Get("path"), "versions": versions}))
+	})
+
+	mux.HandleFunc("GET /v1/sites/{id}/bin", func(w http.ResponseWriter, r *http.Request) {
+		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
+		bin, err := mgr.Deleted(r.Context(), r.PathValue("id"), limit)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_list", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"bin": bin}))
+	})
+
+	mux.HandleFunc("POST /v1/sites/{id}/history/restore", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Rev  string `json:"rev"`
+			Path string `json:"path"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4096)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {rev, path}"))
+			return
+		}
+		if err := mgr.Restore(r.Context(), r.PathValue("id"), body.Rev, body.Path); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_restore", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"path": body.Path, "restoredFrom": body.Rev}))
+	})
+
 	mux.HandleFunc("PUT /v1/sites/{id}/aliases", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Aliases []string `json:"aliases"`

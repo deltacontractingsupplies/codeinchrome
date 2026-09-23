@@ -1,0 +1,13 @@
+{"plan":"pro","rate":2,"requests":61,"achieved_rps":2.032084923586196,"failed_ratio":0,"p50_ms":17.714774,"p95_ms":25.670318,"p99_ms":29.517198599999993,"dropped":0}
+{"plan":"pro","rate":4,"requests":121,"achieved_rps":4.030797891323807,"failed_ratio":0,"p50_ms":17.534765,"p95_ms":23.277644,"p99_ms":27.110388799999996,"dropped":0}
+{"plan":"pro","rate":6,"requests":181,"achieved_rps":6.029511181576949,"failed_ratio":0,"p50_ms":17.423358,"p95_ms":22.569215,"p99_ms":24.0383906,"dropped":0}
+{"plan":"pro","rate":8,"requests":241,"achieved_rps":8.027689965493,"failed_ratio":0,"p50_ms":17.289776,"p95_ms":22.552592,"p99_ms":25.616182199999997,"dropped":0}
+{"plan":"pro","rate":10,"requests":300,"achieved_rps":9.999747505042198,"failed_ratio":0,"p50_ms":17.181573999999998,"p95_ms":20.0020823,"p99_ms":24.268730749999996,"dropped":0}
+{"plan":"pro","rate":15,"requests":451,"achieved_rps":15.023643816225686,"failed_ratio":0,"p50_ms":17.010075,"p95_ms":19.0307125,"p99_ms":24.316986,"dropped":0}
+{"plan":"pro","rate":20,"requests":600,"achieved_rps":19.999491942239796,"failed_ratio":0,"p50_ms":16.605286,"p95_ms":18.661789599999995,"p99_ms":24.24534184,"dropped":0}
+{"plan":"pro","rate":30,"requests":901,"achieved_rps":30.013065228261873,"failed_ratio":0,"p50_ms":16.098241,"p95_ms":17.929993,"p99_ms":22.26556,"dropped":0}
+{"plan":"pro","rate":40,"requests":1200,"achieved_rps":39.99919952935249,"failed_ratio":0,"p50_ms":15.840037500000001,"p95_ms":17.7489858,"p99_ms":21.60599212,"dropped":0}
+{"plan":"pro","rate":50,"requests":1500,"achieved_rps":49.998168630414085,"failed_ratio":0,"p50_ms":15.5710575,"p95_ms":17.33603755,"p99_ms":19.378658219999995,"dropped":0}
+{"plan":"pro","rate":60,"requests":1800,"achieved_rps":59.9980803854173,"failed_ratio":0,"p50_ms":15.44985,"p95_ms":17.3650618,"p99_ms":20.55122962999999,"dropped":0}
+{"plan":"pro","rate":80,"requests":2401,"achieved_rps":79.98328702013917,"failed_ratio":0,"p50_ms":16.274208,"p95_ms":18.472631,"p99_ms":24.821285,"dropped":0}
+{"plan":"pro","rate":100,"requests":2724,"achieved_rps":75.48660409588742,"failed_ratio":0.37812041116005873,"p50_ms":1482.5532545,"p95_ms":7565.8449756499995,"p99_ms":8596.035444629999,"dropped":276}

@@ -111,7 +111,7 @@ return [
         'fresh_seconds' => 600,
     ],
 
-    'min_agent_version' => '0.16.0',
+    'min_agent_version' => '0.17.0',
 
     /*
      * The zone every free subdomain is created under, and the hosts that are

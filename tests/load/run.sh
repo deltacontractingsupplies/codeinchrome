@@ -57,7 +57,7 @@ gen_ip=$(tr ' ' '\n' <<<"$CIC_HOSTS" | awk -F: -v h="$host" '$1 != h {print $2; 
 ok "$SITE.codeinchrome.com on $host ($site_ip); load from $gen_ip"
 
 # ── the storefront ───────────────────────────────────────────────────────────
-tar -C tests/load/app -cf - . | on "$site_ip" "docker exec -i -u 33:33 cic-$SITE tar -xf - -C /var/www/html"
+COPYFILE_DISABLE=1 tar --no-xattrs -C tests/load/app -cf - . | on "$site_ip" "docker exec -i -u 33:33 cic-$SITE tar -xf - -C /var/www/html"
 on "$site_ip" "docker exec -u 33:33 cic-$SITE php /var/www/html/artisan migrate --force -q && docker exec -u 33:33 cic-$SITE php /var/www/html/artisan optimize -q"
 code=$(on "$gen_ip" "curl -sk -o /dev/null -w %{http_code} --resolve $SITE.codeinchrome.com:443:$site_ip https://$SITE.codeinchrome.com/shop")
 [[ $code == 200 ]] || die "/shop answered $code"
@@ -71,27 +71,36 @@ k6() { # rate duration
 }
 
 summary=$out/summary.md
-printf '| plan | limits | page views/s | p95 at that rate | peak memory | OOM kills |\n|---|---|---|---|---|---|\n' > "$summary"
+printf '| plan | limits | page views/s | p95 at that rate | peak memory | OOM kills | apache processes |\n|---|---|---|---|---|---|---|\n' > "$summary"
 
 for plan in $PLANS; do
   tinker "\$u = App\Models\User::where('email', '$EMAIL')->first(); \$u->update(['plan' => '$plan']); app(App\Fleet\PlanLimits::class)->applyTo(\$u); echo 'ok';" >/dev/null
   limits=$(on "$site_ip" "docker inspect -f '{{.HostConfig.NanoCpus}} {{.HostConfig.Memory}}' cic-$SITE" | awk '{printf "%.2g CPU, %d MB", $1/1e9, $2/1048576}')
   on "$site_ip" "docker restart cic-$SITE >/dev/null && sleep 3"
   k6 5 15s >/dev/null   # warm OPcache and the pool
-  oom_before=$(on "$site_ip" "docker inspect -f '{{.State.OOMKilled}}' cic-$SITE; dmesg 2>/dev/null | grep -c 'Memory cgroup out of memory' || true" | tail -1)
-  best=0 best_p95=-
+  # The container's own cgroup (this kernel has no memory.peak): its
+  # memory.current is sampled every second while each step runs, and
+  # memory.events' oom_kill counts what the kernel killed for lack of memory.
+  cg="/sys/fs/cgroup\$(sed -n 's|^0::||p' /proc/\$(docker inspect -f '{{.State.Pid}}' cic-$SITE)/cgroup)"
+  oom_before=$(on "$site_ip" "awk '/^oom_kill /{print \$2}' $cg/memory.events")
+  best=0 best_p95=- peak_mb=0
   for rate in $STEPS; do
+    on "$site_ip" "rm -f /tmp/cic-mem; for i in \$(seq 1 34); do cat $cg/memory.current >> /tmp/cic-mem; sleep 1; done" &
+    sampler=$!
     r=$(k6 "$rate" 30s)
+    wait "$sampler" || true
+    step_mb=$(on "$site_ip" "sort -n /tmp/cic-mem | tail -1" | awk '{printf "%d", $1/1048576}')
+    (( step_mb > peak_mb )) && peak_mb=$step_mb
     echo "{\"plan\":\"$plan\",${r#\{}" >> "$out/$plan.jsonl"
     read -r p95 failed dropped achieved < <(python3 -c 'import json,sys; d=json.loads(sys.argv[1]); print(round(d["p95_ms"] or 1e9), d["failed_ratio"], d["dropped"], round(d["achieved_rps"],1))' "$r")
     pass=$(python3 -c "print(int($p95 <= $P95_MAX_MS and $failed <= 0.01 and $dropped <= $rate * 30 * 0.01))")
-    printf '    %-8s %4s/s  p95 %5s ms  errors %5.1f%%  dropped %s  %s\n' "$plan" "$rate" "$p95" "$(python3 -c "print($failed*100)")" "$dropped" "$([[ $pass == 1 ]] && echo pass || echo FAIL)"
+    printf '    %-8s %4s/s  p95 %5s ms  errors %5.1f%%  dropped %s  memory %s MB  %s\n' "$plan" "$rate" "$p95" "$(python3 -c "print($failed*100)")" "$dropped" "$step_mb" "$([[ $pass == 1 ]] && echo pass || echo FAIL)"
     [[ $pass == 1 ]] || break
     best=$rate best_p95=$p95
   done
-  peak=$(on "$site_ip" "cat /sys/fs/cgroup/system.slice/docker-\$(docker inspect -f '{{.Id}}' cic-$SITE).scope/memory.peak 2>/dev/null || echo 0" | awk '{printf "%d MB", $1/1048576}')
-  oom_after=$(on "$site_ip" "dmesg 2>/dev/null | grep -c 'Memory cgroup out of memory' || true" | tail -1)
-  printf '| %s | %s | %s | %s ms | %s | %s |\n' "$plan" "$limits" "$best" "$best_p95" "$peak" "$((oom_after - oom_before))" >> "$summary"
+  oom_after=$(on "$site_ip" "awk '/^oom_kill /{print \$2}' $cg/memory.events")
+  workers=$(on "$site_ip" "docker exec cic-$SITE sh -c 'ps -C apache2 --no-headers | wc -l'")
+  printf '| %s | %s | %s | %s ms | %s MB | %s | %s |\n' "$plan" "$limits" "$best" "$best_p95" "$peak_mb" "$((oom_after - oom_before))" "$workers" >> "$summary"
   ok "$plan: $best page views/s within the bar"
 done
 
