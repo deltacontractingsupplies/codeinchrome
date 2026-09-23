@@ -318,6 +318,14 @@ func (m *Manager) ensureNetwork(ctx context.Context, id string) error {
 // startContainer runs the customer's container with every restriction we can
 // apply without breaking a normal Laravel app.
 func (m *Manager) startContainer(ctx context.Context, s Site) error {
+	if _, err := run(ctx, 2*time.Minute, "docker", m.runArgs(s)...); err != nil {
+		return fmt.Errorf("start container for %s: %w", s.ID, err)
+	}
+	return nil
+}
+
+// runArgs is the whole `docker run` for a site: pure, so it can be tested.
+func (m *Manager) runArgs(s Site) []string {
 	args := []string{
 		"run", "-d",
 		"--name", s.Container,
@@ -360,13 +368,19 @@ func (m *Manager) startContainer(ctx context.Context, s Site) error {
 	if s.Reverb && s.WSPort != 0 {
 		// Reverb's WebSocket port, loopback only; Caddy routes /app/* to it.
 		args = append(args, "--publish", fmt.Sprintf("127.0.0.1:%d:8081", s.WSPort))
+		// One open file per connection. The host's default (daemon.json:
+		// 1024 soft, 4096 hard) is right for a web-only site and held Reverb
+		// to ~1000 connections on every plan - measured by tests/load/ws.sh,
+		// where 2000 connections left exactly 1011 subscribed. What a site
+		// can actually hold stays bounded by its memory limit: socket
+		// buffers are charged to the container's cgroup.
+		args = append(args, "--ulimit", fmt.Sprintf("nofile=%d:%d", wsOpenFiles, wsOpenFiles))
 	}
-	args = append(args, laravelImage)
-	if _, err := run(ctx, 2*time.Minute, "docker", args...); err != nil {
-		return fmt.Errorf("start container for %s: %w", s.ID, err)
-	}
-	return nil
+	return append(args, laravelImage)
 }
+
+// wsOpenFiles is the open-file limit of a site with WebSockets on.
+const wsOpenFiles = 65536
 
 // seedApp copies the baked-in Laravel skeleton into the new site and gives it
 // an application key of its own.

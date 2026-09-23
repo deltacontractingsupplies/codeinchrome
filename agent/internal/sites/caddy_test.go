@@ -70,3 +70,26 @@ func TestReverbGetsTheWebSocketRouteAndItsAPIStaysPrivate(t *testing.T) {
 		t.Errorf("a site without Reverb gets no WebSocket route:\n%s", plain)
 	}
 }
+
+func TestOnlyAWebSocketSiteGetsTheHighOpenFileLimit(t *testing.T) {
+	m := &Manager{cfg: Config{HostID: "h9"}}
+	has := func(args []string, want string) bool {
+		for i := range args {
+			if args[i] == "--ulimit" && i+1 < len(args) && args[i+1] == want {
+				return true
+			}
+		}
+		return false
+	}
+	web := m.runArgs(Site{ID: "shop", Container: "cic-shop", CPULimit: "1", MemLimit: "1024m", Port: 20000})
+	if has(web, "nofile=65536:65536") {
+		t.Fatal("a web-only site must keep the host's default open-file limit")
+	}
+	ws := m.runArgs(Site{ID: "shop", Container: "cic-shop", CPULimit: "1", MemLimit: "1024m", Port: 20000, Reverb: true, WSPort: 30000})
+	if !has(ws, "nofile=65536:65536") {
+		t.Fatalf("a Reverb site needs room for its connections: %v", ws)
+	}
+	if ws[len(ws)-1] != laravelImage {
+		t.Fatal("the image must be the last argument")
+	}
+}
