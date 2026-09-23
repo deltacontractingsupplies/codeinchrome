@@ -13,3 +13,50 @@
 .legal ul { @apply list-disc space-y-1 pl-6; }
 .legal a { @apply text-teal-300 underline; }
 .legal strong { @apply text-neutral-100 font-medium; }
+
+/*
+ * Light theme. The views are written against Tailwind's palette; in light
+ * mode the palette itself is remapped - the neutral scale inverted, accents
+ * darkened for text on white and lightened for tints and borders - so every
+ * page follows without a second set of classes. data-theme is set on <html>
+ * by /theme.js before the first paint (the visitor's choice, else the
+ * system's). Without it, the page stays dark.
+ */
+:root[data-theme="light"] {
+    color-scheme: light;
+    --color-white: oklch(14.5% 0 none);
+    --color-neutral-50: oklch(14.5% 0 none);
+    --color-neutral-100: oklch(20.5% 0 none);
+    --color-neutral-200: oklch(26.9% 0 none);
+    --color-neutral-300: oklch(37.1% 0 none);
+    --color-neutral-400: oklch(43.9% 0 none);
+    --color-neutral-500: oklch(55.6% 0 none);
+    --color-neutral-600: oklch(70.8% 0 none);
+    --color-neutral-700: oklch(87% 0 none);
+    --color-neutral-800: oklch(92.2% 0 none);
+    --color-neutral-900: oklch(97% 0 none);
+    --color-neutral-950: oklch(99.5% 0 none);
+
+    --color-teal-200: oklch(43.7% 0.078 188.216);
+    --color-teal-300: oklch(43.7% 0.078 188.216);
+    --color-teal-400: oklch(43.7% 0.078 188.216);
+    --color-teal-500: oklch(51.1% 0.096 186.391);
+    --color-teal-600: oklch(51.1% 0.096 186.391);
+    --color-teal-800: oklch(85.5% 0.138 181.071);
+    --color-teal-950: oklch(98.4% 0.014 180.72);
+
+    --color-amber-200: oklch(47.3% 0.137 46.201);
+    --color-amber-300: oklch(55.5% 0.163 48.998);
+    --color-amber-400: oklch(55.5% 0.163 48.998);
+    --color-amber-800: oklch(87.9% 0.169 91.605);
+    --color-amber-950: oklch(98.7% 0.022 95.277);
+
+    --color-red-200: oklch(44.4% 0.177 26.899);
+    --color-red-300: oklch(50.5% 0.213 27.518);
+    --color-red-400: oklch(50.5% 0.213 27.518);
+    --color-red-500: oklch(57.7% 0.245 27.325);
+    --color-red-800: oklch(80.8% 0.114 19.571);
+    --color-red-900: oklch(80.8% 0.114 19.571);
+    --color-red-950: oklch(97.1% 0.013 17.38);
+}
+:root[data-theme="dark"] { color-scheme: dark; }

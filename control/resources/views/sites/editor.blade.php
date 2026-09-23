@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>{{ $site->site_id }} — codeinchrome</title>
+    <script src="/theme.js"></script>
     @vite(['resources/css/editor.css', 'resources/js/editor.js'])
 </head>
 <body>
@@ -24,6 +25,7 @@
     <header class="titlebar">
         <a class="back" href="{{ route('dashboard') }}" title="Back to your sites">code<span>in</span>chrome</a>
         <span class="title" id="winTitle">{{ $site->site_id }}</span>
+        <button type="button" class="open-site" data-theme-toggle title="Switch between system, light and dark">Theme: <span data-theme-label>System</span></button>
         <a class="open-site" href="{{ $site->url() }}" target="_blank" rel="noopener">Open site ↗</a>
     </header>
 

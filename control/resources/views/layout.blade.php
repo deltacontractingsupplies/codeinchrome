@@ -9,6 +9,8 @@
     <meta name="csrf-token" content="{{ csrf_token() }}">
     <title>@yield('title', 'codeinchrome')</title>
     <meta name="description" content="Laravel hosting where the AI does the work and the code stays yours.">
+    {{-- Blocking on purpose: sets the theme before the first paint. --}}
+    <script src="/theme.js"></script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
 </head>
 <body class="h-full bg-neutral-950 text-neutral-200 antialiased">
@@ -19,6 +21,7 @@
                 code<span class="text-teal-400">in</span>chrome
             </a>
             <nav class="flex items-center gap-4 text-sm">
+                <button type="button" data-theme-toggle class="text-neutral-400 hover:text-neutral-200" title="Switch between system, light and dark">Theme: <span data-theme-label>System</span></button>
                 @auth
                     <a href="{{ route('account') }}" class="text-neutral-500 hover:text-neutral-300 hidden sm:inline">{{ auth()->user()->email }}</a>
                     <a href="{{ route('dashboard') }}" class="text-neutral-300 hover:text-white">Sites</a>

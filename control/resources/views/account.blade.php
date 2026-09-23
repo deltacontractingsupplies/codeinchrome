@@ -42,7 +42,7 @@
         <form method="POST" action="{{ route('account.destroy') }}" class="mt-3 flex gap-2">@csrf @method('DELETE')
             <input type="password" name="password" placeholder="Current password" autocomplete="current-password" required
                    class="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100">
-            <button class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-white hover:bg-red-600">Delete everything</button>
+            <button class="rounded-md bg-red-700 px-3 py-2 text-sm font-medium text-red-50 hover:bg-red-600">Delete everything</button>
         </form>
         @error('password')<p class="mt-1 text-sm text-red-400">{{ $message }}</p>@enderror
     </details>

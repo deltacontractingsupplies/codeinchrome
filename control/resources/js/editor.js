@@ -1051,3 +1051,7 @@ window.cic = Object.freeze({
   }
   status(drafts.length ? `Restored ${drafts.length} unsaved file(s)` : 'Ready');
 })();
+
+// The theme switch in the title bar (the theme itself is set before paint by /theme.js).
+import { initThemeToggle } from './theme-toggle.js';
+initThemeToggle();

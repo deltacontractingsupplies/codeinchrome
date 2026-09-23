@@ -114,7 +114,7 @@
                           class="absolute right-0 z-10 mt-2 w-64 rounded-md border border-red-900 bg-neutral-900 p-3 text-sm shadow-lg">
                         @csrf @method('DELETE')
                         <p class="text-neutral-300">Delete <strong>{{ $site->domain }}</strong> and everything on it? This cannot be undone.</p>
-                        <button class="mt-3 w-full rounded-md bg-red-700 px-3 py-1.5 font-medium text-white hover:bg-red-600">Delete permanently</button>
+                        <button class="mt-3 w-full rounded-md bg-red-700 px-3 py-1.5 font-medium text-red-50 hover:bg-red-600">Delete permanently</button>
                     </form>
                 </details>
                 </div>
