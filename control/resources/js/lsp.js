@@ -24,6 +24,21 @@ const toServer = (s) => s.replaceAll('cic:/', `${ROOT}/`);
 const toClient = (s) => s.replaceAll(`${ROOT}/`, 'cic:/');
 const isPhp = (uri) => /\.php$/i.test(uri) && !/\.blade\.php$/i.test(uri);
 
+// Monaco's document synchronizer announces documents with their URI
+// lowercased, while its feature requests use the true case. Linux paths are
+// case-sensitive, so every document URI is put back to its model's true case
+// before anything else looks at it - otherwise a hover on ShopController.php
+// was taken for a file that was never opened, and answered with nothing.
+function trueCase(uri) {
+  if (typeof uri !== 'string') return uri;
+  const lower = uri.toLowerCase();
+  for (const m of monaco.editor.getModels()) {
+    const s = m.uri.toString(true);
+    if (s.toLowerCase() === lower) return s;
+  }
+  return uri;
+}
+
 class HttpTransport {
   constructor({ url, csrf, session, onStatus }) {
     this.url = url;
@@ -37,6 +52,9 @@ class HttpTransport {
     this.timer = null;
     this.phpUris = new Set();
     this.state = { value: { state: 'open' } };
+    this.own = new Map();
+    this.ownId = 0;
+    this.stats = { initialized: false, initId: undefined, sent: 0, received: 0, lastError: null, capabilities: [] };
     this.poll = setInterval(() => {
       if (document.visibilityState === 'visible' && !this.flushing && this.outbox.length === 0) this.flush(0);
     }, 4000);
@@ -47,12 +65,40 @@ class HttpTransport {
     while (listener && this.inbox.length) listener(this.inbox.shift());
   }
 
+  // A request of our own (window.cic.php), answered to us, not to Monaco.
+  request(method, params) {
+    const id = `cic-${++this.ownId}`;
+    return new Promise((resolve) => {
+      this.own.set(id, resolve);
+      this.outbox.push({ jsonrpc: '2.0', id, method, params });
+      clearTimeout(this.timer);
+      this.timer = setTimeout(() => this.flush(8000), 15);
+      setTimeout(() => {
+        if (this.own.delete(id)) resolve({ error: { message: 'timed out - the language server may still be indexing; try again' } });
+      }, 20000);
+    });
+  }
+
   deliver(message) {
+    if (message.id !== undefined && this.own.has(message.id)) {
+      this.own.get(message.id)(message);
+      this.own.delete(message.id);
+      return;
+    }
+    this.stats.received++;
+    if (message.id !== undefined && message.id === this.stats.initId && message.result) {
+      this.stats.initialized = true;
+      this.stats.capabilities = Object.keys(message.result.capabilities ?? {});
+    }
+    if (message.error) this.stats.lastError = message.error.message;
     if (this.listener) this.listener(message);
     else this.inbox.push(message);
   }
 
   send(message) {
+    if (message.params?.textDocument?.uri) {
+      message.params = { ...message.params, textDocument: { ...message.params.textDocument, uri: trueCase(message.params.textDocument.uri) } };
+    }
     const uri = message.params?.textDocument?.uri;
     if (message.method === 'textDocument/didOpen') {
       if (isPhp(uri)) this.phpUris.add(uri);
@@ -66,10 +112,22 @@ class HttpTransport {
       return Promise.resolve();
     }
     if (message.method === 'textDocument/didClose') this.phpUris.delete(uri);
+    if (message.method === 'textDocument/didChange') {
+      // Phpactor declares FULL document sync (textDocumentSync: 1): each
+      // change must carry the whole text. Monaco's client sends incremental
+      // edits regardless, and Phpactor took the one inserted character for
+      // the entire file - its copy of the document became "l", and it had
+      // nothing to complete. A change with no range replaces the whole
+      // document, which every server accepts.
+      const model = monaco.editor.getModels().find((m) => m.uri.toString(true) === uri);
+      if (model) message.params = { ...message.params, contentChanges: [{ text: model.getValue() }] };
+    }
     if (message.method === 'initialize') {
+      this.stats.initId = message.id;
       message.params = { ...message.params, rootUri: ROOT, rootPath: '/var/www/html',
         workspaceFolders: [{ uri: ROOT, name: 'site' }] };
     }
+    this.stats.sent++;
     this.outbox.push(message);
     // Requests go almost at once; a run of keystrokes rides together.
     clearTimeout(this.timer);
@@ -93,6 +151,7 @@ class HttpTransport {
         });
         const res = JSON.parse(toClient(await r.text()));
         if (!res.ok) {
+          this.stats.lastError = res.hint ?? res.error;
           this.onStatus?.(res.hint ?? 'PHP language server unavailable', true);
           for (const m of batch) {
             if (m.id !== undefined && m.method) this.deliver({ jsonrpc: '2.0', id: m.id, error: { code: -32603, message: res.hint ?? 'unavailable' } });
@@ -101,7 +160,8 @@ class HttpTransport {
         }
         this.onStatus?.('', false);
         for (const m of res.messages) this.deliver(m);
-      } catch {
+      } catch (e) {
+        this.stats.lastError = String(e);
         for (const m of batch) {
           if (m.id !== undefined && m.method) this.deliver({ jsonrpc: '2.0', id: m.id, error: { code: -32603, message: 'network' } });
         }
@@ -134,5 +194,32 @@ export function startPhpLanguageServer({ url, closeUrl, csrf, onStatus }) {
       headers: { 'X-CSRF-TOKEN': csrf, 'X-Requested-With': 'XMLHttpRequest' } }).catch(() => {});
   };
   addEventListener('pagehide', stop, { once: true });
-  return { client, stop, session };
+  const status = () => ({ session, ...transport.stats, openPhpFiles: [...transport.phpUris].map((u) => u.replace('cic:', '')) });
+  // For the agent: the same answers the person gets. The file must be open
+  // in the editor (the caller opens it); line and column are 1-based.
+  const ask = async (method, path, line, column) => {
+    const uri = trueCase(`cic:${path.startsWith('/') ? path : `/${path}`}`);
+    const r = await transport.request(method, { textDocument: { uri }, position: { line: line - 1, character: column - 1 } });
+    return r.error ? { ok: false, error: 'lsp', hint: r.error.message } : { ok: true, result: JSON.parse(toClient(JSON.stringify(r.result ?? null))) };
+  };
+  const plain = (c) => (typeof c === 'string' ? c : Array.isArray(c) ? c.map(plain).join('\n') : c?.value ?? '');
+  const php = {
+    complete: async (path, line, column) => {
+      const r = await ask('textDocument/completion', path, line, column);
+      if (!r.ok) return r;
+      const items = Array.isArray(r.result) ? r.result : r.result?.items ?? [];
+      return { ok: true, items: items.slice(0, 100).map((i) => ({ label: i.label, kind: i.kind, detail: i.detail ?? null, insert: i.insertText ?? i.label })) };
+    },
+    hover: async (path, line, column) => {
+      const r = await ask('textDocument/hover', path, line, column);
+      return r.ok ? { ok: true, text: r.result ? plain(r.result.contents) : '' } : r;
+    },
+    definition: async (path, line, column) => {
+      const r = await ask('textDocument/definition', path, line, column);
+      if (!r.ok) return r;
+      const locs = [].concat(r.result ?? []);
+      return { ok: true, locations: locs.map((l) => ({ path: (l.uri ?? l.targetUri ?? '').replace(/^cic:/, ''), line: (l.range ?? l.targetRange)?.start.line + 1 })) };
+    },
+  };
+  return { client, stop, session, status, ...php };
 }

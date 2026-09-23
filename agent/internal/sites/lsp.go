@@ -41,6 +41,17 @@ const (
 	lspCacheInstall = "/var/www/html/storage/framework/cache/phpactor"
 )
 
+func lspPidFile(session string) string { return lspCacheInstall + "/lsp-" + session + ".pid" }
+
+// lspKill stops a session's language server INSIDE the container, by the pid
+// it recorded. A variable so the tests need no docker.
+var lspKill = func(container, session string) {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	_ = exec.CommandContext(ctx, "docker", "exec", "-u", "33:33", container, "sh", "-c",
+		`f="$1"; [ -f "$f" ] && kill "$(cat "$f")" 2>/dev/null; rm -f "$f"`, "sh", lspPidFile(session)).Run()
+}
+
 var lspSessionID = regexp.MustCompile(`^[a-z0-9]{16,40}$`)
 
 // ErrLSPSessions means the site already has as many language servers as it may.
@@ -48,26 +59,40 @@ var ErrLSPSessions = errors.New("too many editor sessions are open for this site
 
 // lspCommand starts the language server. A variable so tests can stand in a
 // fake server without docker.
-var lspCommand = func(ctx context.Context, container string) *exec.Cmd {
+var lspCommand = func(ctx context.Context, container, session string) *exec.Cmd {
 	return exec.CommandContext(ctx, "docker", "exec", "-i", "-u", "33:33", "-w", "/var/www/html",
-		// Its cache (the class index) lives on the site's own disk, under its
-		// quota, and outside history (storage/ is excluded).
-		"-e", "XDG_CACHE_HOME="+lspCacheInstall, "-e", "HOME=/tmp",
-		container, "php", "-d", "memory_limit="+lspPHPMemory, "/usr/local/bin/phpactor", "language-server")
+		// Its cache (the class index) AND its temporary files live on the
+		// site's own disk, under its quota and outside history (storage/ is
+		// excluded). Not /tmp: that is a 64 MB tmpfs - memory, charged to the
+		// site - and where PHP stages the site's own uploads. Phpactor's temp
+		// files (several MB per process) filled it, which broke Phpactor
+		// itself ("No space left on device", then "phar corruption") and
+		// would have broken the site's uploads. Stale ones are swept at start.
+		"-e", "XDG_CACHE_HOME="+lspCacheInstall, "-e", "HOME=/tmp", "-e", "TMPDIR="+lspCacheInstall+"/tmp",
+		// The pid file is how the process is stopped later: killing this
+		// `docker exec` client does NOT stop what runs inside the container,
+		// and a language server left behind holds up to 256 MB of the
+		// site's own memory limit. exec keeps the pid: sh becomes php.
+		"-e", "CIC_LSP_PID="+lspPidFile(session),
+		container, "sh", "-c",
+		`mkdir -p "$TMPDIR" && find "$TMPDIR" -type f -mmin +60 -delete 2>/dev/null; echo $$ > "$CIC_LSP_PID"; `+
+			`exec php -d memory_limit=`+lspPHPMemory+` -d sys_temp_dir="$TMPDIR" -d upload_tmp_dir="$TMPDIR" /usr/local/bin/phpactor language-server`)
 }
 
 type lspSession struct {
-	site     string
-	cmd      *exec.Cmd
-	cancel   context.CancelFunc
-	stdin    io.WriteCloser
-	writeMu  sync.Mutex
-	mu       sync.Mutex
-	queue    []json.RawMessage
-	arrived  chan struct{} // closed and replaced each time a message arrives
-	lastUsed time.Time
-	done     chan struct{}
-	err      error
+	site      string
+	session   string
+	container string
+	cmd       *exec.Cmd
+	cancel    context.CancelFunc
+	stdin     io.WriteCloser
+	writeMu   sync.Mutex
+	mu        sync.Mutex
+	queue     []json.RawMessage
+	arrived   chan struct{} // closed and replaced each time a message arrives
+	lastUsed  time.Time
+	done      chan struct{}
+	err       error
 }
 
 var (
@@ -107,7 +132,7 @@ func (m *Manager) lspSession(id, session string) (*lspSession, error) {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
-	cmd := lspCommand(ctx, m.container(id))
+	cmd := lspCommand(ctx, m.container(id), session)
 	stdin, err := cmd.StdinPipe()
 	if err != nil {
 		cancel()
@@ -123,7 +148,7 @@ func (m *Manager) lspSession(id, session string) (*lspSession, error) {
 		cancel()
 		return nil, fmt.Errorf("the language server could not start")
 	}
-	s := &lspSession{site: id, cmd: cmd, cancel: cancel, stdin: stdin,
+	s := &lspSession{site: id, session: session, container: m.container(id), cmd: cmd, cancel: cancel, stdin: stdin,
 		arrived: make(chan struct{}), lastUsed: time.Now(), done: make(chan struct{})}
 	go s.read(bufio.NewReaderSize(stdout, 64<<10))
 	lspSessions[key] = s
@@ -260,6 +285,14 @@ func (m *Manager) LSPExchange(ctx context.Context, id, session string, send []js
 	}
 }
 
+// stop ends the server: closes its input, kills it inside the container, and
+// lets go of the docker client.
+func (s *lspSession) stop() {
+	_ = s.stdin.Close()
+	lspKill(s.container, s.session)
+	s.cancel()
+}
+
 // LSPClose ends an editor session's language server.
 func (m *Manager) LSPClose(id, session string) {
 	lspMu.Lock()
@@ -267,8 +300,7 @@ func (m *Manager) LSPClose(id, session string) {
 	delete(lspSessions, id+"/"+session)
 	lspMu.Unlock()
 	if s != nil {
-		_ = s.stdin.Close()
-		s.cancel()
+		go s.stop()
 	}
 }
 
@@ -284,8 +316,7 @@ func (m *Manager) LSPCloseSite(id string) {
 	}
 	lspMu.Unlock()
 	for _, s := range gone {
-		_ = s.stdin.Close()
-		s.cancel()
+		s.stop()
 	}
 }
 
@@ -304,10 +335,26 @@ func reapLSP() {
 			}
 			if idle {
 				delete(lspSessions, k)
-				_ = s.stdin.Close()
-				s.cancel()
+				go s.stop()
 			}
 		}
 		lspMu.Unlock()
 	}
+}
+
+// StopStrayLanguageServers stops every language server running in any site
+// container. Called when the agent starts: it holds no sessions yet, so any
+// such process was left by a previous run and nothing will ever talk to it.
+func (m *Manager) StopStrayLanguageServers(ctx context.Context) int {
+	out, err := exec.CommandContext(ctx, "docker", "ps", "-q", "--filter", "label=codeinchrome.site").Output()
+	if err != nil {
+		return 0
+	}
+	n := 0
+	for _, c := range strings.Fields(string(out)) {
+		if exec.CommandContext(ctx, "docker", "exec", "-u", "33:33", c, "pkill", "-f", "phpactor language-server").Run() == nil {
+			n++
+		}
+	}
+	return n
 }

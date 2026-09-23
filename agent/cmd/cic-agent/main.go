@@ -72,6 +72,10 @@ func main() {
 		fatal("cannot start site manager: %v", err)
 	}
 
+	if n := mgr.StopStrayLanguageServers(context.Background()); n > 0 {
+		slog.Info("stopped language servers left by a previous run", "containers", n)
+	}
+
 	mode, err := mgr.SelfTest()
 	if err != nil {
 		fatal("file operations do not work in this environment, refusing to serve: %v", err)

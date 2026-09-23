@@ -36,7 +36,9 @@
   --ansi-30: #000000; --ansi-31: #cd3131; --ansi-32: #107c10; --ansi-33: #949800;
   --ansi-34: #0451a5; --ansi-35: #bc05bc; --ansi-36: #0598bc; --ansi-37: #555555;
 }
-* { box-sizing: border-box; margin: 0; padding: 0; }
+/* The reset stops at Monaco: its widgets (suggestions, hover docs, find)
+   are styled by Monaco and rely on normal margins and paddings. */
+*:where(:not(.monaco-editor, .monaco-editor *)) { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
 body { background: var(--editor-bg); color: var(--editor-fg); font: 13px/1.4 var(--ui); -webkit-font-smoothing: antialiased; }
 button { font: inherit; color: inherit; background: none; border: 0; cursor: pointer; }
@@ -55,7 +57,9 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .side-actions button { width: 22px; height: 22px; border-radius: 4px; color: var(--desc); font-size: 14px; }
 .side-actions button:hover { background: var(--list-hover); color: var(--editor-fg); }
 .side-site { padding: 2px 20px 6px; font-size: 11px; font-weight: 700; }
-.tree { overflow: auto; flex: 1; padding-bottom: 12px; }
+/* aside-scoped: Monaco's suggestion widget has a class="tree" of its own,
+   and this rule's padding pushed its rows out of view. */
+aside .tree { overflow: auto; flex: 1; padding-bottom: 12px; }
 .node { display: flex; align-items: center; height: 22px; padding-right: 8px; cursor: pointer; white-space: nowrap; user-select: none; }
 .node:hover { background: var(--list-hover); }
 .node.active { background: var(--list-active); }

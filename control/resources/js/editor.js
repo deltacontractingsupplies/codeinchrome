@@ -80,7 +80,7 @@ new MutationObserver(() => {
 })
   .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 // PHP IntelliSense from Phpactor in the site's container (lsp.js).
-startPhpLanguageServer({
+const php = startPhpLanguageServer({
   url: SITE.lspUrl,
   closeUrl: SITE.lspCloseUrl,
   csrf: CSRF,
@@ -410,6 +410,9 @@ function show(path) {
       applying = false;
     }
     if (editor.getModel() !== m) editor.setModel(m);
+    // PHP has a real language server; word guesses would crowd its answers,
+    // as VS Code avoids. Other files keep them.
+    editor.updateOptions({ wordBasedSuggestions: m.getLanguageId() === 'php' ? 'off' : 'currentDocument' });
   } else {
     editor.setModel(null);
   }
@@ -1115,6 +1118,12 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
   cic.logs(source, lines)      source 'app' (storage/logs), 'access' (requests) or
                                'container' (PHP and Apache errors)  -> { ok, log: { lines } }
 
+  cic.php.status()             PHP IntelliSense: { initialized, capabilities, openPhpFiles, lastError }
+  cic.php.complete(path, line, col)   PHP completions at a position (1-based) -> { ok, items: [{ label, kind, detail }] }
+  cic.php.hover(path, line, col)      what the symbol there is, with its docs  -> { ok, text }
+  cic.php.definition(path, line, col) where it is defined -> { ok, locations: [{ path, line }] }
+                               Phpactor runs in this site's container and sees its vendor/. The
+                               first answers after opening the editor can take ~15 s (indexing).
   cic.buffer()                 the open file as shown, unsaved edits included
                                -> { ok, path, content, dirty, readOnly }
 
@@ -1611,6 +1620,14 @@ window.cic = Object.freeze({
     },
   }),
   open: (path) => openFile(path),
+  // PHP IntelliSense (Phpactor in the site's container): is it running?
+  php: Object.freeze({
+    status: () => php.status(),
+    // Opens the file (it must be open for the server to see its text), then asks.
+    complete: async (path, line, column) => { await openFile(path); return php.complete(path, line, column); },
+    hover: async (path, line, column) => { await openFile(path); return php.hover(path, line, column); },
+    definition: async (path, line, column) => { await openFile(path); return php.definition(path, line, column); },
+  }),
   // What the person sees in the open file right now, saved or not.
   buffer: () => {
     const t = tabs.get(active);

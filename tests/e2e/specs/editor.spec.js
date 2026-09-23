@@ -65,6 +65,26 @@ test('a person and an agent can both edit a real site, without erasing each othe
     expect(env.content).toMatch(/^DB_PASSWORD=[0-9a-f]{64}$/m);
   });
 
+  await test.step('PHP IntelliSense runs in the site: hover, go to definition, completion', async () => {
+    // Phpactor indexes the site first (~15 s cold), so the first answers are retried.
+    await expect(async () => {
+      const h = await page.evaluate(() => window.cic.php.hover('/routes/web.php', 5, 3));
+      expect(h.ok, h.hint).toBe(true);
+      expect(h.text).toContain('Route');
+    }).toPass({ timeout: 90_000, intervals: [3_000] });
+
+    const def = await page.evaluate(() => window.cic.php.definition('/routes/web.php', 5, 3));
+    expect(def.ok, def.hint).toBe(true);
+    expect(def.locations[0].path).toContain('/vendor/laravel/framework/');
+
+    expect((await page.evaluate(() => window.cic.write('/app/Probe.php', "<?php\n\nuse Illuminate\\Support\\Str;\n\nStr::sl"))).ok).toBe(true);
+    const comp = await page.evaluate(() => window.cic.php.complete('/app/Probe.php', 5, 8));
+    expect(comp.ok, comp.hint).toBe(true);
+    expect(comp.items.map((i) => i.label)).toContain('slug');
+    expect((await page.evaluate(() => window.cic.rm('/app/Probe.php'))).ok).toBe(true);
+
+  });
+
   await test.step('the explorer shows the real Laravel tree, with the open file revealed', async () => {
     await expect(page.locator('.node.active .nm')).toHaveText('web.php');
     for (const name of ['app', 'public', 'routes', 'artisan', 'composer.json']) {

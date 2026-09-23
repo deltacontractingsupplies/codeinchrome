@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 )
@@ -64,12 +65,25 @@ func fakeLSP() {
 	}
 }
 
+var (
+	killed   = &[]string{}
+	killedMu sync.Mutex
+)
+
 func fakeLSPCommand(t *testing.T) *[]string {
 	t.Helper()
 	started := &[]string{}
+	*killed = nil
 	orig := lspCommand
 	t.Cleanup(func() { lspCommand = orig })
-	lspCommand = func(ctx context.Context, container string) *exec.Cmd {
+	origKill := lspKill
+	t.Cleanup(func() { lspKill = origKill })
+	lspKill = func(container, session string) {
+		killedMu.Lock()
+		defer killedMu.Unlock()
+		*killed = append(*killed, container+"/"+session)
+	}
+	lspCommand = func(ctx context.Context, container, session string) *exec.Cmd {
 		*started = append(*started, container)
 		cmd := exec.CommandContext(ctx, os.Args[0], "-test.run=^$")
 		cmd.Env = append(os.Environ(), "CIC_FAKE_LSP=1")
@@ -150,5 +164,19 @@ func TestLSPRefusesBadInputAndCapsSessionsPerSite(t *testing.T) {
 	m.LSPClose(id, fmt.Sprintf("tab%016d", 1))
 	if _, err := m.LSPExchange(context.Background(), id, "tabxxxxxxxxxxxxxxxx", nil, 0); err != nil {
 		t.Fatalf("a closed session did not free its slot: %v", err)
+	}
+}
+
+func TestClosingASessionKillsItsProcessInsideTheContainer(t *testing.T) {
+	m, id := historyManager(t)
+	fakeLSPCommand(t)
+	if _, err := m.LSPExchange(context.Background(), id, "tab0123456789abcd", nil, 0); err != nil {
+		t.Fatal(err)
+	}
+	m.LSPCloseSite(id)
+	killedMu.Lock()
+	defer killedMu.Unlock()
+	if len(*killed) != 1 || (*killed)[0] != "cic-"+id+"/tab0123456789abcd" {
+		t.Fatalf("killed inside containers: %v", *killed)
 	}
 }
