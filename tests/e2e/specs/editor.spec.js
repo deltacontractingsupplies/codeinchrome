@@ -378,4 +378,36 @@ Route::get('/', function () {
     const bin = await page.evaluate(() => window.cic.bin());
     expect(bin.bin.map((b) => b.path)).toEqual(expect.arrayContaining(['app/Shop/Cart.php', 'app/Shop/Trolley.php']));
   });
+  await test.step('the database imports a .sql file through window.cic and exports as .sql.gz', async () => {
+    const refused = await page.evaluate(() => window.cic.db.import(new Blob(['SELECT 1;'], { type: 'application/sql' })));
+    expect(refused.error).toBe('needs_confirm');
+
+    const imported = await page.evaluate(() => window.cic.db.import(new Blob([
+      'CREATE TABLE e2e_import (id INT PRIMARY KEY, name VARCHAR(40));\n',
+      "INSERT INTO e2e_import VALUES (1, 'imported by the agent');\n",
+    ], { type: 'application/sql' }), { confirm: true }));
+    expect(imported.ok, imported.hint).toBe(true);
+    const row = await page.evaluate(() => window.cic.db.query('SELECT name FROM e2e_import WHERE id = 1'));
+    expect(row.result.rows).toEqual([['imported by the agent']]);
+
+    const dump = await page.evaluate(async () => {
+      const r = await fetch(document.getElementById('cic-app').dataset.dbExport, { credentials: 'same-origin' });
+      const bytes = new Uint8Array(await r.arrayBuffer());
+      const text = await new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).text();
+      return { status: r.status, disp: r.headers.get('content-disposition'), magic: [bytes[0], bytes[1]], text };
+    });
+    expect(dump.status).toBe(200);
+    expect(dump.magic).toEqual([0x1f, 0x8b]);
+    expect(dump.disp).toMatch(/^attachment; filename="site_.*\.sql\.gz"$/);
+    expect(dump.text).toContain('CREATE TABLE `e2e_import`');
+    expect(dump.text).toContain('imported by the agent');
+
+    // The database as it was before the import was saved, and it does not
+    // have the imported table.
+    const before = await page.evaluate(async () => {
+      const r = await fetch(document.getElementById('cic-app').dataset.dbExport + '?saved=before-import', { credentials: 'same-origin' });
+      return new Response(r.body.pipeThrough(new DecompressionStream('gzip'))).text();
+    });
+    expect(before).not.toContain('e2e_import');
+  });
 });
