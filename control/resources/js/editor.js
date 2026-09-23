@@ -71,7 +71,10 @@ const editor = monaco.editor.create($('monaco'), {
   padding: { top: 8 },
 });
 // The page's theme switch (light / dark / system) drives Monaco's.
-new MutationObserver(() => monaco.editor.setTheme(themeName()))
+new MutationObserver(() => {
+  monaco.editor.setTheme(themeName());
+  if (listings.size) renderTree();
+})
   .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 /** tab key -> Monaco model */
 const models = new Map();
@@ -197,7 +200,41 @@ async function loadDir(path) {
   return res;
 }
 
+/*
+ * File and folder icons: Material Icon Theme (MIT), copied to /file-icons by
+ * scripts/file-icons.mjs. The manifest maps names and extensions to icons,
+ * the way VS Code's icon themes do; only icons actually shown are fetched.
+ */
+let icons = null;
+const iconsReady = fetch('/file-icons/manifest.json', { credentials: 'same-origin' })
+  .then((r) => (r.ok ? r.json() : null))
+  .then((m) => {
+    if (m) icons = { ...m, known: new Set(m.icons) };
+  })
+  .catch(() => {});
+
+function iconFor(entry, open) {
+  if (!icons) return null;
+  const light = document.documentElement.dataset.theme === 'light';
+  const pick = (table, key) => (light ? icons.light[table]?.[key] : undefined) ?? icons[table][key];
+  const name = entry.name.toLowerCase();
+  let icon;
+  if (entry.dir) {
+    icon = pick(open ? 'folderNamesExpanded' : 'folderNames', name) ?? (open ? icons.folderExpanded : icons.folder);
+  } else {
+    icon = pick('fileNames', name);
+    // Longest extension first: "blade.php" before "php".
+    const parts = name.split('.');
+    for (let i = 1; !icon && i < parts.length; i++) icon = pick('fileExtensions', parts.slice(i).join('.'));
+    // Names with no entry of their own: .env and its variants.
+    if (!icon && (name === '.env' || name.startsWith('.env.'))) icon = pick('fileNames', '.env.example');
+    icon ??= icons.file;
+  }
+  return icons.known.has(icon) ? `/file-icons/${icon}.svg` : null;
+}
+
 async function renderTree() {
+  await iconsReady;
   if (!listings.has('/')) await loadDir('/');
   const tree = $('tree');
   tree.replaceChildren();
@@ -236,15 +273,28 @@ function nodeFor(entry, depth) {
   el.tabIndex = 0;
   el.dataset.path = entry.path;
 
+  const open = entry.dir && expanded.has(entry.path);
   const twisty = document.createElement('span');
-  twisty.className = 'tw';
-  twisty.textContent = entry.dir ? (expanded.has(entry.path) ? '▾' : '▸') : '';
+  twisty.className = 'tw' + (entry.dir ? (open ? ' open' : ' closed') : '');
+  twisty.setAttribute('aria-hidden', 'true');
 
   const name = document.createElement('span');
   name.className = 'nm';
   name.textContent = entry.name; // textContent: file names are data, never markup
 
-  el.append(twisty, name);
+  el.append(twisty);
+  const src = iconFor(entry, open);
+  if (src) {
+    const img = document.createElement('img');
+    img.className = 'ic';
+    img.src = src;
+    img.alt = '';
+    img.width = img.height = 16;
+    img.decoding = 'async';
+    el.append(img);
+  }
+  el.append(name);
+  if (entry.dir) el.setAttribute('aria-expanded', String(open));
 
   const more = document.createElement('button');
   more.type = 'button';
@@ -606,17 +656,17 @@ editor.onDidChangeModelContent(() => {
   paint();
 });
 editor.onDidChangeCursorPosition(paint);
-editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
-  if (active) save(active);
-});
+// ⌘S / Ctrl+S, everywhere on the page including inside the code editor.
+// Capture phase, so it runs before Monaco: one save path, whether the key
+// comes from a person, a browser test or an agent - Monaco's own keybinding
+// service did not see Playwright's synthetic ⌘S at all.
 document.addEventListener('keydown', (e) => {
-  // Inside the code editor, Monaco's own ⌘S command handles it.
-  if (e.target?.closest?.('.monaco-editor')) return;
-  if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 's') {
+  if ((e.metaKey || e.ctrlKey) && !e.altKey && e.key.toLowerCase() === 's') {
+    e.stopPropagation();
     e.preventDefault();
     if (active) save(active);
   }
-});
+}, true);
 
 $('btnRefresh').addEventListener('click', async () => {
   for (const dir of ['/', ...expanded]) await loadDir(dir);

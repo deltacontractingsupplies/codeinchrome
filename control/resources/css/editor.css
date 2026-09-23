@@ -60,7 +60,16 @@ button { font: inherit; color: inherit; background: none; border: 0; cursor: poi
 .node:hover { background: var(--list-hover); }
 .node.active { background: var(--list-active); }
 .node:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
-.node .tw { width: 16px; text-align: center; color: var(--desc); font-size: 10px; flex: none; }
+.node .tw { width: 16px; height: 16px; flex: none; position: relative; }
+/* The chevron, drawn: two borders of a small square, turned. */
+.node .tw.closed::before, .node .tw.open::before {
+  content: ""; position: absolute; left: 5px; top: 4px; width: 5px; height: 5px;
+  border-right: 1.5px solid var(--desc); border-bottom: 1.5px solid var(--desc);
+  transform: rotate(-45deg); transition: transform .1s ease;
+}
+.node .tw.open::before { transform: rotate(45deg); left: 5px; top: 3px; }
+@media (prefers-reduced-motion: reduce) { .node .tw::before { transition: none; } }
+.node .ic { width: 16px; height: 16px; flex: none; margin-right: 6px; }
 .node .nm { overflow: hidden; text-overflow: ellipsis; }
 .node.dir .nm { color: var(--editor-fg); }
 .node .del { margin-left: auto; opacity: 0; color: var(--desc); padding: 0 4px; }

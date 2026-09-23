@@ -24,7 +24,7 @@ const toEnd = async (page) => {
   await page.keyboard.press('ControlOrMeta+End');
 };
 // The editor as the person sees it (Monaco), unsaved edits included.
-const shown = (page) => page.evaluate(() => window.cic.buffer());
+const shown = (page) => page.evaluate(() => window.cic?.buffer() ?? { content: '' });
 const expectShown = async (page, matcher) => {
   await expect.poll(async () => (await shown(page)).content).toMatch(matcher);
 };
@@ -93,10 +93,13 @@ test('a person and an agent can both edit a real site, without erasing each othe
 
     await page.evaluate(() => window.cic.open('/app/Hostile.php'));
     await expect.poll(async () => (await shown(page)).content).toBe(payload);
-    await expect(page.locator('#hl')).toContainText('onerror');
+    // What the editor draws: Monaco's rendered lines show the text...
+    const lines = page.locator('.monaco-editor .view-lines');
+    await expect(lines).toContainText('onerror');
 
+    // ...and none of it became an element or ran.
     expect(await page.evaluate(() => window.__pwned)).toBeUndefined();
-    expect(await page.locator('#hl img, #hl script, #hl svg').count()).toBe(0);
+    expect(await lines.locator('img, script, svg').count()).toBe(0);
   });
 
   await test.step('an agent edit reaches the person watching', async () => {
