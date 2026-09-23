@@ -172,18 +172,26 @@ print(dbs[0]["short_id"] if dbs else "")' "$which")
   # click away in the editor's history. Same hardening as the agent's calls:
   # no hooks, no fsmonitor, no system or global config.
   if [[ -d $vol/history.git ]]; then
-    env -i PATH=/usr/bin:/bin HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-      GIT_AUTHOR_NAME=codeinchrome GIT_AUTHOR_EMAIL=history@codeinchrome.com \
-      GIT_COMMITTER_NAME=codeinchrome GIT_COMMITTER_EMAIL=history@codeinchrome.com \
-      git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c safe.directory='*' \
-        --git-dir="$vol/history.git" --work-tree="$app" add -A -- . ':(exclude,glob).env' ':(exclude,glob).env.*' \
-        ':(exclude,glob)**/.env' ':(exclude,glob)**/.env.*' ':(exclude)storage' ':(exclude)vendor' ':(exclude)node_modules' \
-        ':(exclude)bootstrap/cache' >/dev/null 2>&1 \
-    && env -i PATH=/usr/bin:/bin HOME=/nonexistent GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
-      GIT_AUTHOR_NAME=codeinchrome GIT_AUTHOR_EMAIL=history@codeinchrome.com \
-      GIT_COMMITTER_NAME=codeinchrome GIT_COMMITTER_EMAIL=history@codeinchrome.com \
-      git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c safe.directory='*' \
-        --git-dir="$vol/history.git" --work-tree="$app" commit -q --no-verify -m "restore site from backup $files_snap" >/dev/null 2>&1 || true
+    # ls-files + update-index, not `git add -A`: with the app's own .gitignore
+    # ignoring .env and vendor, `git add` plus these exclusions exits 1 and
+    # the restore was never recorded (the agent's history.go explains).
+    hgit() {
+      env -i PATH=/usr/bin:/bin HOME=/nonexistent LC_ALL=C GIT_CONFIG_NOSYSTEM=1 GIT_CONFIG_GLOBAL=/dev/null \
+        GIT_AUTHOR_NAME=codeinchrome GIT_AUTHOR_EMAIL=history@codeinchrome.com \
+        GIT_COMMITTER_NAME=codeinchrome GIT_COMMITTER_EMAIL=history@codeinchrome.com \
+        git -c core.hooksPath=/dev/null -c core.fsmonitor=false -c safe.directory='*' -c gc.auto=0 \
+          --git-dir="$vol/history.git" --work-tree="$app" "$@"
+    }
+    if hgit ls-files -z --others --modified --deleted --exclude-standard -- . \
+        ':(exclude,glob).env' ':(exclude,glob).env.*' ':(exclude,glob)**/.env' ':(exclude,glob)**/.env.*' \
+        ':(exclude)storage' ':(exclude)vendor' ':(exclude)node_modules' ':(exclude)bootstrap/cache' \
+        ':(exclude)public/storage' ':(exclude)public/hot' ':(exclude).phpunit.cache' ':(exclude).phpunit.result.cache' \
+        | hgit update-index --add --remove -z --stdin \
+      && hgit commit -q --no-verify --allow-empty -m "restore site from backup $files_snap" >/dev/null; then
+      :
+    else
+      echo "cic-backup: $id: the restore worked but could not be recorded in the site's history" >&2
+    fi
   fi
 
   docker start "cic-$id" >/dev/null

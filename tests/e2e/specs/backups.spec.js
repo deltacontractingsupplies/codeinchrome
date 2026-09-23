@@ -71,7 +71,8 @@ test('back up, change the site, restore it, and the restore can itself be undone
     await expect(page.locator('#sbMsg')).toHaveText('Ready');
     expect((await page.evaluate(() => window.cic.write('/public/kept.txt', 'changed later'))).ok).toBe(true);
     expect((await page.evaluate(() => window.cic.db.query("UPDATE kept SET v = 'changed later'", { write: true }))).ok).toBe(true);
-    expect((await httpsGet(`https://${siteName}.codeinchrome.com/kept.txt`)).body).toBe('changed later');
+    const [address] = await waitForDns(`${siteName}.codeinchrome.com`);
+    expect((await httpsGet(`${siteName}.codeinchrome.com`, '/kept.txt', address)).body).toBe('changed later');
   });
 
   await test.step('restore needs the box ticked, then brings files and database back', async () => {
@@ -85,7 +86,8 @@ test('back up, change the site, restore it, and the restore can itself be undone
     await expect(page.getByText(new RegExp(`restored backup ${taken}\\. The site as it was before is backup [0-9a-f]{8}`))).toBeVisible();
 
     await expect(async () => {
-      expect((await httpsGet(`https://${siteName}.codeinchrome.com/kept.txt`)).body).toBe('the original');
+      const [address] = await waitForDns(`${siteName}.codeinchrome.com`);
+      expect((await httpsGet(`${siteName}.codeinchrome.com`, '/kept.txt', address)).body).toBe('the original');
     }).toPass({ timeout: 60_000 });
     await page.goto(`/sites/${siteName}/edit`);
     await expect(page.locator('#sbMsg')).toHaveText('Ready');

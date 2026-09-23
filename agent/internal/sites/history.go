@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"os/exec"
@@ -63,6 +64,11 @@ func historyLock(id string) *sync.Mutex {
 // git runs one git command against a site's history, with nothing from the
 // environment, the system or the repository able to run code.
 func (m *Manager) git(ctx context.Context, id string, args ...string) (string, error) {
+	return m.gitIn(ctx, id, nil, args...)
+}
+
+// gitIn is git with stdin.
+func (m *Manager) gitIn(ctx context.Context, id string, stdin io.Reader, args ...string) (string, error) {
 	ctx, cancel := context.WithTimeout(ctx, historyTimeout)
 	defer cancel()
 	base := []string{
@@ -77,6 +83,7 @@ func (m *Manager) git(ctx context.Context, id string, args ...string) (string, e
 		"--work-tree=" + m.appDir(id),
 	}
 	cmd := exec.CommandContext(ctx, "git", append(base, args...)...)
+	cmd.Stdin = stdin
 	cmd.Env = []string{
 		"PATH=/usr/bin:/bin", "HOME=/nonexistent", "LC_ALL=C",
 		"GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0",
@@ -124,8 +131,21 @@ func (m *Manager) commit(ctx context.Context, id, message string) error {
 	if err := m.ensureHistory(ctx, id); err != nil {
 		return err
 	}
-	if _, err := m.git(ctx, id, append([]string{"add", "-A", "--", "."}, historyExcludes...)...); err != nil {
+	// Not `git add -A`: on a real Laravel app it exits 1 whenever one of our
+	// exclusions names a path the app's own .gitignore already ignores (.env,
+	// vendor) - every commit failed, silently, on every live site, while the
+	// unit tests (no .gitignore) passed. ls-files lists exactly what changed,
+	// honouring both the app's .gitignore and our exclusions, and never
+	// complains; update-index stages exactly that list. An excluded file is
+	// never even hashed into the history's object store.
+	changed, err := m.git(ctx, id, append([]string{"ls-files", "-z", "--others", "--modified", "--deleted", "--exclude-standard", "--", "."}, historyExcludes...)...)
+	if err != nil {
 		return err
+	}
+	if changed != "" {
+		if _, err := m.gitIn(ctx, id, strings.NewReader(changed), "update-index", "--add", "--remove", "-z", "--stdin"); err != nil {
+			return err
+		}
 	}
 	// Leave very large files out: history is for code, not for uploads.
 	staged, err := m.git(ctx, id, "diff", "--cached", "--name-only", "-z", "--diff-filter=AM")

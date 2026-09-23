@@ -137,3 +137,43 @@ func TestHistoryRefusesBadRevisionsAndPaths(t *testing.T) {
 		}
 	}
 }
+
+// The case the first version failed on every live site: Laravel's own
+// .gitignore ignores .env and vendor, and `git add` with our exclusions then
+// exited 1 on every commit - silently, since a failed commit is only logged.
+// Also: an excluded file must never even be hashed into the object store.
+func TestHistoryWorksWithLaravelsOwnGitignore(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	app := m.appDir(id)
+	os.WriteFile(filepath.Join(app, ".gitignore"), []byte("/node_modules\n/public/hot\n/public/storage\n/storage/*.key\n/vendor\n.env\n.env.backup\n.phpunit.result.cache\n"), 0o644)
+	os.WriteFile(filepath.Join(app, ".env"), []byte("APP_KEY=base64:topsecret"), 0o640)
+	os.MkdirAll(filepath.Join(app, "vendor/laravel"), 0o755)
+	os.WriteFile(filepath.Join(app, "vendor/laravel/x.php"), []byte("vendor"), 0o644)
+
+	if err := m.WriteFile(ctx, id, "/routes/web.php", "<?php // one"); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.WriteFile(ctx, id, "/routes/web.php", "<?php // two"); err != nil {
+		t.Fatal(err)
+	}
+	versions, err := m.History(ctx, id, "/routes/web.php", 10)
+	if err != nil || len(versions) != 2 {
+		t.Fatalf("want 2 versions of routes/web.php, got %d (%v)", len(versions), err)
+	}
+	// A deletion is recorded too.
+	if err := m.DeleteFile(ctx, id, "/routes/web.php"); err != nil {
+		t.Fatal(err)
+	}
+	if v, _ := m.History(ctx, id, "/routes/web.php", 10); len(v) != 3 {
+		t.Fatalf("the deletion was not recorded: %d versions", len(v))
+	}
+	// No blob anywhere in the object store holds the secret.
+	objects, _ := m.git(ctx, id, "cat-file", "--batch-all-objects", "--batch-check=%(objectname)")
+	for _, o := range strings.Fields(objects) {
+		body, _ := m.git(ctx, id, "cat-file", "-p", o)
+		if strings.Contains(body, "topsecret") {
+			t.Fatalf("the .env content was hashed into history as %s", o)
+		}
+	}
+}
