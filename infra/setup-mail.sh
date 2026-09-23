@@ -9,7 +9,7 @@
 # is not an open relay, because nothing outside can connect to it at all),
 # with every message DKIM-signed by OpenDKIM. The zone gets:
 #
-#   SPF    codeinchrome.com          v=spf1 ip4:<control ip> -all
+#   SPF    codeinchrome.com          v=spf1 ip4:<control ip> include:<Cloudflare routing> -all
 #   DKIM   <selector>._domainkey     the public key
 #   DMARC  _dmarc                    p=quarantine, strict alignment
 #
@@ -40,9 +40,16 @@ die() { printf '\033[31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
 control() { ssh -o ConnectTimeout=20 -o StrictHostKeyChecking=accept-new "root@$ip" "$@"; }
 
 cf_upsert_txt() { # name content
+  # Replaces the TXT record at `name` of the same KIND (v=spf1, v=DKIM1,
+  # v=DMARC1) and nothing else: the apex also carries other TXT records
+  # (domain verifications), and the first version overwrote whichever came first.
   local name=$1 content=$2 id
   id=$(curl -fsS -g "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records?type=TXT&name=$name" \
-        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; print(r[0]["id"] if r else "")')
+        -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | KIND="${content%%;*}" python3 -c '
+import json, os, sys
+kind = os.environ["KIND"].split()[0]
+r = [x for x in json.load(sys.stdin)["result"] if x["content"].strip("\"").startswith(kind)]
+print(r[0]["id"] if r else "")')
   local body
   body=$(python3 -c 'import json,sys; print(json.dumps({"type":"TXT","name":sys.argv[1],"content":sys.argv[2],"ttl":300}))' "$name" "$content")
   if [[ -n $id ]]; then
@@ -130,7 +137,11 @@ ok "Postfix (send-only, loopback) and OpenDKIM on the control host"
 # ── the records that let receivers verify the mail ───────────────────────────
 dkim_txt=$(control "cat /etc/opendkim/keys/$selector.txt" | tr -d '\n' | sed -E 's/^[^(]*\(//; s/\).*$//; s/"[[:space:]]*"//g; s/"//g; s/[[:space:]]+/ /g; s/^ //; s/ $//')
 [[ $dkim_txt == v=DKIM1* ]] || die "could not read the DKIM public key (got: ${dkim_txt:0:60})"
-cf_upsert_txt "$zone"                      "v=spf1 ip4:$ip -all"
+# include:_spf.mx.cloudflare.net - Cloudflare Email Routing forwards mail
+# for support@ to the operators (enabled in the dashboard; it owns the MX and
+# cf2024-1 DKIM records). A domain may have only ONE SPF record, so its entry
+# lives here rather than as the second record the dashboard offers to add.
+cf_upsert_txt "$zone"                      "v=spf1 ip4:$ip include:_spf.mx.cloudflare.net -all"
 cf_upsert_txt "$selector._domainkey.$zone" "$dkim_txt"
 cf_upsert_txt "_dmarc.$zone"               "v=DMARC1; p=quarantine; adkim=s; aspf=s"
 ok "SPF, DKIM ($selector) and DMARC published"
@@ -150,6 +161,8 @@ check "not reachable from the internet" "! nc -z -G 5 $ip 25"
 # first version checked immediately and failed a correct setup.
 dkim_ok() { for _ in $(seq 1 20); do control "opendkim-testkey -d $zone -s $selector -vvv 2>&1 | grep -q 'key OK'" && return 0; sleep 3; done; return 1; }
 check "DKIM key matches the published record" dkim_ok
+check "exactly one SPF record" "[ \$(dig +short TXT $zone @\$(dig +short NS $zone | head -1) | grep -c 'v=spf1') = 1 ]"
+check "inbound mail is routed (Cloudflare MX)" "dig +short MX $zone @\$(dig +short NS $zone | head -1) | grep -q mx.cloudflare.net"
 check "reserved test domains are discarded, not sent" "control 'postmap -q .test hash:/etc/postfix/transport' | grep -q '^discard:'"
 (( fails )) && die "$fails check(s) failed"
 printf '\033[32mmail ready\033[0m  from no-reply@%s via %s\n' "$zone" "$helo"

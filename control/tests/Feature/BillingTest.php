@@ -4,6 +4,7 @@ namespace Tests\Feature;
 
 use App\Models\Subscription;
 use App\Models\User;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -45,6 +46,38 @@ class BillingTest extends TestCase
 
         $this->actingAs(User::factory()->create())->post(route('billing.checkout'), ['plan' => 'pro'])
             ->assertSessionHas('error', fn ($m) => str_contains($m, 'The variant is not published.'));
+    }
+
+    public function test_a_dropped_connection_is_retried(): void
+    {
+        $calls = 0;
+        Http::fake(['api.lemonsqueezy.com/v1/checkouts' => function () use (&$calls) {
+            if (++$calls === 1) {
+                throw new ConnectionException('cURL error 52: Empty reply from server');
+            }
+
+            return Http::response(['data' => ['attributes' => ['url' => 'https://codeinchrome.lemonsqueezy.com/checkout/x']]], 201);
+        }]);
+
+        $this->actingAs(User::factory()->create())->post(route('billing.checkout'), ['plan' => 'pro'])
+            ->assertRedirect('https://codeinchrome.lemonsqueezy.com/checkout/x');
+        $this->assertSame(2, $calls);
+    }
+
+    public function test_an_unreachable_provider_is_a_message_not_a_500(): void
+    {
+        Http::fake(['api.lemonsqueezy.com/*' => fn () => throw new ConnectionException('cURL error 52: Empty reply from server')]);
+
+        $this->actingAs(User::factory()->create())->from(route('billing'))->post(route('billing.checkout'), ['plan' => 'pro'])
+            ->assertRedirect(route('billing'))
+            ->assertSessionHas('error', 'The payment provider could not be reached. Please try again in a minute.');
+    }
+
+    public function test_an_http_refusal_is_not_retried(): void
+    {
+        Http::fake(['api.lemonsqueezy.com/*' => Http::response(['errors' => [['detail' => 'nope']]], 422)]);
+        $this->actingAs(User::factory()->create())->post(route('billing.checkout'), ['plan' => 'pro'])->assertSessionHas('error');
+        Http::assertSentCount(1);
     }
 
     public function test_the_return_page_does_not_claim_the_upgrade_happened(): void

@@ -74,11 +74,18 @@ say "code"
 # --no-o --no-g: without them rsync -a carries the DEVELOPER's uid and gid onto
 # the server. Here that landed /srv/control as `501:staff` - a macOS uid that
 # means nothing on Linux - mode 0750, and caddy could not traverse it at all.
+# /storage/ and /bootstrap/cache/ are the SERVER's state and are never
+# shipped or --deleted: sessions (the file driver - shipping them signed every
+# customer out on every deploy), uploaded files, and the package manifest,
+# which from a laptop lists dev-only packages (Laravel Pail) that the
+# per-minute scheduler then failed to load until composer rebuilt it.
 rsync -az --delete --no-o --no-g \
-  --exclude vendor --exclude node_modules --exclude .env --exclude 'database/*.sqlite' \
-  --exclude storage/logs --exclude storage/framework/cache --exclude public/build \
+  --exclude /vendor/ --exclude /node_modules/ --exclude /.env --exclude '/database/*.sqlite' \
+  --exclude /storage/ --exclude /bootstrap/cache/ --exclude /public/build/ --exclude /tests/ \
+  --exclude /.phpunit.result.cache --exclude /.predeploy-tests.log \
   -e 'ssh -o StrictHostKeyChecking=accept-new' \
   control/ "root@$ip:/srv/control/"
+ssh_ 'cd /srv/control && mkdir -p storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache'
 rsync -az --no-o --no-g -e 'ssh -o StrictHostKeyChecking=accept-new' control/public/build/ "root@$ip:/srv/control/public/build/"
 ok "source synced"
 
@@ -330,6 +337,7 @@ check "app cannot read the agent tokens as caddy" "ssh root@$ip '! sudo -u caddy
 check "env readable by its owner only" "ssh root@$ip '[ \"\$(stat -c %a /srv/control/.env)\" = 600 ]'"
 check "env owned by the app user"      "ssh root@$ip '[ \"\$(stat -c %U /srv/control/.env)\" = codeinchrome ]'"
 check "scheduler installed"    "ssh root@$ip 'grep -q schedule:run /etc/cron.d/codeinchrome'"
+check "no dev-only package in the manifest" "! ssh root@$ip 'grep -q Pail /srv/control/bootstrap/cache/packages.php'"
 check "config is cached"       "ssh root@$ip 'test -f /srv/control/bootstrap/cache/config.php'"
 check "answers over https"     "[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 25 https://$domain/)\" = 200 ]"
 check ".env not served"        "[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 15 https://$domain/.env)\" != 200 ]"

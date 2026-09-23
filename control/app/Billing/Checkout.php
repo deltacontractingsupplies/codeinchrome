@@ -3,6 +3,7 @@
 namespace App\Billing;
 
 use App\Models\User;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use RuntimeException;
 
@@ -37,28 +38,36 @@ class Checkout
             }
         }
 
-        $response = Http::withToken(config('billing.api_key'))
-            ->withHeaders(['Accept' => 'application/vnd.api+json', 'Content-Type' => 'application/vnd.api+json'])
-            ->timeout(20)
-            ->post('https://api.lemonsqueezy.com/v1/checkouts', [
-                'data' => [
-                    'type' => 'checkouts',
-                    'attributes' => [
-                        'checkout_data' => [
-                            'email' => $user->email,
-                            'name' => $user->name,
-                            'custom' => ['user_id' => (string) $user->id],
+        // Retried on a CONNECTION failure only (seen in production: an empty
+        // reply from the API, fine a second later). Safe to repeat - an unused
+        // checkout just expires - and an HTTP error is never retried.
+        try {
+            $response = Http::withToken(config('billing.api_key'))
+                ->withHeaders(['Accept' => 'application/vnd.api+json', 'Content-Type' => 'application/vnd.api+json'])
+                ->timeout(20)
+                ->retry(3, 500, fn ($e) => $e instanceof ConnectionException, throw: false)
+                ->post('https://api.lemonsqueezy.com/v1/checkouts', [
+                    'data' => [
+                        'type' => 'checkouts',
+                        'attributes' => [
+                            'checkout_data' => [
+                                'email' => $user->email,
+                                'name' => $user->name,
+                                'custom' => ['user_id' => (string) $user->id],
+                            ],
+                            'product_options' => [
+                                'redirect_url' => route('billing.return'),
+                            ],
                         ],
-                        'product_options' => [
-                            'redirect_url' => route('billing.return'),
+                        'relationships' => [
+                            'store' => ['data' => ['type' => 'stores', 'id' => (string) config('billing.store_id')]],
+                            'variant' => ['data' => ['type' => 'variants', 'id' => (string) $plan['variant_id']]],
                         ],
                     ],
-                    'relationships' => [
-                        'store' => ['data' => ['type' => 'stores', 'id' => (string) config('billing.store_id')]],
-                        'variant' => ['data' => ['type' => 'variants', 'id' => (string) $plan['variant_id']]],
-                    ],
-                ],
-            ]);
+                ]);
+        } catch (ConnectionException $e) {
+            throw new RuntimeException('The payment provider could not be reached. Please try again in a minute.', previous: $e);
+        }
 
         $url = $response->json('data.attributes.url');
         if (! $response->successful() || ! $url) {

@@ -81,3 +81,58 @@ export async function dnsDeleteUnder(suffix) {
     }
   }
 }
+
+/**
+ * A test account's billing state, as the control plane holds it.
+ */
+export function billingOf(email) {
+  if (!email.endsWith('@codeinchrome.test')) throw new Error('billingOf is for test accounts only');
+  const out = onControl(['tinker', `--execute=$u = App\\Models\\User::where('email', '${email}')->first(); $s = $u?->subscriptions()->latest()->first(); echo json_encode(['plan' => $u?->plan, 'status' => $s?->status, 'id' => $s?->ls_subscription_id, 'ends_at' => $s?->ends_at]);`]);
+  return JSON.parse(out.trim().split('\n').pop());
+}
+
+/**
+ * Lemon Squeezy, TEST MODE ONLY. Every call re-reads the subscription and
+ * refuses unless it is a test-mode subscription in the codeinchrome store, so
+ * a live customer's subscription can never be cancelled by a test.
+ */
+function ls() {
+  const env = Object.fromEntries(readFileSync(`${REPO}/.env`, 'utf8').split('\n')
+    .filter((l) => l.includes('=') && !l.startsWith('#')).map((l) => [l.slice(0, l.indexOf('=')), l.slice(l.indexOf('=') + 1).trim()]));
+  return { key: env.LEMONSQUEEZY_API_KEY, store: env.LEMONSQUEEZY_STORE_ID };
+}
+
+async function lsRequest(method, path, body) {
+  const { key } = ls();
+  const r = await fetch(`https://api.lemonsqueezy.com/v1/${path}`, {
+    method,
+    headers: { Authorization: `Bearer ${key}`, Accept: 'application/vnd.api+json', 'Content-Type': 'application/vnd.api+json' },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const j = await r.json();
+  if (!r.ok) throw new Error(`lemon squeezy ${method} ${path}: ${JSON.stringify(j.errors)}`);
+  return j.data;
+}
+
+async function lsTestSubscription(id) {
+  const sub = await lsRequest('GET', `subscriptions/${id}`);
+  const a = sub.attributes;
+  if (!a.test_mode) throw new Error(`subscription ${id} is LIVE; tests never touch live subscriptions`);
+  if (String(a.store_id) !== String(ls().store)) throw new Error(`subscription ${id} belongs to store ${a.store_id}, not codeinchrome`);
+  if (!a.user_email.endsWith('@codeinchrome.test')) throw new Error(`subscription ${id} is not a test account's`);
+  return sub;
+}
+
+export async function lsSubscription(id) {
+  return (await lsTestSubscription(id)).attributes;
+}
+
+export async function lsCancel(id) {
+  await lsTestSubscription(id);
+  return (await lsRequest('DELETE', `subscriptions/${id}`)).attributes;
+}
+
+export async function lsResume(id) {
+  await lsTestSubscription(id);
+  return (await lsRequest('PATCH', `subscriptions/${id}`, { data: { type: 'subscriptions', id: String(id), attributes: { cancelled: false } } })).attributes;
+}
