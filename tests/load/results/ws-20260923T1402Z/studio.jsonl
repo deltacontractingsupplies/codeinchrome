@@ -1,0 +1,10 @@
+{"plan":"studio","conns":100,"opened":100,"subscribed":100,"closed_early":0,"errors":0,"ticks":6930,"p50_ms":6,"p95_ms":12}
+{"plan":"studio","conns":250,"opened":250,"subscribed":250,"closed_early":0,"errors":0,"ticks":17300,"p50_ms":14,"p95_ms":23}
+{"plan":"studio","conns":500,"opened":500,"subscribed":500,"closed_early":0,"errors":0,"ticks":34510,"p50_ms":25,"p95_ms":44}
+{"plan":"studio","conns":1000,"opened":1000,"subscribed":1000,"closed_early":0,"errors":0,"ticks":69280,"p50_ms":48,"p95_ms":76}
+{"plan":"studio","conns":2000,"opened":2000,"subscribed":2000,"closed_early":0,"errors":0,"ticks":138380,"p50_ms":84,"p95_ms":120}
+{"plan":"studio","conns":3000,"opened":3000,"subscribed":3000,"closed_early":0,"errors":0,"ticks":207632,"p50_ms":101,"p95_ms":148}
+{"plan":"studio","conns":4000,"opened":4000,"subscribed":4000,"closed_early":0,"errors":0,"ticks":276866,"p50_ms":120,"p95_ms":180}
+{"plan":"studio","conns":6000,"opened":6000,"subscribed":6000,"closed_early":0,"errors":0,"ticks":416840,"p50_ms":159,"p95_ms":240}
+{"plan":"studio","conns":8000,"opened":8000,"subscribed":8000,"closed_early":0,"errors":0,"ticks":554222,"p50_ms":201,"p95_ms":311}
+{"plan":"studio","conns":10000,"opened":10000,"subscribed":10000,"closed_early":0,"errors":0,"ticks":689976,"p50_ms":251,"p95_ms":382}

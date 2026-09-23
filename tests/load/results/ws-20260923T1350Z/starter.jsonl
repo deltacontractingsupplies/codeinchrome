@@ -1,0 +1,5 @@
+{"plan":"starter","conns":100,"opened":100,"subscribed":100,"closed_early":0,"errors":0,"ticks":6971,"p50_ms":8,"p95_ms":12}
+{"plan":"starter","conns":250,"opened":250,"subscribed":250,"closed_early":0,"errors":0,"ticks":17290,"p50_ms":15,"p95_ms":25}
+{"plan":"starter","conns":500,"opened":500,"subscribed":500,"closed_early":0,"errors":0,"ticks":34670,"p50_ms":27,"p95_ms":47}
+{"plan":"starter","conns":1000,"opened":1000,"subscribed":1000,"closed_early":0,"errors":0,"ticks":69480,"p50_ms":51,"p95_ms":108}
+{"plan":"starter","conns":2000,"opened":1011,"subscribed":1011,"closed_early":989,"errors":989,"ticks":5280,"p50_ms":38,"p95_ms":60}

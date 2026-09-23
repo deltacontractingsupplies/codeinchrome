@@ -143,6 +143,119 @@
           "failed_ratio": 0.14960221376686267,
           "dropped": 437
         }
+      ],
+      "websocket_connections": 10000,
+      "websocket_steps": [
+        {
+          "plan": "studio",
+          "conns": 100,
+          "opened": 100,
+          "subscribed": 100,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 6930,
+          "p50_ms": 6,
+          "p95_ms": 12
+        },
+        {
+          "plan": "studio",
+          "conns": 250,
+          "opened": 250,
+          "subscribed": 250,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 17300,
+          "p50_ms": 14,
+          "p95_ms": 23
+        },
+        {
+          "plan": "studio",
+          "conns": 500,
+          "opened": 500,
+          "subscribed": 500,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 34510,
+          "p50_ms": 25,
+          "p95_ms": 44
+        },
+        {
+          "plan": "studio",
+          "conns": 1000,
+          "opened": 1000,
+          "subscribed": 1000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 69280,
+          "p50_ms": 48,
+          "p95_ms": 76
+        },
+        {
+          "plan": "studio",
+          "conns": 2000,
+          "opened": 2000,
+          "subscribed": 2000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 138380,
+          "p50_ms": 84,
+          "p95_ms": 120
+        },
+        {
+          "plan": "studio",
+          "conns": 3000,
+          "opened": 3000,
+          "subscribed": 3000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 207632,
+          "p50_ms": 101,
+          "p95_ms": 148
+        },
+        {
+          "plan": "studio",
+          "conns": 4000,
+          "opened": 4000,
+          "subscribed": 4000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 276866,
+          "p50_ms": 120,
+          "p95_ms": 180
+        },
+        {
+          "plan": "studio",
+          "conns": 6000,
+          "opened": 6000,
+          "subscribed": 6000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 416840,
+          "p50_ms": 159,
+          "p95_ms": 240
+        },
+        {
+          "plan": "studio",
+          "conns": 8000,
+          "opened": 8000,
+          "subscribed": 8000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 554222,
+          "p50_ms": 201,
+          "p95_ms": 311
+        },
+        {
+          "plan": "studio",
+          "conns": 10000,
+          "opened": 10000,
+          "subscribed": 10000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 689976,
+          "p50_ms": 251,
+          "p95_ms": 382
+        }
       ]
     },
     "starter": {
@@ -218,6 +331,97 @@
           "p95_ms": 10000.728622999999,
           "failed_ratio": 0.23845623707787733,
           "dropped": 49
+        }
+      ],
+      "websocket_connections": 4000,
+      "websocket_steps": [
+        {
+          "plan": "starter",
+          "conns": 100,
+          "opened": 100,
+          "subscribed": 100,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 6970,
+          "p50_ms": 9,
+          "p95_ms": 14
+        },
+        {
+          "plan": "starter",
+          "conns": 250,
+          "opened": 250,
+          "subscribed": 250,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 17299,
+          "p50_ms": 16,
+          "p95_ms": 26
+        },
+        {
+          "plan": "starter",
+          "conns": 500,
+          "opened": 500,
+          "subscribed": 500,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 34670,
+          "p50_ms": 28,
+          "p95_ms": 47
+        },
+        {
+          "plan": "starter",
+          "conns": 1000,
+          "opened": 1000,
+          "subscribed": 1000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 69544,
+          "p50_ms": 52,
+          "p95_ms": 80
+        },
+        {
+          "plan": "starter",
+          "conns": 2000,
+          "opened": 2000,
+          "subscribed": 2000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 139109,
+          "p50_ms": 88,
+          "p95_ms": 175
+        },
+        {
+          "plan": "starter",
+          "conns": 3000,
+          "opened": 3000,
+          "subscribed": 3000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 208064,
+          "p50_ms": 188,
+          "p95_ms": 303
+        },
+        {
+          "plan": "starter",
+          "conns": 4000,
+          "opened": 4000,
+          "subscribed": 4000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 277040,
+          "p50_ms": 235,
+          "p95_ms": 411
+        },
+        {
+          "plan": "starter",
+          "conns": 6000,
+          "opened": 6000,
+          "subscribed": 6000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 417264,
+          "p50_ms": 325,
+          "p95_ms": 541
         }
       ]
     },
@@ -316,6 +520,119 @@
           "failed_ratio": 0.07448601280754971,
           "dropped": 34
         }
+      ],
+      "websocket_connections": 10000,
+      "websocket_steps": [
+        {
+          "plan": "pro",
+          "conns": 100,
+          "opened": 100,
+          "subscribed": 100,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 6910,
+          "p50_ms": 8,
+          "p95_ms": 12
+        },
+        {
+          "plan": "pro",
+          "conns": 250,
+          "opened": 250,
+          "subscribed": 250,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 17370,
+          "p50_ms": 14,
+          "p95_ms": 25
+        },
+        {
+          "plan": "pro",
+          "conns": 500,
+          "opened": 500,
+          "subscribed": 500,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 34530,
+          "p50_ms": 26,
+          "p95_ms": 46
+        },
+        {
+          "plan": "pro",
+          "conns": 1000,
+          "opened": 1000,
+          "subscribed": 1000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 69312,
+          "p50_ms": 49,
+          "p95_ms": 76
+        },
+        {
+          "plan": "pro",
+          "conns": 2000,
+          "opened": 2000,
+          "subscribed": 2000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 138840,
+          "p50_ms": 82,
+          "p95_ms": 117
+        },
+        {
+          "plan": "pro",
+          "conns": 3000,
+          "opened": 3000,
+          "subscribed": 3000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 207422,
+          "p50_ms": 100,
+          "p95_ms": 150
+        },
+        {
+          "plan": "pro",
+          "conns": 4000,
+          "opened": 4000,
+          "subscribed": 4000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 273680,
+          "p50_ms": 120,
+          "p95_ms": 180
+        },
+        {
+          "plan": "pro",
+          "conns": 6000,
+          "opened": 6000,
+          "subscribed": 6000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 415154,
+          "p50_ms": 159,
+          "p95_ms": 241
+        },
+        {
+          "plan": "pro",
+          "conns": 8000,
+          "opened": 8000,
+          "subscribed": 7998,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 554855,
+          "p50_ms": 208,
+          "p95_ms": 325
+        },
+        {
+          "plan": "pro",
+          "conns": 10000,
+          "opened": 10000,
+          "subscribed": 10000,
+          "closed_early": 0,
+          "errors": 0,
+          "ticks": 692320,
+          "p50_ms": 255,
+          "p95_ms": 398
+        }
       ]
     },
     "free": {
@@ -373,5 +690,11 @@
         }
       ]
     }
+  },
+  "websocket_bar": {
+    "subscribed": 0.99,
+    "closed_early": 0.01,
+    "p95_delivery_ms": 500,
+    "workload": "Laravel Reverb in the site's container, one broadcast a second to every connection on a public channel (tests/load/ws.sh)"
   }
 }
