@@ -48,6 +48,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::post('/logout', [AuthController::class, 'logout'])->name('logout');
 
     Route::get('/email/verify', [VerificationController::class, 'notice'])->name('verification.notice');
+    Route::post('/email/verify-code', [VerificationController::class, 'code'])->middleware('throttle:email-code')->name('verification.code');
     Route::get('/email/verify/{id}/{hash}', [VerificationController::class, 'verify'])->middleware('signed')->name('verification.verify');
     Route::post('/email/verification-notification', [VerificationController::class, 'send'])->middleware('throttle:password-mail')->name('verification.send');
     Route::get('/status', StatusController::class)->name('status');
