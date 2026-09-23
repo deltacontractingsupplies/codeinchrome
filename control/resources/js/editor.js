@@ -1,5 +1,6 @@
 import { monaco, languageFor } from './monaco.js';
 import { startPhpLanguageServer } from './lsp.js';
+import { previewKind, loadPreview, renderPreview } from './preview.js';
 /*
  * The codeinchrome editor.
  *
@@ -398,12 +399,18 @@ function show(path) {
   const has = Boolean(t);
 
   $('empty').hidden = has;
-  $('editorWrap').hidden = !has;
+  const isPreview = Boolean(has && t.preview);
+  $('editorWrap').hidden = !has || isPreview;
+  $('preview').hidden = !isPreview;
+  if (isPreview) {
+    t.free?.();
+    renderPreview($('preview'), t.preview, t.loaded, path).then((free) => { t.free = free; });
+  }
   // An earlier version is shown read-only; it changes only by restoring it.
   editor.updateOptions({ readOnly: !has || Boolean(t.version) });
   $('versionBar').hidden = !(has && t.version);
   if (has && t.version) $('versionText').textContent = `Version of ${t.version.path} from ${when(t.version.at)} — ${t.version.message}. Read-only.`;
-  if (has) {
+  if (has && !isPreview) {
     const m = modelFor(path, t);
     if (m.getValue() !== t.content) {
       applying = true;
@@ -437,6 +444,22 @@ async function openFile(path) {
   if (tabs.has(path)) {
     show(path);
     return { ok: true, path, alreadyOpen: true };
+  }
+
+  // Images and PDFs open as previews, not as text.
+  const kind = previewKind(path);
+  if (kind) {
+    status(`Opening ${path}…`);
+    const loaded = await loadPreview(SITE.downloadUrl, path);
+    if (!loaded.ok) {
+      status(`${path}: ${loaded.hint}`, true);
+      return { ok: false, error: 'cannot_preview', hint: loaded.hint };
+    }
+    tabs.set(path, { preview: kind, loaded, content: '', saved: '', revision: '', dirty: false, conflict: null });
+    await revealInTree(path);
+    show(path);
+    status('');
+    return { ok: true, path, preview: kind, bytes: loaded.size };
   }
 
   status(`Opening ${path}…`);
@@ -482,6 +505,7 @@ function closeTab(path) {
   }
   const keys = [...tabs.keys()];
   const index = keys.indexOf(path);
+  t?.free?.();
   tabs.delete(path);
   dropModel(path);
   saveDrafts();
@@ -1105,6 +1129,7 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
   cic.restore(path, commit)    put a version back; the restore is itself a new version,
                                so it can be undone the same way  -> { ok, restoredFrom }
   cic.open(path)               open a file in the editor for the person watching
+                               (images and PDFs open as previews -> { ok, preview, bytes })
   cic.state()                  what is open, which tabs are unsaved or in conflict
 
   cic.run(tool, args, { confirm })

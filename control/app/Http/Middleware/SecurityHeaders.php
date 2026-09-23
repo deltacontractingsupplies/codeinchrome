@@ -44,7 +44,9 @@ class SecurityHeaders
                 // from loading anything from elsewhere. <style> elements
                 // stay nonce-only, scripts stay 'self'.
                 ...($styleNonce ? ["style-src-attr 'unsafe-inline'"] : []),
-                "img-src 'self' data:",
+                // blob: on the editor only: image previews are shown from
+                // the page's own blob: URLs (preview.js).
+                $styleNonce ? "img-src 'self' data: blob:" : "img-src 'self' data:",
                 "font-src 'self'",
                 "connect-src 'self'",
                 "object-src 'none'",

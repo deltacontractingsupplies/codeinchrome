@@ -109,6 +109,7 @@
                 <button type="button" id="btnCloseVersion">Close</button>
             </div>
             <div id="crumb" class="crumb"></div>
+            <div id="preview" class="preview" hidden></div>
             <div class="editor" id="editorWrap">
                 {{-- Monaco, the editor inside VS Code, mounts here (resources/js/monaco.js). --}}
                 <div id="monaco" class="monaco-host"></div>

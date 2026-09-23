@@ -14,6 +14,9 @@ const siteName = `ed-${stamp}`.slice(0, 40);
 const password = `ed-${stamp}-${Math.random().toString(36).slice(2)}-Wq3`;
 
 test.describe.configure({ mode: 'serial' });
+// One long journey through the whole editor, including the PHP language
+// server's first index of the site (up to a minute): more than the default.
+test.setTimeout(600_000);
 test.afterAll(() => destroySite(siteName));
 
 // Put the caret at the very end of the editor. Keyboard shortcuts for this
@@ -98,6 +101,8 @@ test('a person and an agent can both edit a real site, without erasing each othe
     expect(write.ok).toBe(false);
     const still = await page.evaluate(() => window.cic.db.query('select count(*) as n from migrations'));
     expect(still.ok).toBe(true);
+    // cic.db.query shows the Database view to the person watching; back to Files.
+    await page.getByRole('tab', { name: 'Files' }).click();
   });
 
   await test.step('the explorer shows the real Laravel tree, with the open file revealed', async () => {
@@ -409,6 +414,28 @@ Route::get('/', function () {
     expect(got.bytes).toEqual(bytes);
     expect(got.disp).toBe('attachment; filename="logo.png"');
     expect(got.csp).toBe('sandbox');
+  });
+
+  await test.step('images and PDFs open as previews, not as text', async () => {
+    // A real 1x1 PNG, and the smallest valid one-page PDF.
+    const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
+    const pdf = '%PDF-1.4\n1 0 obj<</Type/Catalog/Pages 2 0 R>>endobj\n2 0 obj<</Type/Pages/Kids[3 0 R]/Count 1>>endobj\n'
+      + '3 0 obj<</Type/Page/Parent 2 0 R/MediaBox[0 0 200 100]>>endobj\ntrailer<</Root 1 0 R>>\n%%EOF\n';
+    const up = await page.evaluate(async ({ png, pdf }) => {
+      const bytes = Uint8Array.from(atob(png), (c) => c.charCodeAt(0));
+      return window.cic.upload('/public/preview', [new File([bytes], 'dot.png', { type: 'image/png' }), new File([pdf], 'doc.pdf', { type: 'application/pdf' })]);
+    }, { png, pdf });
+    expect(up.ok).toBe(true);
+
+    const img = await page.evaluate(() => window.cic.open('/public/preview/dot.png'));
+    expect(img.preview).toBe('image');
+    await expect(page.locator('#preview img.preview-image')).toHaveJSProperty('naturalWidth', 1);
+    await expect(page.locator('#preview .preview-meta')).toContainText('1 x 1 px');
+
+    const doc = await page.evaluate(() => window.cic.open('/public/preview/doc.pdf'));
+    expect(doc.preview).toBe('pdf');
+    await expect(page.locator('#preview canvas.preview-page')).toHaveCount(1, { timeout: 30_000 });
+    await expect(page.locator('#preview .preview-meta')).toContainText('1 page');
   });
 
   await test.step('a folder delete needs confirm, and then its files are in the bin', async () => {

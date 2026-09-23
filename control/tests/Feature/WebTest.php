@@ -208,11 +208,13 @@ class WebTest extends TestCase
         $this->assertNotSame($nonces[0], $nonces[1], 'a nonce must be new on every request');
 
         $this->assertStringContainsString("style-src-attr 'unsafe-inline'", $csp);
+        $this->assertStringContainsString("img-src 'self' data: blob:", $csp);
         $this->assertStringNotContainsString("script-src 'self' 'unsafe", $csp);
 
         $dash = $this->actingAs($user)->get(route('dashboard'))->headers->get('Content-Security-Policy');
         $this->assertStringNotContainsString('nonce-', $dash);
         $this->assertStringNotContainsString('unsafe-inline', $dash);
+        $this->assertStringNotContainsString('blob:', $dash);
     }
 
     public function test_the_owner_can_open_the_editor(): void
