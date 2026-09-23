@@ -5,9 +5,12 @@ namespace App\Providers;
 use App\Fleet\Stock;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\Facades\View;
 use Illuminate\Support\ServiceProvider;
+use SocialiteProviders\Apple\AppleExtendSocialite;
+use SocialiteProviders\Manager\SocialiteWasCalled;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -24,6 +27,12 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Sign in with Apple is a SocialiteProviders driver, registered here.
+        Event::listen(
+            SocialiteWasCalled::class,
+            [AppleExtendSocialite::class, 'handle'],
+        );
+
         // How many of each paid plan the fleet can still take (App\Fleet\Stock),
         // for every page that lists plans. For a signed-in customer the count
         // is theirs: what they hold now is released by a change of plan.

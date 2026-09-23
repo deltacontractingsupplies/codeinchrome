@@ -9,6 +9,7 @@ use App\Http\Controllers\DomainController;
 use App\Http\Controllers\FileController;
 use App\Http\Controllers\PasswordResetController;
 use App\Http\Controllers\SiteController;
+use App\Http\Controllers\SocialLoginController;
 use App\Http\Controllers\StatusController;
 use App\Http\Controllers\TwoFactorController;
 use App\Http\Controllers\VerificationController;
@@ -23,6 +24,10 @@ Route::view('/privacy', 'legal.privacy')->name('privacy');
 Route::view('/refunds', 'legal.refunds')->name('refunds');
 
 Route::middleware('guest')->group(function () {
+    // Sign in with Google or Apple. Apple's callback is a POST from its own
+    // site (see SocialLoginController); both methods are accepted there.
+    Route::get('/auth/{provider}/redirect', [SocialLoginController::class, 'redirect'])->middleware('throttle:login')->name('social.redirect');
+    Route::match(['get', 'post'], '/auth/{provider}/callback', [SocialLoginController::class, 'callback'])->middleware('throttle:login')->name('social.callback');
     Route::get('/register', [AuthController::class, 'showRegister'])->name('register');
     // Rate limited because these are the two endpoints an attacker gets to
     // call as often as we let them.

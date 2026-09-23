@@ -1,0 +1,2 @@
+{"plan":"starter","rate":2,"requests":61,"achieved_rps":2.032113888477287,"failed_ratio":0,"p50_ms":17.582872,"p95_ms":25.271578,"p99_ms":54.870557799999965,"dropped":0}
+{"plan":"starter","rate":4,"requests":120,"achieved_rps":3.9999017664125187,"failed_ratio":0,"p50_ms":17.4429345,"p95_ms":24.1972382,"p99_ms":27.191092300000008,"dropped":0}

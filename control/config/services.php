@@ -35,4 +35,24 @@ return [
         ],
     ],
 
+    // Sign in with Google: an OAuth web client in the owner's Google Cloud
+    // project. Redirect URI: https://app.codeinchrome.com/auth/google/callback
+    'google' => [
+        'client_id' => env('GOOGLE_CLIENT_ID'),
+        'client_secret' => env('GOOGLE_CLIENT_SECRET'),
+        'redirect' => env('APP_URL').'/auth/google/callback',
+    ],
+
+    // Sign in with Apple: a Services ID (client_id), the team, and a Sign in
+    // with Apple key (.p8, text or path). The client secret is a JWT the
+    // provider signs from the key on each request.
+    'apple' => [
+        'client_id' => env('APPLE_CLIENT_ID'),
+        'client_secret' => '',
+        'team_id' => env('APPLE_TEAM_ID'),
+        'key_id' => env('APPLE_KEY_ID'),
+        'private_key' => env('APPLE_PRIVATE_KEY'),
+        'redirect' => env('APP_URL').'/auth/apple/callback',
+    ],
+
 ];

@@ -31,6 +31,10 @@ return Application::configure(basePath: dirname(__DIR__))
 
         $middleware->validateCsrfTokens(except: [
             'webhooks/*',
+            // Apple returns by POSTing a form from appleid.apple.com, which cannot
+            // carry our token; the encrypted nonce cookie and Apple's signed
+            // identity token protect that round trip (SocialLoginController).
+            'auth/apple/callback',
         ]);
 
         /*

@@ -3,6 +3,7 @@
 @section('content')
 <div class="mx-auto max-w-sm py-10">
     <h1 class="text-2xl font-semibold text-white">Sign in</h1>
+    @include('auth.social')
     <form method="POST" action="{{ route('login') }}" class="mt-8 space-y-4">
         @csrf
         <div>

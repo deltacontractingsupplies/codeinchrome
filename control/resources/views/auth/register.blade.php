@@ -5,6 +5,7 @@
     <h1 class="text-2xl font-semibold text-white">Create your account</h1>
     <p class="mt-2 text-sm text-neutral-400">The free plan includes one site on a codeinchrome.com subdomain.</p>
 
+    @include('auth.social')
     <form method="POST" action="{{ route('register') }}" class="mt-8 space-y-4">
         @csrf
         @foreach ([['name','Name','text'],['email','Email','email'],['password','Password','password'],['password_confirmation','Confirm password','password']] as [$field,$label,$type])
