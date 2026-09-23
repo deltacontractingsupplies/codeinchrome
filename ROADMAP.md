@@ -34,9 +34,15 @@ code exists.
       checked, certificate on first visit; verified end to end with a real domain
 - [x] **Billing checkout** built and validated against the live API; the
       billing portal link comes from the webhook
-- [ ] **Billing products** (blocked on a human: products can only be created
-      in the Lemon Squeezy dashboard, ideally in a codeinchrome store rather
-      than that other store - the API key sees only that other store; then set LS_VARIANT_STARTER/PRO/STUDIO and the webhook secret)
+- [x] **Billing products** (test mode): Starter/Pro/Studio in the codeinchrome
+      store (USD), webhook with every event, checked by `infra/setup-billing.sh`;
+      a new customer paying end to end is `tests/e2e/specs/billing.spec.js`
+- [ ] **Store activation** (owner: identity verification in Lemon Squeezy), then
+      the same products copied to live mode and `setup-billing.sh` re-run
+      with the live key
+- [ ] **support@codeinchrome.com inbox**: Cloudflare Email Routing is set up
+      (MX, DKIM, merged SPF); waiting on the destination address being
+      verified, then the forwarding rule
 - [x] **Artisan / composer from the editor**: a fixed allow-list, run in the
       site's container as www-data; destructive commands need confirm
 - [x] **Logs**: Laravel log, request log and PHP/Apache output in the editor
@@ -59,6 +65,20 @@ code exists.
 - [x] **Security headers and a strict Content-Security-Policy** on the control plane
 - [x] **Dependency vulnerability scanning** in CI, weekly as well as on push
       (composer audit, npm audit, govulncheck with the toolchain pinned)
+- [ ] **Email verification by one-time code**: a 6-digit code typed on the
+      site (expiring, attempt-limited, single use), not only a link
+- [ ] **Sign in with Google and Apple**: OAuth apps in the owner's Google Cloud
+      and Apple Developer accounts; an OAuth sign-in counts as a verified email;
+      linking to an existing account only through a verified address
+- [ ] **Themes**: light and dark, following the system by default, switchable,
+      remembered; every page including the editor
+- [ ] **Plans described in capacity, not CPU/RAM**: concurrent visitors on a
+      typical Laravel app and live WebSocket connections per plan, measured by
+      real load and stress tests on each plan's limits; disk stays; a "view
+      more" with the actual test results
+- [ ] **Out of stock**: a plan cannot be bought, or a site created, when the
+      fleet has no room for it; shown as out of stock rather than failing
+      after payment
 - [ ] **Repository on GitHub, PRIVATE** (owner's choice; blocked on `gh auth login`; then
       `infra/publish-repo.sh --private OWNER/NAME` pushes a history-cleaned
       copy and refuses if any .env secret, private key or artifact is in it)
