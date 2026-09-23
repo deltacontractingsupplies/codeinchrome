@@ -34,6 +34,8 @@ const (
 
 var errOutside = errors.New("path is outside the site")
 
+var errExists = errors.New("something already exists at the destination")
+
 // Never searched, zipped or copied into history's reach: dependencies,
 // caches, and the site's secrets.
 func skippedDir(rel string) bool {
@@ -88,13 +90,10 @@ func (m *Manager) Rename(ctx context.Context, id, from, to string) error {
 	if strings.HasPrefix(dst, src+string(os.PathSeparator)) {
 		return fmt.Errorf("a folder cannot be moved into itself")
 	}
-	if _, err := os.Lstat(dst); err == nil {
-		return fmt.Errorf("something already exists at the destination")
-	}
-	if err := mkdirBeneath(root, strings.TrimPrefix(filepath.Dir(dst), root)); err != nil {
-		return err
-	}
-	if err := os.Rename(src, dst); err != nil {
+	if err := renameBeneath(root, strings.TrimPrefix(src, root), strings.TrimPrefix(dst, root)); err != nil {
+		if errors.Is(err, errExists) || errors.Is(err, errOutside) {
+			return err
+		}
 		return fmt.Errorf("cannot move that")
 	}
 	m.record(ctx, id, fmt.Sprintf("move %s to %s", m.relativeTo(id, src), m.relativeTo(id, dst)))
@@ -215,30 +214,34 @@ func (m *Manager) Upload(ctx context.Context, id, rel string, body io.Reader) er
 	if err != nil {
 		return err
 	}
-	if info, err := os.Stat(abs); err == nil && info.IsDir() {
-		return fmt.Errorf("that is a folder")
-	}
-	dir := filepath.Dir(abs)
-	root, _ := m.realRoot(id)
-	if err := mkdirBeneath(root, strings.TrimPrefix(dir, root)); err != nil {
+	root, err := m.realRoot(id)
+	if err != nil {
 		return err
 	}
-	tmp, err := os.CreateTemp(dir, ".cic-upload-*")
+	rel = strings.TrimPrefix(abs, root)
+	if f, err := openBeneath(root, rel); err == nil {
+		info, serr := f.Stat()
+		f.Close()
+		if serr == nil && info.IsDir() {
+			return fmt.Errorf("that is a folder")
+		}
+	}
+	var n int64
+	err = replaceBeneath(root, rel, 0o640, func(f *os.File) error {
+		var cerr error
+		n, cerr = io.Copy(f, io.LimitReader(body, MaxUploadSize+1))
+		if cerr != nil {
+			return fmt.Errorf("upload interrupted")
+		}
+		if n > MaxUploadSize {
+			return fmt.Errorf("the file is larger than %d MB", MaxUploadSize>>20)
+		}
+		return nil
+	})
 	if err != nil {
-		return fmt.Errorf("cannot write there")
-	}
-	defer os.Remove(tmp.Name())
-	n, err := io.Copy(tmp, io.LimitReader(body, MaxUploadSize+1))
-	tmp.Close()
-	if err != nil {
-		return fmt.Errorf("upload interrupted")
-	}
-	if n > MaxUploadSize {
-		return fmt.Errorf("the file is larger than %d MB", MaxUploadSize>>20)
-	}
-	_ = chownAsWWW(tmp.Name())
-	_ = os.Chmod(tmp.Name(), 0o640)
-	if err := os.Rename(tmp.Name(), abs); err != nil {
+		if n > MaxUploadSize || strings.HasPrefix(err.Error(), "upload interrupted") {
+			return err
+		}
 		return fmt.Errorf("cannot write there")
 	}
 	m.record(ctx, id, "upload "+m.relativeTo(id, abs))
@@ -251,7 +254,11 @@ func (m *Manager) Download(_ context.Context, id, rel string, w io.Writer) (stri
 	if err != nil {
 		return "", err
 	}
-	f, err := os.Open(abs)
+	root, err := m.realRoot(id)
+	if err != nil {
+		return "", err
+	}
+	f, err := openBeneath(root, strings.TrimPrefix(abs, root))
 	if err != nil {
 		return "", fmt.Errorf("no such file")
 	}
@@ -292,6 +299,18 @@ type Hit struct {
 	Path string `json:"path"`
 	Line int    `json:"line"`
 	Text string `json:"text"`
+}
+
+// readBeneath reads up to limit bytes of the file at abs, a path under root,
+// through openBeneath: a file the walk saw can be swapped for a symlink before
+// it is read, and the read must refuse rather than follow it.
+func readBeneath(root, abs string, limit int64) ([]byte, error) {
+	f, err := openBeneath(root, strings.TrimPrefix(abs, root))
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	return io.ReadAll(io.LimitReader(f, limit))
 }
 
 // Search finds text in the site's files, case-insensitively. Dependencies,
@@ -340,7 +359,7 @@ func (m *Manager) Search(ctx context.Context, id, query string, limit int) ([]Hi
 		if scanned++; scanned > maxTreeEntries {
 			return errDone
 		}
-		b, err := os.ReadFile(p)
+		b, err := readBeneath(root, p, maxSearchFile)
 		if err != nil || IsBinary(b) {
 			return nil
 		}
@@ -383,50 +402,51 @@ func (m *Manager) Zip(ctx context.Context, id, from, to string) error {
 	if _, err := os.Lstat(dst); err == nil {
 		return fmt.Errorf("something already exists at %s", to)
 	}
-	tmp, err := os.CreateTemp(filepath.Dir(dst), ".cic-zip-*")
+	root, err := m.realRoot(id)
 	if err != nil {
-		return fmt.Errorf("cannot write there")
+		return err
 	}
-	defer os.Remove(tmp.Name())
-	zw := zip.NewWriter(tmp)
 	base := filepath.Dir(src)
 	budget := treeBudget{}
-	werr := filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
-		if err != nil {
+	var werr error
+	err = replaceBeneath(root, strings.TrimPrefix(dst, root), 0o640, func(out *os.File) error {
+		zw := zip.NewWriter(out)
+		werr = filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+			if err != nil {
+				return err
+			}
+			// .cic-write-* is this archive itself, still being written.
+			if d.Type()&fs.ModeSymlink != 0 || d.IsDir() || isSecretName(d.Name()) || strings.HasPrefix(d.Name(), ".cic-write-") {
+				return nil
+			}
+			info, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if err := budget.add(info.Size()); err != nil {
+				return err
+			}
+			w, err := zw.Create(strings.TrimPrefix(strings.TrimPrefix(p, base), "/"))
+			if err != nil {
+				return err
+			}
+			f, err := openBeneath(root, strings.TrimPrefix(p, root))
+			if err != nil {
+				return err
+			}
+			defer f.Close()
+			_, err = io.Copy(w, io.LimitReader(f, info.Size()))
 			return err
+		})
+		if cerr := zw.Close(); werr == nil {
+			werr = cerr
 		}
-		if d.Type()&fs.ModeSymlink != 0 || d.IsDir() || isSecretName(d.Name()) || p == tmp.Name() {
-			return nil
-		}
-		info, err := d.Info()
-		if err != nil {
-			return err
-		}
-		if err := budget.add(info.Size()); err != nil {
-			return err
-		}
-		w, err := zw.Create(strings.TrimPrefix(strings.TrimPrefix(p, base), "/"))
-		if err != nil {
-			return err
-		}
-		f, err := os.Open(p)
-		if err != nil {
-			return err
-		}
-		defer f.Close()
-		_, err = io.Copy(w, f)
-		return err
+		return werr
 	})
-	if cerr := zw.Close(); werr == nil {
-		werr = cerr
-	}
-	tmp.Close()
 	if werr != nil {
 		return fmt.Errorf("zip failed: %v", werr)
 	}
-	_ = chownAsWWW(tmp.Name())
-	_ = os.Chmod(tmp.Name(), 0o640)
-	if err := os.Rename(tmp.Name(), dst); err != nil {
+	if err != nil {
 		return fmt.Errorf("cannot write there")
 	}
 	return nil

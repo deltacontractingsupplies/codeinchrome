@@ -5,6 +5,7 @@ package sites
 import (
 	"errors"
 	"fmt"
+	"math/rand/v2"
 	"os"
 	"path/filepath"
 	"strings"
@@ -108,4 +109,136 @@ func createBeneath(root, rel string, perm os.FileMode) (*os.File, error) {
 		_ = unix.Fchown(fd, wwwUID, wwwGID)
 	}
 	return os.NewFile(uintptr(fd), filepath.Join(root, rel)), nil
+}
+
+func openRootFD(root string) (int, error) {
+	return unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+}
+
+// openBeneath opens an EXISTING file or folder at rel under root for reading.
+// No component - the file itself included - may be a symlink, so a path that
+// resolve() approved cannot be swapped for a link to a host file before the
+// open happens: the kernel refuses the lookup.
+func openBeneath(root, rel string) (*os.File, error) {
+	rootFD, err := openRootFD(root)
+	if err != nil {
+		return nil, err
+	}
+	defer unix.Close(rootFD)
+	clean := strings.TrimPrefix(filepath.Clean("/"+rel), "/")
+	if clean == "" {
+		clean = "."
+	}
+	fd, err := unix.Openat2(rootFD, clean, &unix.OpenHow{
+		Flags:   unix.O_RDONLY | unix.O_CLOEXEC | unix.O_NOFOLLOW,
+		Resolve: beneath,
+	})
+	if err != nil {
+		if errors.Is(err, unix.ENOENT) {
+			return nil, os.ErrNotExist
+		}
+		return nil, fmt.Errorf("%w: %s", errOutside, clean)
+	}
+	return os.NewFile(uintptr(fd), filepath.Join(root, clean)), nil
+}
+
+// replaceBeneath writes a file at rel under root atomically: a temporary file
+// is created beside it, filled, and renamed over it - every step relative to a
+// handle on the parent folder that was opened with no symlink on the way. A
+// folder swapped for a link after the check makes the open fail rather than
+// the write land outside the site.
+func replaceBeneath(root, rel string, perm os.FileMode, fill func(*os.File) error) error {
+	dir, base := filepath.Split(filepath.Clean("/" + rel))
+	if base == "" {
+		return fmt.Errorf("invalid path")
+	}
+	if err := mkdirBeneath(root, dir); err != nil {
+		return err
+	}
+	rootFD, err := openRootFD(root)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(rootFD)
+	parent, err := openDirBeneath(rootFD, strings.TrimPrefix(dir, "/"))
+	if err != nil {
+		return fmt.Errorf("%w: %s", errOutside, dir)
+	}
+	defer unix.Close(parent)
+
+	var tmp string
+	var fd int
+	for i := 0; ; i++ {
+		tmp = fmt.Sprintf(".cic-write-%d-%d", os.Getpid(), rand.Uint64())
+		fd, err = unix.Openat(parent, tmp, unix.O_CREAT|unix.O_EXCL|unix.O_WRONLY|unix.O_NOFOLLOW|unix.O_CLOEXEC, uint32(perm))
+		if err == nil {
+			break
+		}
+		if !errors.Is(err, unix.EEXIST) || i > 10 {
+			return err
+		}
+	}
+	f := os.NewFile(uintptr(fd), tmp)
+	done := false
+	defer func() {
+		if !done {
+			_ = unix.Unlinkat(parent, tmp, 0)
+		}
+	}()
+	if os.Geteuid() == 0 {
+		if err := unix.Fchown(fd, wwwUID, wwwGID); err != nil {
+			f.Close()
+			return err
+		}
+	}
+	_ = unix.Fchmod(fd, uint32(perm))
+	if err := fill(f); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	if err := unix.Renameat(parent, tmp, parent, base); err != nil {
+		return err
+	}
+	done = true
+	return nil
+}
+
+// renameBeneath moves from to to, both under root, never replacing anything
+// at the destination (RENAME_NOREPLACE: the kernel checks, so there is no
+// window between "nothing is there" and the move). The entry itself is moved
+// as it is - a symlink moves as a link.
+func renameBeneath(root, from, to string) error {
+	fdir, fbase := filepath.Split(filepath.Clean("/" + from))
+	tdir, tbase := filepath.Split(filepath.Clean("/" + to))
+	if fbase == "" || tbase == "" {
+		return fmt.Errorf("invalid path")
+	}
+	if err := mkdirBeneath(root, tdir); err != nil {
+		return err
+	}
+	rootFD, err := openRootFD(root)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(rootFD)
+	fp, err := openDirBeneath(rootFD, strings.TrimPrefix(fdir, "/"))
+	if err != nil {
+		return fmt.Errorf("%w: %s", errOutside, fdir)
+	}
+	defer unix.Close(fp)
+	tp, err := openDirBeneath(rootFD, strings.TrimPrefix(tdir, "/"))
+	if err != nil {
+		return fmt.Errorf("%w: %s", errOutside, tdir)
+	}
+	defer unix.Close(tp)
+	if err := unix.Renameat2(fp, fbase, tp, tbase, unix.RENAME_NOREPLACE); err != nil {
+		if errors.Is(err, unix.EEXIST) {
+			return errExists
+		}
+		return err
+	}
+	return nil
 }

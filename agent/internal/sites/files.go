@@ -227,7 +227,22 @@ func (m *Manager) ReadFileRevision(_ context.Context, id, rel string) (string, s
 		return "", "", err
 	}
 
-	info, err := os.Stat(abs)
+	root, err := m.realRoot(id)
+	if err != nil {
+		return "", "", err
+	}
+	// Opened in the kernel with no symlink on the way, so the path resolve()
+	// approved cannot be swapped for a link to a host file in between.
+	f, err := openBeneath(root, strings.TrimPrefix(abs, root))
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return "", "", fmt.Errorf("no such file")
+		}
+		return "", "", fmt.Errorf("cannot read that file")
+	}
+	defer f.Close()
+
+	info, err := f.Stat()
 	if err != nil {
 		return "", "", fmt.Errorf("no such file")
 	}
@@ -237,12 +252,6 @@ func (m *Manager) ReadFileRevision(_ context.Context, id, rel string) (string, s
 	if info.Size() > MaxFileSize {
 		return "", "", fmt.Errorf("file is %d bytes; the editor limit is %d", info.Size(), MaxFileSize)
 	}
-
-	f, err := os.Open(abs)
-	if err != nil {
-		return "", "", fmt.Errorf("cannot read that file")
-	}
-	defer f.Close()
 
 	// LimitReader as well as the stat check: the file could grow between the
 	// two, and a stat is not a lock.
@@ -327,13 +336,34 @@ func (m *Manager) writeLocked(id, rel, content, expect string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	if info, err := os.Stat(abs); err == nil && info.IsDir() {
-		return "", fmt.Errorf("that is a directory")
+	root, err := m.realRoot(id)
+	if err != nil {
+		return "", err
+	}
+	// Everything below goes through the *Beneath helpers, which re-check in
+	// the kernel what resolve() checked in user space: the site's own code
+	// can replace a folder with a symlink between the two, and the agent is
+	// root.
+	relAbs := strings.TrimPrefix(abs, root)
+
+	var current []byte
+	exists := false
+	if f, oerr := openBeneath(root, relAbs); oerr == nil {
+		info, serr := f.Stat()
+		if serr == nil && info.IsDir() {
+			f.Close()
+			return "", fmt.Errorf("that is a directory")
+		}
+		if expect != "" {
+			current, oerr = io.ReadAll(io.LimitReader(f, MaxFileSize+1))
+			exists = oerr == nil
+		}
+		f.Close()
+	} else if !errors.Is(oerr, os.ErrNotExist) {
+		return "", fmt.Errorf("cannot write there")
 	}
 
 	if expect != "" {
-		current, rerr := os.ReadFile(abs)
-		exists := rerr == nil
 		switch {
 		case expect == "absent" && exists:
 			return "", ErrConflict
@@ -344,38 +374,12 @@ func (m *Manager) writeLocked(id, rel, content, expect string) (string, error) {
 		}
 	}
 
-	dir := filepath.Dir(abs)
-	if err := os.MkdirAll(dir, 0o750); err != nil {
-		return "", fmt.Errorf("cannot create the parent directory")
-	}
-	if err := chownAsWWW(dir); err != nil {
-		return "", fmt.Errorf("cannot set ownership on the parent directory")
-	}
-
-	tmp, err := os.CreateTemp(dir, ".cic-write-*")
-	if err != nil {
-		return "", fmt.Errorf("cannot write there")
-	}
-	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename has succeeded
-
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("cannot write there")
-	}
-	if err := tmp.Close(); err != nil {
-		return "", fmt.Errorf("cannot write there")
-	}
 	// Owned by www-data, or the site's own PHP cannot read what the panel just
 	// wrote - and 0640 so it is not world-readable on the host.
-	if err := chownAsWWW(tmpName); err != nil {
-		return "", fmt.Errorf("cannot set ownership")
-	}
-	if err := os.Chmod(tmpName, 0o640); err != nil {
-		return "", fmt.Errorf("cannot set permissions")
-	}
-
-	if err := os.Rename(tmpName, abs); err != nil {
+	if err := replaceBeneath(root, relAbs, 0o640, func(f *os.File) error {
+		_, werr := f.WriteString(content)
+		return werr
+	}); err != nil {
 		return "", fmt.Errorf("cannot write there")
 	}
 	return Revision([]byte(content)), nil

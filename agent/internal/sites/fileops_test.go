@@ -224,3 +224,114 @@ func TestUnzipAndCopyNeverWriteThroughAPlantedSymlink(t *testing.T) {
 		t.Fatal("copy created something outside the site")
 	}
 }
+
+// The window these close: resolve() approves a path, then the site's own code
+// swaps a folder on it for a symlink to the host before the agent - running as
+// root - opens it. The helpers are called here directly on the path AFTER the
+// swap, which is exactly what the agent would do if it lost that race.
+func TestWritesReadsAndMovesRefuseAFolderSwappedForASymlink(t *testing.T) {
+	m, id := historyManager(t)
+	root, err := m.realRoot(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hostDir := t.TempDir() // stands in for /etc
+	os.WriteFile(filepath.Join(hostDir, "shadow"), []byte("root:secret"), 0o600)
+	os.Symlink(hostDir, filepath.Join(root, "swapped"))
+
+	err = replaceBeneath(root, "/swapped/owned", 0o640, func(f *os.File) error {
+		_, err := f.WriteString("written by the agent")
+		return err
+	})
+	if _, statErr := os.Stat(filepath.Join(hostDir, "owned")); statErr == nil {
+		t.Fatal("a write went OUTSIDE the site through a swapped folder")
+	}
+	if err == nil {
+		t.Fatal("a write through a symlinked folder should be refused")
+	}
+
+	if f, err := openBeneath(root, "/swapped/shadow"); err == nil {
+		f.Close()
+		t.Fatal("a read followed a swapped folder out of the site")
+	}
+	os.Symlink(filepath.Join(hostDir, "shadow"), filepath.Join(root, "leaf-link"))
+	if f, err := openBeneath(root, "/leaf-link"); err == nil {
+		f.Close()
+		t.Fatal("a read followed a symlinked file out of the site")
+	}
+	if _, err := readBeneath(root, filepath.Join(root, "swapped/shadow"), 1<<20); err == nil {
+		t.Fatal("search read through a swapped folder")
+	}
+
+	os.WriteFile(filepath.Join(root, "mine.txt"), []byte("x"), 0o640)
+	if err := renameBeneath(root, "/mine.txt", "/swapped/mine.txt"); err == nil {
+		t.Fatal("a move went through a symlinked folder")
+	}
+	if _, statErr := os.Stat(filepath.Join(hostDir, "mine.txt")); statErr == nil {
+		t.Fatal("a move placed a file OUTSIDE the site")
+	}
+	if err := renameBeneath(root, "/swapped/shadow", "/stolen"); err == nil {
+		t.Fatal("a move pulled a host file into the site")
+	}
+}
+
+func TestAMoveNeverReplacesWhatIsAtTheDestination(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	m.WriteFile(ctx, id, "/a.txt", "a")
+	m.WriteFile(ctx, id, "/b.txt", "b")
+	if err := m.Rename(ctx, id, "/a.txt", "/b.txt"); err == nil {
+		t.Fatal("a move replaced an existing file")
+	}
+	if got, _ := m.ReadFile(ctx, id, "/b.txt"); got != "b" {
+		t.Fatalf("destination changed to %q", got)
+	}
+}
+
+// Links that stay inside the site keep working: Laravel's public/storage is
+// one. resolve() follows them, and the kernel-checked open then runs on the
+// real path.
+func TestAnInSiteSymlinkStillReadsAndWrites(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	app := m.appDir(id)
+	os.MkdirAll(filepath.Join(app, "storage/app/public"), 0o755)
+	os.MkdirAll(filepath.Join(app, "public"), 0o755)
+	os.Symlink("../storage/app/public", filepath.Join(app, "public/storage"))
+
+	if err := m.WriteFile(ctx, id, "/public/storage/logo.txt", "logo"); err != nil {
+		t.Fatal(err)
+	}
+	if b, err := os.ReadFile(filepath.Join(app, "storage/app/public/logo.txt")); err != nil || string(b) != "logo" {
+		t.Fatalf("write through an in-site link landed wrong: %q %v", b, err)
+	}
+	if got, err := m.ReadFile(ctx, id, "/public/storage/logo.txt"); err != nil || got != "logo" {
+		t.Fatalf("read through an in-site link: %q %v", got, err)
+	}
+	var buf bytes.Buffer
+	if _, err := m.Download(ctx, id, "/public/storage/logo.txt", &buf); err != nil || buf.String() != "logo" {
+		t.Fatalf("download through an in-site link: %q %v", buf.String(), err)
+	}
+}
+
+func TestZipStillProducesAnArchiveOfTheFolder(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	m.WriteFile(ctx, id, "/theme/a.css", "body{}")
+	m.WriteFile(ctx, id, "/theme/.env", "SECRET=1")
+	if err := m.Zip(ctx, id, "/theme", "/theme/theme.zip"); err != nil {
+		t.Fatal(err)
+	}
+	r, err := zip.OpenReader(filepath.Join(m.appDir(id), "theme/theme.zip"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer r.Close()
+	var names []string
+	for _, f := range r.File {
+		names = append(names, f.Name)
+	}
+	if strings.Join(names, ",") != "theme/a.css" {
+		t.Fatalf("archive holds %v; want only theme/a.css (no .env, not itself)", names)
+	}
+}
