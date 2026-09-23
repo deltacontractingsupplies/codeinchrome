@@ -11,7 +11,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"syscall"
 	"time"
 )
 
@@ -134,7 +133,7 @@ func (m *Manager) Copy(ctx context.Context, id, from, to string) error {
 	dstRel := strings.TrimPrefix(dst, root)
 	budget := treeBudget{}
 	created := false
-	err = filepath.WalkDir(src, func(p string, d fs.DirEntry, werr error) error {
+	err = walkBeneath(root, src, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil {
 			return werr
 		}
@@ -183,7 +182,10 @@ func (b *treeBudget) add(size int64) error {
 // copyFileBeneath copies src (a regular file, already inside the site) to a
 // NEW file at rel under root, through the kernel-enforced helpers.
 func copyFileBeneath(root, src, rel string) error {
-	in, err := os.OpenFile(src, os.O_RDONLY|syscall.O_NOFOLLOW, 0)
+	// The whole path re-resolved in the kernel, not just the last component:
+	// O_NOFOLLOW alone would still follow a folder on the way that was
+	// swapped for a symlink after the walk listed it.
+	in, err := openBeneath(root, strings.TrimPrefix(src, root))
 	if err != nil {
 		return err
 	}
@@ -336,7 +338,7 @@ func (m *Manager) Search(ctx context.Context, id, query string, limit int) ([]Hi
 	hits := []Hit{}
 	scanned := 0
 	errDone := errors.New("done")
-	err = filepath.WalkDir(root, func(p string, d fs.DirEntry, werr error) error {
+	err = walkBeneath(root, root, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil || ctx.Err() != nil {
 			return errDone
 		}
@@ -411,7 +413,7 @@ func (m *Manager) Zip(ctx context.Context, id, from, to string) error {
 	var werr error
 	err = replaceBeneath(root, strings.TrimPrefix(dst, root), 0o640, func(out *os.File) error {
 		zw := zip.NewWriter(out)
-		werr = filepath.WalkDir(src, func(p string, d fs.DirEntry, err error) error {
+		werr = walkBeneath(root, src, func(p string, d fs.DirEntry, err error) error {
 			if err != nil {
 				return err
 			}
@@ -464,11 +466,26 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 	if err != nil {
 		return err
 	}
-	zr, err := zip.OpenReader(src)
+	root, err := m.realRoot(id)
+	if err != nil {
+		return err
+	}
+	// Opened by a kernel-checked resolution, not zip.OpenReader(path): the
+	// archive (or a folder on the way to it) could be swapped for a symlink
+	// after resolve() approved it.
+	af, err := openBeneath(root, strings.TrimPrefix(src, root))
 	if err != nil {
 		return fmt.Errorf("not a readable zip archive")
 	}
-	defer zr.Close()
+	defer af.Close()
+	ainfo, err := af.Stat()
+	if err != nil || !ainfo.Mode().IsRegular() {
+		return fmt.Errorf("not a readable zip archive")
+	}
+	zr, err := zip.NewReader(af, ainfo.Size())
+	if err != nil {
+		return fmt.Errorf("not a readable zip archive")
+	}
 
 	// Check the whole archive before writing anything.
 	var total uint64
@@ -492,7 +509,6 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 		}
 	}
 
-	root, _ := m.realRoot(id)
 	intoRel := strings.TrimPrefix(dstRoot, root)
 	for _, f := range zr.File {
 		rel := filepath.Join(intoRel, filepath.Clean("/"+f.Name))

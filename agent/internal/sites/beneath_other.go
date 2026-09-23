@@ -134,3 +134,7 @@ func renameBeneath(root, from, to string) error {
 	}
 	return os.Rename(filepath.Join(root, filepath.Clean("/"+from)), dst)
 }
+
+func statAt(dir *os.File, name string) (os.FileInfo, error) {
+	return os.Lstat(filepath.Join(dir.Name(), name))
+}

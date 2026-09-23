@@ -156,7 +156,18 @@ func (m *Manager) ListFiles(_ context.Context, id, rel string) (Listing, error) 
 		return Listing{}, err
 	}
 
-	info, err := os.Stat(abs)
+	root, err := m.realRoot(id)
+	if err != nil {
+		return Listing{}, err
+	}
+	// Listed through a kernel-checked handle: a folder swapped for a symlink
+	// after resolve() cannot turn this into a listing of someone else's tree.
+	dir, err := openBeneath(root, strings.TrimPrefix(abs, root))
+	if err != nil {
+		return Listing{}, fmt.Errorf("no such path")
+	}
+	defer dir.Close()
+	info, err := dir.Stat()
 	if err != nil {
 		return Listing{}, fmt.Errorf("no such path")
 	}
@@ -164,7 +175,7 @@ func (m *Manager) ListFiles(_ context.Context, id, rel string) (Listing, error) 
 		return Listing{}, fmt.Errorf("not a directory")
 	}
 
-	dirEntries, err := os.ReadDir(abs)
+	dirEntries, err := dir.ReadDir(-1)
 	if err != nil {
 		return Listing{}, fmt.Errorf("cannot read that directory")
 	}
@@ -175,7 +186,8 @@ func (m *Manager) ListFiles(_ context.Context, id, rel string) (Listing, error) 
 			out.Truncated = true
 			break
 		}
-		fi, err := e.Info()
+		// Relative to the open directory, not by path, for the same reason.
+		fi, err := statAt(dir, e.Name())
 		if err != nil {
 			continue
 		}

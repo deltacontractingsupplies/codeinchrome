@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -333,5 +334,59 @@ func TestZipStillProducesAnArchiveOfTheFolder(t *testing.T) {
 	}
 	if strings.Join(names, ",") != "theme/a.css" {
 		t.Fatalf("archive holds %v; want only theme/a.css (no .env, not itself)", names)
+	}
+}
+
+// The Copy/Zip/Search walk, at the moment a listed subfolder has just been
+// swapped for a symlink to another tenant: the walk must refuse to descend,
+// and never hand its caller a single name from the other side.
+func TestTheTreeWalkNeverDescendsThroughASwappedFolder(t *testing.T) {
+	m, id := historyManager(t)
+	root, _ := m.realRoot(id)
+	other := t.TempDir() // another tenant's app
+	os.WriteFile(filepath.Join(other, "their-secret.env"), []byte("x"), 0o600)
+	os.Mkdir(filepath.Join(other, "their-folder"), 0o755)
+	os.Symlink(other, filepath.Join(root, "evil"))
+
+	info, _ := os.Stat(other) // the walk believed "evil" was a folder when it listed it
+	var seen []string
+	err := walkDirBeneath(root, filepath.Join(root, "evil"), fs.FileInfoToDirEntry(info), func(p string, d fs.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		seen = append(seen, p)
+		return nil
+	})
+	if err == nil || len(seen) > 0 {
+		t.Fatalf("walked into another tree: err=%v saw=%v", err, seen)
+	}
+
+	// And the file copy re-resolves the whole path, not just its last part.
+	if err := copyFileBeneath(root, filepath.Join(root, "evil/their-secret.env"), "/stolen.env"); err == nil {
+		t.Fatal("copied a file through a swapped folder")
+	}
+	if _, err := os.Lstat(filepath.Join(root, "stolen.env")); err == nil {
+		t.Fatal("a file from another tenant landed in the site")
+	}
+}
+
+func TestCopyAndListingStillWorkOnAnOrdinaryTreeAndThroughInSiteLinks(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	app := m.appDir(id)
+	m.WriteFile(ctx, id, "/theme/css/a.css", "a")
+	m.WriteFile(ctx, id, "/theme/b.css", "b")
+	if err := m.Copy(ctx, id, "/theme", "/theme2"); err != nil {
+		t.Fatal(err)
+	}
+	for _, f := range []string{"theme2/css/a.css", "theme2/b.css"} {
+		if _, err := os.Stat(filepath.Join(app, f)); err != nil {
+			t.Fatalf("%s not copied", f)
+		}
+	}
+	os.Symlink("theme", filepath.Join(app, "skin"))
+	l, err := m.ListFiles(ctx, id, "/skin")
+	if err != nil || len(l.Entries) != 2 || l.Entries[0].Name != "css" || !l.Entries[0].Dir || l.Entries[1].Size != 1 {
+		t.Fatalf("listing through an in-site link: %+v %v", l, err)
 	}
 }

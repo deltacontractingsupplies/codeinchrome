@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"golang.org/x/sys/unix"
 )
@@ -242,3 +243,37 @@ func renameBeneath(root, from, to string) error {
 	}
 	return nil
 }
+
+// statAt lstats name inside the open directory dir, by handle rather than by
+// path, so no swap on the way can make it describe some other file.
+func statAt(dir *os.File, name string) (os.FileInfo, error) {
+	var st unix.Stat_t
+	if err := unix.Fstatat(int(dir.Fd()), name, &st, unix.AT_SYMLINK_NOFOLLOW); err != nil {
+		return nil, err
+	}
+	return statInfo{name: name, st: st}, nil
+}
+
+type statInfo struct {
+	name string
+	st   unix.Stat_t
+}
+
+func (s statInfo) Name() string { return s.name }
+func (s statInfo) Size() int64  { return s.st.Size }
+func (s statInfo) Mode() os.FileMode {
+	m := os.FileMode(s.st.Mode & 0o777)
+	switch s.st.Mode & unix.S_IFMT {
+	case unix.S_IFDIR:
+		m |= os.ModeDir
+	case unix.S_IFLNK:
+		m |= os.ModeSymlink
+	case unix.S_IFREG:
+	default:
+		m |= os.ModeIrregular
+	}
+	return m
+}
+func (s statInfo) ModTime() time.Time { return time.Unix(s.st.Mtim.Sec, s.st.Mtim.Nsec) }
+func (s statInfo) IsDir() bool        { return s.Mode().IsDir() }
+func (s statInfo) Sys() any           { return &s.st }
