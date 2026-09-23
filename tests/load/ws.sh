@@ -137,6 +137,8 @@ for f in glob.glob(os.path.join(out, "*.jsonl")):
             and (r["p95_ms"] or 1e9) <= 500 and r["ticks"] > 0]
     plan = cap.setdefault("plans", {}).setdefault(rows[0]["plan"], {})
     plan["websocket_connections"] = max((r["conns"] for r in good), default=0)
+    # Passing the top step means the real limit is higher: say "at least".
+    plan["websocket_at_least"] = bool(good) and plan["websocket_connections"] == max(r["conns"] for r in rows) and len(good) == len(rows)
     plan["websocket_steps"] = rows
 cap["websocket_bar"] = {"subscribed": 0.99, "closed_early": 0.01, "p95_delivery_ms": 500,
                         "workload": "Laravel Reverb in the site's container, one broadcast a second to every connection on a public channel (tests/load/ws.sh)"}

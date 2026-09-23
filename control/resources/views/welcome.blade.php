@@ -141,7 +141,7 @@
                         <td class="py-2 pr-6">{{ $row['cap']['page_views_per_second'] }}</td>
                         <td class="py-2 pr-6">{{ $row['cap']['p95_ms'] ? $row['cap']['p95_ms'].' ms' : '' }}</td>
                         @if ($measured->contains(fn ($r) => $r['cap']['websocket_connections']))
-                            <td class="py-2">{{ $row['cap']['websocket_connections'] ? '~'.number_format($row['cap']['websocket_connections']) : '' }}</td>
+                            <td class="py-2">{{ $row['cap']['websocket_connections'] ? '~'.$row['cap']['websocket_label'] : '' }}</td>
                         @endif
                     </tr>
                 @endforeach

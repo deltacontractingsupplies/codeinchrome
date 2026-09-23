@@ -30,7 +30,7 @@ class Capacity
     }
 
     /**
-     * @return array{page_views_per_second: int, concurrent_visitors: int, p95_ms: ?int, websocket_connections: ?int}|null
+     * @return array{page_views_per_second: int, concurrent_visitors: int, p95_ms: ?int, websocket_connections: ?int, websocket_label: ?string}|null
      */
     public function forPlan(string $plan): ?array
     {
@@ -45,6 +45,10 @@ class Capacity
             'p95_ms' => $p['p95_ms'] ?? null,
             // Measured separately (tests/load/ws.sh); absent until it has been.
             'websocket_connections' => ! empty($p['websocket_connections']) ? (int) $p['websocket_connections'] : null,
+            // The plan passed the test's highest step: its real limit is above it.
+            'websocket_label' => ! empty($p['websocket_connections'])
+                ? number_format((int) $p['websocket_connections']).(! empty($p['websocket_at_least']) ? '+' : '')
+                : null,
         ];
     }
 }

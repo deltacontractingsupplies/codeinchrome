@@ -256,7 +256,8 @@
           "p50_ms": 251,
           "p95_ms": 382
         }
-      ]
+      ],
+      "websocket_at_least": true
     },
     "starter": {
       "page_views_per_second": 40,
@@ -633,7 +634,8 @@
           "p50_ms": 255,
           "p95_ms": 398
         }
-      ]
+      ],
+      "websocket_at_least": true
     },
     "free": {
       "page_views_per_second": 15,

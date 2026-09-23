@@ -67,4 +67,19 @@ class CapacityTest extends TestCase
             @unlink($file);
         }
     }
+
+    public function test_a_plan_that_passed_the_top_step_is_shown_as_at_least(): void
+    {
+        $file = tempnam(storage_path('framework/testing'), 'cap');
+        file_put_contents($file, json_encode(['measured_at' => '20260923T1200Z', 'bar' => ['p95_ms' => 500, 'errors' => 0.01], 'workload' => 'w',
+            'plans' => ['pro' => ['page_views_per_second' => 80, 'p95_ms' => 20, 'steps' => [], 'websocket_connections' => 10000, 'websocket_at_least' => true],
+                'starter' => ['page_views_per_second' => 40, 'p95_ms' => 20, 'steps' => [], 'websocket_connections' => 4000]]]));
+        try {
+            $this->app->instance(Capacity::class, new Capacity($file));
+            $this->get('/pricing')->assertOk()->assertSee('~10,000+ live WebSocket connections')->assertSee('~4,000 live WebSocket connections')
+                ->assertDontSee('~4,000+');
+        } finally {
+            @unlink($file);
+        }
+    }
 }

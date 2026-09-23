@@ -48,7 +48,7 @@
             <tbody class="text-neutral-300">
             @foreach (config('billing.plans') as $key => $plan)
                 @if ($cap = app(\App\Billing\Capacity::class)->forPlan($key))
-                    <tr class="border-t border-neutral-800"><td class="py-2 pr-6">{{ $plan['name'] }}</td><td class="py-2 pr-6">{{ $cap['page_views_per_second'] }}</td><td class="py-2 pr-6">{{ $cap['p95_ms'] }} ms</td><td class="py-2 pr-6">~{{ number_format($cap['concurrent_visitors']) }}</td><td class="py-2">{{ $cap['websocket_connections'] ? '~'.number_format($cap['websocket_connections']) : 'not measured yet' }}</td></tr>
+                    <tr class="border-t border-neutral-800"><td class="py-2 pr-6">{{ $plan['name'] }}</td><td class="py-2 pr-6">{{ $cap['page_views_per_second'] }}</td><td class="py-2 pr-6">{{ $cap['p95_ms'] }} ms</td><td class="py-2 pr-6">~{{ number_format($cap['concurrent_visitors']) }}</td><td class="py-2">{{ $cap['websocket_connections'] ? '~'.$cap['websocket_label'] : 'not measured yet' }}</td></tr>
                 @endif
             @endforeach
             </tbody>
