@@ -38,6 +38,16 @@ Route::middleware('guest')->group(function () {
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:register');
     Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
+    // One-time links from `php artisan user:login-link` (App\Auth\LoginLink).
+    Route::get('/login/link/{token}', function (\Illuminate\Http\Request $request, string $token) {
+        $user = \App\Auth\LoginLink::consume($token);
+        abort_unless($user, 404);
+        \Illuminate\Support\Facades\Auth::login($user);
+        $request->session()->regenerate();
+        \App\Audit\Audit::record('auth.login_link');
+
+        return redirect()->route('dashboard');
+    })->middleware('throttle:login')->name('login.link');
     Route::get('/two-factor-challenge', [TwoFactorController::class, 'challenge'])->name('two-factor.challenge');
 
     // Password reset. Every action 404s unless mail really leaves the
