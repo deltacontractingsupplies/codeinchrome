@@ -40,9 +40,9 @@ code exists.
 - [ ] **Store activation** (owner: identity verification in Lemon Squeezy), then
       the same products copied to live mode and `setup-billing.sh` re-run
       with the live key
-- [ ] **support@codeinchrome.com inbox**: Cloudflare Email Routing is set up
-      (MX, DKIM, merged SPF); waiting on the destination address being
-      verified, then the forwarding rule
+- [x] **support@codeinchrome.com inbox**: Cloudflare Email Routing (MX, DKIM,
+      merged SPF) forwards to the owner's verified Gmail; a DKIM-signed test
+      from the control host landed in the inbox, not spam
 - [x] **Artisan / composer from the editor**: a fixed allow-list, run in the
       site's container as www-data; destructive commands need confirm
 - [x] **Logs**: Laravel log, request log and PHP/Apache output in the editor
