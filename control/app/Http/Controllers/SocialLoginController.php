@@ -33,8 +33,15 @@ class SocialLoginController extends Controller
     /** Providers that are configured, in display order. */
     public static function enabled(): array
     {
-        return array_values(array_filter(self::PROVIDERS, fn ($p) => filled(config("services.$p.client_id"))
-            && ($p !== 'apple' || filled(config('services.apple.private_key')))));
+        // Everything a provider needs, or its button does not appear: a
+        // half-configured provider would send people to a sign-in that fails.
+        $needs = [
+            'google' => ['client_id', 'client_secret'],
+            'apple' => ['client_id', 'team_id', 'key_id', 'private_key'],
+        ];
+
+        return array_values(array_filter(self::PROVIDERS, fn ($p) => collect($needs[$p])
+            ->every(fn ($key) => filled(config("services.$p.$key")))));
     }
 
     private function driver(string $provider): Provider

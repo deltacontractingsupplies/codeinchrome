@@ -27,7 +27,7 @@ class SocialLoginTest extends TestCase
         parent::setUp();
         config([
             'services.google' => ['client_id' => 'gid', 'client_secret' => 'gsecret', 'redirect' => 'https://app.test/auth/google/callback'],
-            'services.apple' => ['client_id' => 'aid', 'client_secret' => '', 'redirect' => 'https://app.test/auth/apple/callback', 'private_key' => 'k'],
+            'services.apple' => ['client_id' => 'aid', 'client_secret' => '', 'redirect' => 'https://app.test/auth/apple/callback', 'private_key' => 'k', 'team_id' => 't', 'key_id' => 'k1'],
         ]);
     }
 
@@ -101,6 +101,13 @@ class SocialLoginTest extends TestCase
         $this->get('/auth/apple/redirect')->assertNotFound();
         $this->get('/auth/github/redirect')->assertNotFound();
         $this->get('/login')->assertSee('Continue with Google')->assertDontSee('Continue with Apple');
+    }
+
+    public function test_a_half_configured_provider_shows_no_button(): void
+    {
+        config(['services.google.client_secret' => null, 'services.apple.key_id' => null]);
+        $this->get('/login')->assertDontSee('Continue with Google')->assertDontSee('Continue with Apple');
+        $this->get('/auth/google/redirect')->assertNotFound();
     }
 
     public function test_apples_form_post_callback_is_accepted_without_a_csrf_token(): void
