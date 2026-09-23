@@ -33,8 +33,9 @@ PLANS="Starter:1200 Pro:2900 Studio:7900"
 ok()  { printf '\033[32m  ok\033[0m %s\n' "$*"; }
 die() { printf '\033[31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
 
+: "${LEMONSQUEEZY_WEBHOOK_SECRET:=}"
 [[ -n ${LEMONSQUEEZY_API_KEY:-} ]] || die "LEMONSQUEEZY_API_KEY is not in .env"
-[[ ${#LEMONSQUEEZY_WEBHOOK_SECRET} -ge 16 ]] 2>/dev/null || die "LEMONSQUEEZY_WEBHOOK_SECRET is missing or shorter than 16 characters"
+[[ ${#LEMONSQUEEZY_WEBHOOK_SECRET} -ge 32 && ${#LEMONSQUEEZY_WEBHOOK_SECRET} -le 40 ]] || die "LEMONSQUEEZY_WEBHOOK_SECRET must be 32-40 characters (Lemon Squeezy allows at most 40)"
 
 ls_get() { # path -> JSON on stdout
   curl -fsS -g "https://api.lemonsqueezy.com/v1/$1" \
