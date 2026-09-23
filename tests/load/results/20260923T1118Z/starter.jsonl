@@ -1,2 +1,9 @@
 {"plan":"starter","rate":2,"requests":61,"achieved_rps":2.032113888477287,"failed_ratio":0,"p50_ms":17.582872,"p95_ms":25.271578,"p99_ms":54.870557799999965,"dropped":0}
 {"plan":"starter","rate":4,"requests":120,"achieved_rps":3.9999017664125187,"failed_ratio":0,"p50_ms":17.4429345,"p95_ms":24.1972382,"p99_ms":27.191092300000008,"dropped":0}
+{"plan":"starter","rate":6,"requests":180,"achieved_rps":5.999754825818806,"failed_ratio":0,"p50_ms":17.632997,"p95_ms":23.324692,"p99_ms":25.218495680000004,"dropped":0}
+{"plan":"starter","rate":8,"requests":241,"achieved_rps":8.028448490217967,"failed_ratio":0,"p50_ms":17.414509,"p95_ms":22.691773,"p99_ms":24.418349399999997,"dropped":0}
+{"plan":"starter","rate":10,"requests":301,"achieved_rps":10.026735235198444,"failed_ratio":0,"p50_ms":17.378905,"p95_ms":22.9217,"p99_ms":31.780685,"dropped":0}
+{"plan":"starter","rate":15,"requests":451,"achieved_rps":15.024285236000038,"failed_ratio":0,"p50_ms":17.070162,"p95_ms":19.492247499999998,"p99_ms":26.250163999999998,"dropped":0}
+{"plan":"starter","rate":20,"requests":601,"achieved_rps":20.021352504606437,"failed_ratio":0,"p50_ms":16.501674,"p95_ms":19.11867,"p99_ms":32.603266,"dropped":0}
+{"plan":"starter","rate":30,"requests":901,"achieved_rps":30.016245807986373,"failed_ratio":0,"p50_ms":16.092789,"p95_ms":20.476477,"p99_ms":132.011812,"dropped":0}
+{"plan":"starter","rate":40,"requests":1171,"achieved_rps":35.718642388604856,"failed_ratio":0.024765157984628524,"p50_ms":16.351289,"p95_ms":4806.1648655,"p99_ms":7026.799159699999,"dropped":30}

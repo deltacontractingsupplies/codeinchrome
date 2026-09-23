@@ -89,6 +89,19 @@ code exists.
 - [ ] **Background processes in the site container**: queue worker, scheduler
       and Laravel Reverb under a small supervisor, WebSockets routed through
       Caddy and Cloudflare; per-plan connection limits measured
+- [ ] **Showcase store**, built live by Claude in Chrome through the editor and
+      recorded step by step: a real-looking Laravel shop (products, cart,
+      Stripe checkout in test mode) with an admin panel; the demo admin login
+      published on the page but READ-ONLY; test orders with Stripe's test card
+- [ ] **A home page that shows the product**: the editor, the agent driving it,
+      the showcase store and its recording, plans and what they really serve
+- [ ] **Editor parity with a hosting panel** (aaPanel as the yardstick): a
+      recycle bin (deleted files restorable for a period), upload/download,
+      zip/unzip, search, rename/move, permissions view, cron, and anything else
+      missing - each audited, built and tested
+- [ ] **Git in every site, every change committed automatically**: nothing lost,
+      any earlier version restorable from the editor; kept in the site's own
+      volume and backups; never served over HTTP
 - [ ] **Repository on GitHub, PRIVATE** (owner's choice; blocked on `gh auth login`; then
       `infra/publish-repo.sh --private OWNER/NAME` pushes a history-cleaned
       copy and refuses if any .env secret, private key or artifact is in it)
