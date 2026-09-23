@@ -438,6 +438,27 @@ Route::get('/', function () {
     await expect(page.locator('#preview .preview-meta')).toContainText('1 page');
   });
 
+  await test.step("Laravel names: F12 on a view name opens the Blade file, and view('...') completes the site's views", async () => {
+    expect((await page.evaluate(() => window.cic.write('/app/ViewProbe.php', "<?php\n\nreturn view('welcome');\n"))).ok).toBe(true);
+    await page.evaluate(() => window.cic.open('/app/ViewProbe.php'));
+
+    // Click on the view name itself, then go to definition.
+    await page.locator('.monaco-editor .view-line span', { hasText: "'welcome'" }).first().click();
+    await page.keyboard.press('F12');
+    await expect(page.locator('.tab.active')).toContainText('welcome.blade.php', { timeout: 15_000 });
+
+    // Completion: a new line typed after the existing one.
+    await page.evaluate(() => window.cic.open('/app/ViewProbe.php'));
+    await page.locator('.monaco-editor .view-line span', { hasText: "'welcome'" }).first().click();
+    await page.keyboard.press('End');
+    await page.keyboard.press('Enter');
+    await page.keyboard.type("view('");
+    await expect(page.locator('.suggest-widget .monaco-list-row', { hasText: 'welcome' }).first()).toBeVisible({ timeout: 30_000 });
+    await page.keyboard.press('Escape');
+
+    expect((await page.evaluate(() => window.cic.rm('/app/ViewProbe.php'))).ok).toBe(true);
+  });
+
   await test.step('a folder delete needs confirm, and then its files are in the bin', async () => {
     const refused = await page.evaluate(() => window.cic.rmdir('/app/Shop'));
     expect(refused.ok).toBe(false);

@@ -3,9 +3,10 @@
  * know: Laravel's string conventions.
  *
  *   route('...')  / to_route / redirect()->route  completes the site's route names
- *   view('...')   / View::make / @include / @extends / @each / <x-...>
- *                                   completes view names, and ⌘-click (go to
- *                                   definition) opens the Blade file
+ *   view('...')   / View::make / @include / @extends / @each / @component
+ *                                   completes view names, and F12 / ⌘-click (go
+ *                                   to definition) opens the Blade file
+ *   (<x-...> components are not covered yet.)
  *
  * The names come from the site itself - routes from `artisan route:list
  * --json` in its container, views from resources/views - fetched once and
@@ -75,8 +76,10 @@ export function installLaravelProviders({ monaco, listDir, runArtisan, fileUri }
   const definition = async (model, position) => {
     const line = model.getLineContent(position.lineNumber);
     for (const m of line.matchAll(VIEW_AT)) {
+      // 1-based column of the name's first letter; the quotes around it count
+      // too, as in VS Code: a click on the string lands on its opening quote.
       const start = m.index + m[0].indexOf(m[1]) + 1;
-      if (position.column >= start && position.column <= start + m[1].length) {
+      if (position.column >= start - 1 && position.column <= start + m[1].length + 1) {
         const path = `/resources/views/${m[1].replaceAll('.', '/')}.blade.php`;
         return [{ uri: fileUri(path), range: new monaco.Range(1, 1, 1, 1) }];
       }
