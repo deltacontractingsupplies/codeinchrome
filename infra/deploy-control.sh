@@ -115,6 +115,11 @@ DB_CONNECTION=sqlite
 DB_DATABASE=/var/lib/codeinchrome/control.sqlite
 
 SESSION_DRIVER=file
+# __Host-: the browser refuses this cookie if it carries a Domain attribute,
+# so a customer's site on name.codeinchrome.com cannot plant a session cookie
+# for the dashboard ("cookie tossing" from a sibling subdomain).
+SESSION_COOKIE=__Host-codeinchrome-session
+SESSION_PATH=/
 SESSION_SECURE_COOKIE=true
 SESSION_SAME_SITE=lax
 CACHE_STORE=file
@@ -364,8 +369,18 @@ ok "vhost written and caddy reloaded"
 say "verifying"
 fails=0
 check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else printf '\033[33m  !!\033[0m %s\n' "$1"; fails=$((fails+1)); fi; }
-check "the bare domain redirects to the app" "[ \"\$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --retry 10 --retry-all-errors --retry-delay 6 https://$zone/pricing)\" = '301 https://$domain/pricing' ]"
-check "www redirects to the app" "[ \"\$(curl -sS -o /dev/null -w '%{http_code}' --retry 10 --retry-all-errors --retry-delay 6 https://www.$zone/)\" = 301 ]"
+# Public checks go the way a visitor's request does: through Cloudflare,
+# resolved by a public resolver. This machine's own resolver may still hold a
+# DNS-only answer from before the proxy, and then reaches h2 directly, where
+# only Cloudflare trusts the certificate.
+pub() {
+  local url=${*: -1} host
+  host=${url#https://}; host=${host%%/*}
+  curl --resolve "$host:443:$(dig +short "$host" @1.1.1.1 | tail -1)" "$@"
+}
+check "the bare domain redirects to the app" "[ \"\$(pub -sS -o /dev/null -w '%{http_code} %{redirect_url}' --retry 10 --retry-all-errors --retry-delay 6 https://$zone/pricing)\" = '301 https://$domain/pricing' ]"
+check "www redirects to the app" "[ \"\$(pub -sS -o /dev/null -w '%{http_code}' --retry 10 --retry-all-errors --retry-delay 6 https://www.$zone/)\" = 301 ]"
+check "the session cookie is __Host- (no sibling subdomain can set it)" "pub -sS -D - -o /dev/null https://$domain/login | grep -i '^set-cookie: __Host-codeinchrome-session=' | grep -iv 'domain='"
 check "php-fpm running"        "ssh root@$ip 'systemctl is-active php$PHP_VERSION-fpm'"
 check "caddy can read the docroot" "ssh root@$ip 'sudo -u caddy test -r /srv/control/public/index.php'"
 check "caddy can reach the fpm socket" "ssh root@$ip 'sudo -u caddy test -w /run/php/codeinchrome.sock'"
@@ -377,9 +392,9 @@ check "env owned by the app user"      "ssh root@$ip '[ \"\$(stat -c %U /srv/con
 check "scheduler installed"    "ssh root@$ip 'grep -q schedule:run /etc/cron.d/codeinchrome'"
 check "no dev-only package in the manifest" "! ssh root@$ip 'grep -q Pail /srv/control/bootstrap/cache/packages.php'"
 check "config is cached"       "ssh root@$ip 'test -f /srv/control/bootstrap/cache/config.php'"
-check "answers over https"     "[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 25 https://$domain/)\" = 200 ]"
-check ".env not served"        "[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 15 https://$domain/.env)\" != 200 ]"
-check "dashboard needs auth"   "[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 15 https://$domain/sites)\" = 302 ]"
+check "answers over https"     "[ \"\$(pub -s -o /dev/null -w %{http_code} --max-time 25 https://$domain/)\" = 200 ]"
+check ".env not served"        "[ \"\$(pub -s -o /dev/null -w %{http_code} --max-time 15 https://$domain/.env)\" != 200 ]"
+check "dashboard needs auth"   "[ \"\$(pub -s -o /dev/null -w %{http_code} --max-time 15 https://$domain/sites)\" = 302 ]"
 (( fails )) && die "$fails check(s) failed"
 
 say "control plane live at https://$domain"
