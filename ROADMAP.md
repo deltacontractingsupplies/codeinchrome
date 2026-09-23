@@ -59,6 +59,6 @@ code exists.
 - [x] **Security headers and a strict Content-Security-Policy** on the control plane
 - [x] **Dependency vulnerability scanning** in CI, weekly as well as on push
       (composer audit, npm audit, govulncheck with the toolchain pinned)
-- [ ] **Public repository** (blocked on `gh auth login`; then
-      `infra/publish-repo.sh --publish OWNER/NAME` pushes a history-cleaned
+- [ ] **Repository on GitHub, PRIVATE** (owner's choice; blocked on `gh auth login`; then
+      `infra/publish-repo.sh --private OWNER/NAME` pushes a history-cleaned
       copy and refuses if any .env secret, private key or artifact is in it)

@@ -11,6 +11,8 @@
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 . infra/hosts.env
+# Only the Cloudflare settings, for the bare-domain records below.
+eval "$(grep -E '^CLOUDFLARE_(API_TOKEN|ZONE_ID|ZONE_NAME)=' .env | sed 's/^/export /')"
 
 name=${CIC_CONTROL_HOST%%:*}
 ip=${CIC_CONTROL_HOST##*:}
@@ -111,7 +113,7 @@ SESSION_SAME_SITE=lax
 CACHE_STORE=file
 QUEUE_CONNECTION=sync
 
-$(grep -E '^(CLOUDFLARE|LEMONSQUEEZY|CIC_ADMIN|CIC_ALERT|MAIL)_' .env)
+$(grep -E '^(CLOUDFLARE|LEMONSQUEEZY|LS_VARIANT|CIC_ADMIN|CIC_ALERT|CIC_LEGAL|CIC_SUPPORT|CIC_REFUND|MAIL)_' .env)
 $tokens
 ENV
 ssh_ 'set -e
@@ -258,6 +260,24 @@ systemctl restart "php$PHP_VERSION-fpm"
 systemctl restart caddy
 POOL
 
+# The bare domain and www point at this host (redirected below). Upserted, so
+# re-running a deploy never duplicates them. Unproxied like every other record:
+# Caddy terminates TLS itself.
+zone=${CLOUDFLARE_ZONE_NAME:-codeinchrome.com}
+for name in "$zone" "www.$zone"; do
+  rec=$(curl -fsS -g "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records?type=A&name=$name" \
+          -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" | python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; print(r[0]["id"] if r else "")')
+  body=$(printf '{"type":"A","name":"%s","content":"%s","ttl":300,"proxied":false}' "$name" "$ip")
+  if [[ -n $rec ]]; then
+    curl -fsS -X PUT "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records/$rec" \
+      -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" -d "$body" >/dev/null
+  else
+    curl -fsS -X POST "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/dns_records" \
+      -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H "Content-Type: application/json" -d "$body" >/dev/null
+  fi
+done
+ok "$zone and www.$zone point at $ip"
+
 ssh_ "set -e
 cat > /opt/codeinchrome/caddy/sites/_control.caddy <<CADDY
 # The control plane. Named with a leading underscore so it sorts before
@@ -282,6 +302,14 @@ $domain {
 		format json
 	}
 }
+
+# The bare domain and www: the public site IS the control plane's front page,
+# so they redirect there rather than serving a second copy of it. One origin
+# keeps sessions, CSRF and the CSP simple, and nothing is served here at all.
+$zone, www.$zone {
+	header -Server
+	redir https://$domain{uri} 301
+}
 CADDY
 touch /var/log/caddy/_control.log && chown caddy:caddy /var/log/caddy/_control.log
 caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || { echo 'Caddyfile invalid'; exit 1; }
@@ -291,6 +319,8 @@ ok "vhost written and caddy reloaded"
 say "verifying"
 fails=0
 check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else printf '\033[33m  !!\033[0m %s\n' "$1"; fails=$((fails+1)); fi; }
+check "the bare domain redirects to the app" "[ \"\$(curl -sS -o /dev/null -w '%{http_code} %{redirect_url}' --retry 10 --retry-all-errors --retry-delay 6 https://$zone/pricing)\" = '301 https://$domain/pricing' ]"
+check "www redirects to the app" "[ \"\$(curl -sS -o /dev/null -w '%{http_code}' --retry 10 --retry-all-errors --retry-delay 6 https://www.$zone/)\" = 301 ]"
 check "php-fpm running"        "ssh root@$ip 'systemctl is-active php$PHP_VERSION-fpm'"
 check "caddy can read the docroot" "ssh root@$ip 'sudo -u caddy test -r /srv/control/public/index.php'"
 check "caddy can reach the fpm socket" "ssh root@$ip 'sudo -u caddy test -w /run/php/codeinchrome.sock'"

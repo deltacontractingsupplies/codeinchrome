@@ -44,8 +44,17 @@
         @yield('content')
     </main>
 
-    <footer class="border-t border-neutral-800 py-6 text-center text-xs text-neutral-600">
-        Your code, your server. Take it with you.
+    <footer class="border-t border-neutral-800 py-6 text-xs text-neutral-600">
+        <div class="mx-auto max-w-5xl px-6 flex flex-wrap items-center justify-between gap-3">
+            <span>Your code, your server. Take it with you.</span>
+            <nav class="flex flex-wrap gap-4">
+                <a href="{{ route('pricing') }}" class="hover:text-neutral-300">Pricing</a>
+                <a href="{{ route('terms') }}" class="hover:text-neutral-300">Terms</a>
+                <a href="{{ route('privacy') }}" class="hover:text-neutral-300">Privacy</a>
+                <a href="{{ route('refunds') }}" class="hover:text-neutral-300">Refunds</a>
+                <a href="mailto:{{ config('legal.support_email') }}" class="hover:text-neutral-300">{{ config('legal.support_email') }}</a>
+            </nav>
+        </div>
     </footer>
 </div>
 </body>

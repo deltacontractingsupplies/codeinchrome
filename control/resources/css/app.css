@@ -7,3 +7,9 @@
     --font-sans: 'Instrument Sans', ui-sans-serif, system-ui, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji',
         'Segoe UI Symbol', 'Noto Color Emoji';
 }
+
+/* The legal pages are prose; give their headings, lists and links shape. */
+.legal h2 { @apply mt-8 text-lg font-semibold text-white; }
+.legal ul { @apply list-disc space-y-1 pl-6; }
+.legal a { @apply text-teal-300 underline; }
+.legal strong { @apply text-neutral-100 font-medium; }

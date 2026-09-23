@@ -1,9 +1,13 @@
 #!/usr/bin/env bash
 #
-# Publish this repository publicly - from a CLEANED COPY, never from here.
+# Push this repository to GitHub - from a CLEANED COPY, never from here.
 #
-#   infra/publish-repo.sh                    build the clean copy and scan it
-#   infra/publish-repo.sh --publish OWNER/NAME   ...then create the public repo and push
+#   infra/publish-repo.sh                              build the clean copy and scan it
+#   infra/publish-repo.sh --private OWNER/NAME         ...then create a PRIVATE repo and push
+#   infra/publish-repo.sh --public  OWNER/NAME         ...then create a PUBLIC repo and push
+#
+# The owner chose private (2026-09-23). The same cleaning and scan run either
+# way: a private repository is one sharing setting away from public.
 #
 # This working repository is never modified. A fresh clone is made under
 # .publish/, and in that clone the history is rewritten to drop paths that
@@ -29,11 +33,12 @@ cd "$(dirname "$0")/.."
 root=$PWD
 work=$root/.publish
 target=""
+visibility=""
 
 case "${1:-}" in
   "") ;;
-  --publish) target=${2:?usage: --publish OWNER/NAME} ;;
-  *) echo "usage: $0 [--publish OWNER/NAME]" >&2; exit 2 ;;
+  --private|--public) visibility=${1#--}; target=${2:?usage: $1 OWNER/NAME} ;;
+  *) echo "usage: $0 [--private|--public OWNER/NAME]" >&2; exit 2 ;;
 esac
 
 ok()  { printf '\033[32m  ok\033[0m %s\n' "$*"; }
@@ -106,10 +111,11 @@ rm -f "$hist" "$work"/note.*
 
 # ── publish ──────────────────────────────────────────────────────────────────
 if [[ -z $target ]]; then
-  echo "clean copy ready; nothing published. Publish with: $0 --publish OWNER/NAME"
+  echo "clean copy ready; nothing pushed. Push with: $0 --private OWNER/NAME"
   exit 0
 fi
 gh auth status >/dev/null 2>&1 || die "not signed in to GitHub: run gh auth login"
-gh repo create "$target" --public --source . --push --description "Laravel hosting driven by an AI agent in the browser"
+gh repo create "$target" "--$visibility" --source . --push --description "Laravel hosting driven by an AI agent in the browser"
 git push -q origin 'refs/notes/*'
-ok "published https://github.com/$target"
+[[ $(gh repo view "$target" --json visibility -q .visibility) == "$(printf %s "$visibility" | tr a-z A-Z)" ]] || die "GitHub reports a different visibility than --$visibility"
+ok "pushed https://github.com/$target ($visibility)"
