@@ -122,24 +122,31 @@ code exists.
 Every piece open source, licence checked before use; nothing assumed working
 until it is exercised in the browser against a real site.
 
-- [ ] **Monaco (MIT) as the editor core** - VS Code's own editor: its look,
+- [x] **Monaco (MIT) as the editor core** - VS Code's own editor: its look,
       keybindings, multi-cursor, find/replace, minimap, and built-in
       IntelliSense for JS/TS, CSS, HTML and JSON. Keeps every current
       guarantee: revision-checked saves, drafts, no native dialogs,
       window.cic unchanged. Must run under the strict CSP (workers from
       self; its styles without opening script-src).
-- [ ] **File icons**: Material Icon Theme (MIT, icons included) - folder and
+- [x] **File icons**: Material Icon Theme (MIT, icons included) - folder and
       file icons by name and extension, as in VS Code. (vscode-icons' artwork
       is CC BY-SA, which would oblige share-alike; Material is cleaner.)
-- [ ] **PHP IntelliSense**: Phpactor (MIT) as a language server inside the
+- [x] **PHP IntelliSense**: Phpactor (MIT) as a language server inside the
       site's own container (so it sees the site's vendor/), bridged to Monaco:
       completion, hover, go to definition, diagnostics. Intelephense is not
-      open source and is not used.
-- [ ] **Laravel awareness**: completion for route names, view names, config
-      keys and translations; go to view from view('...'); Blade syntax.
-- [ ] **Laravel Boost MCP (MIT) for the agent**: window.cic.mcp.tools() and
+      open source and is not used. Done: e2e-tested on a fresh site (hover,
+      definition into vendor/, Str::slug completion); the same answers for
+      agents via cic.php.complete/hover/definition. Found and fixed on the way:
+      lowercased URIs, incremental edits to a full-sync server, Phpactor temp
+      files filling the container's /tmp, orphaned servers holding site memory.
+- [ ] **Laravel awareness**: Blade highlighting done (with PHP inside {{ }});
+      route/view/config-key completion and go-to-view still to do (Phpactor
+      does not know Laravel's string conventions).
+- [x] **Laravel Boost MCP (MIT) for the agent**: window.cic.mcp.tools() and
       .call() - routes, schema, config, docs search, last errors - run in the
-      site's container as the site's own user.
+      site's container as the site's own user. Done: in every new site's
+      skeleton; only that process runs as "local" (Boost refuses production),
+      the site stays production with debug off; writes refused.
 - [ ] **Previews**: images shown, PDFs rendered with pdf.js (Apache-2.0),
       Markdown preview.
 - [ ] **UI polish pass**: spacing, contrast, focus states, empty states,
