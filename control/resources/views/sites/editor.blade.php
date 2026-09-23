@@ -97,7 +97,7 @@
         </aside>
 
         <main class="editor-area">
-            <div id="tabs" class="tabs" role="tablist"></div>
+            <div id="tabs" class="tabs" role="group" aria-label="Open files"></div>
             <div id="conflict" class="conflict" hidden>
                 <span id="conflictText"></span>
                 <button type="button" id="btnTheirs">Load the saved version</button>

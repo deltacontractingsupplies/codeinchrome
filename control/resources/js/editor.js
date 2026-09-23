@@ -420,13 +420,26 @@ function renderTabs() {
   const bar = $('tabs');
   bar.replaceChildren();
   for (const [path, t] of tabs) {
+    // A container holding two sibling controls - the tab itself and its
+    // close button - not a tab with a button inside it: nested interactive
+    // controls are unreachable for screen readers (axe: nested-interactive).
     const el = document.createElement('div');
     el.className = 'tab' + (path === active ? ' active' : '') + (t.dirty ? ' dirty' : '');
-    el.setAttribute('role', 'tab');
     el.title = path;
 
-    const name = document.createElement('span');
+    const name = document.createElement('button');
+    name.type = 'button';
+    name.className = 'tab-name';
+    if (path === active) name.setAttribute('aria-current', 'true');
     name.textContent = baseName(path);
+    if (t.dirty) {
+      // The dot says it visually; this says it to a screen reader.
+      const sr = document.createElement('span');
+      sr.className = 'sr-only';
+      sr.textContent = ' (unsaved)';
+      name.append(sr);
+    }
+    name.addEventListener('click', () => show(path));
 
     const x = document.createElement('button');
     x.type = 'button';
