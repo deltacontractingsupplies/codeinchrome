@@ -116,6 +116,16 @@ RUN set -eux; \
         > /etc/apache2/conf-available/hardening.conf; \
     a2enconf hardening
 
+# Every request reaching this Apache came through the host's Caddy over HTTPS
+# (Caddy redirects plain HTTP itself), so PHP is told so. Without it Laravel -
+# which trusts no proxy by default and so ignores X-Forwarded-Proto - built
+# every URL as http://: redirects, JSON and URLs handed to other services
+# (a payment provider's return URL) all pointed at plain HTTP, hidden in HTML
+# only because Cloudflare rewrites links there. With HTTPS=on and the
+# original Host header (Caddy passes it through), Symfony derives https and
+# port 443 for every generated URL, with no change to the customer's app.
+RUN printf '%s\n' 'SetEnv HTTPS on' > /etc/apache2/conf-available/cic-https.conf && a2enconf cic-https
+
 # Belt and braces: even if a vhost were misconfigured to serve the project
 # root, these never leave the container.
 RUN printf '%s\n' \
