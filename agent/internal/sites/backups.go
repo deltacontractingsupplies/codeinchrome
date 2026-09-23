@@ -287,10 +287,14 @@ func (m *Manager) StartRestore(ctx context.Context, id, snapshot string) (*Backu
 	return &c, nil
 }
 
+// lastLine is the most useful line of cic-backup's output for a person: the
+// last one that says WHY, not the closing "FAILED <site>" summary - that line
+// alone hid a missing restic cache behind a message that said nothing.
 func lastLine(s string) string {
 	lines := strings.Split(strings.TrimSpace(s), "\n")
 	for i := len(lines) - 1; i >= 0; i-- {
-		if l := strings.TrimSpace(lines[i]); l != "" {
+		l := strings.TrimSpace(lines[i])
+		if l != "" && !strings.HasPrefix(l, "FAILED ") {
 			return l
 		}
 	}

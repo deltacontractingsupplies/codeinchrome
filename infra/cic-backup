@@ -30,6 +30,12 @@ die() { echo "cic-backup: $*" >&2; exit 1; }
 # shellcheck disable=SC1091
 . "$CIC/etc/mysql.env"
 export RESTIC_REPOSITORY RESTIC_PASSWORD RESTIC_REST_USERNAME RESTIC_REST_PASSWORD
+# An explicit cache, in a path the agent's sandbox may write. Run by the agent
+# (systemd: ProtectHome=yes, no $HOME) restic otherwise finds no cache
+# directory and every customer's "Back up now" failed, while the same command
+# from a root shell worked.
+export RESTIC_CACHE_DIR=$CIC/cache/restic
+mkdir -p "$RESTIC_CACHE_DIR" && chmod 0700 "$CIC/cache" "$RESTIC_CACHE_DIR"
 HOST_ID=$(cat "$CIC/etc/host.id")
 
 valid_id() { [[ $1 =~ $ID_RE && $1 != *--* ]] || die "invalid site id: $1"; }
