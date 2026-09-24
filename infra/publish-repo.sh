@@ -230,6 +230,8 @@ if [[ -z $target ]]; then
 fi
 gh auth status >/dev/null 2>&1 || die "not signed in to GitHub: run gh auth login"
 gh repo create "$target" "--$visibility" --source . --push --description "Laravel hosting driven by an AI agent in the browser"
-git push -q origin 'refs/notes/*'
+# gh's credentials, not whatever git's own helper holds: a keychain entry for
+# another GitHub account was used here once, and refused (403).
+git -c credential.helper= -c 'credential.helper=!gh auth git-credential' push -q origin 'refs/notes/*'
 [[ $(gh repo view "$target" --json visibility -q .visibility) == "$(printf %s "$visibility" | tr a-z A-Z)" ]] || die "GitHub reports a different visibility than --$visibility"
 ok "pushed https://github.com/$target ($visibility)"

@@ -77,6 +77,11 @@ jobs:
       - name: npm audit
         working-directory: control
         run: npm ci --no-audit --no-fund && npm audit --audit-level=high
+      - name: Build the front end
+        working-directory: control
+        # Every page renders @vite, which needs public/build/manifest.json -
+        # built, never committed. Also proves the assets build at all.
+        run: npm run build
       - name: Tests
         working-directory: control
         # PAO_DISABLE=1 is required: laravel/pao replaces the test printer when
@@ -91,7 +96,7 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck -S warning infra/*.sh
+          shellcheck -S warning infra/*.sh infra/hooks/*
       - name: no code may target a server outside the fleet
         # The addresses are not in this repository (they are in the operator's
         # infra/hosts.local.env); CI gets them from the CIC_FORBIDDEN_HOSTS

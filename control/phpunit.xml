@@ -36,5 +36,14 @@
         <env name="PULSE_ENABLED" value="false"/>
         <env name="TELESCOPE_ENABLED" value="false"/>
         <env name="NIGHTWATCH_ENABLED" value="false"/>
+        <!-- The fleet the tests see: documentation addresses (RFC 5737) and a
+             fake Cloudflare token, forced over .env and infra/hosts.local.env.
+             Without these the suite passed on a machine that had the real
+             registry and failed in CI, which has neither. -->
+        <env name="CIC_HOSTS" value="h1:203.0.113.1 h3:203.0.113.3 h4:203.0.113.4" force="true"/>
+        <env name="CIC_HOST_STATES" value="" force="true"/>
+        <env name="CLOUDFLARE_API_TOKEN" value="test-cloudflare-token" force="true"/>
+        <env name="CLOUDFLARE_ZONE_ID" value="test-zone-id" force="true"/>
+        <env name="CLOUDFLARE_ZONE_NAME" value="codeinchrome.com" force="true"/>
     </php>
 </phpunit>

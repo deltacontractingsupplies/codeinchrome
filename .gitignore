@@ -45,3 +45,5 @@ infra/publish-deny.local
 # local run logs and caches
 /.tmp/
 __pycache__/
+# infra/check-outgoing.sh works here, removed when it ends.
+/.publish-check.*/

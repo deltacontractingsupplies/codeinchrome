@@ -81,10 +81,12 @@ code exists.
       (composer audit, npm audit, govulncheck with the toolchain pinned)
 - [x] **Email verification by one-time code**: a 6-digit code typed on the
       site (expiring, attempt-limited, single use), not only a link
-- [ ] **Sign in with Google and Apple**: built and tested (an OAuth sign-in
+- [x] **Sign in with Google and Apple**: built and tested (an OAuth sign-in
       counts as a verified email; linking to an existing account only through a
-      verified address). Apple is configured; Google waits for its client
-      SECRET from the owner. A live round trip needs a person's own account.
+      verified address). Both configured (Google's client secret added
+      2026-09-24; the consent screen is in production, "continue to
+      codeinchrome.com", no unverified warning), verified live up to Google's
+      account chooser. LEFT for a person: one real sign-in with their own account.
 - [x] **Themes**: light and dark, following the system by default, switchable,
       remembered; every page including the editor
 - [x] **Plans described in measured capacity** (no CPU or memory figures since 2026-09-24): page views and concurrent
@@ -132,9 +134,8 @@ code exists.
       read, write, upload, move, zip and unzip by the agent (root) goes through
       openat2 RESOLVE_BENEATH|NO_SYMLINKS / renameat2 NOREPLACE, so a site
       cannot race a folder into a link to the host. Tested as root on Linux.
-- [ ] **Repository on GitHub, PRIVATE** (owner's choice; blocked on `gh auth login`; then
-      `infra/publish-repo.sh --private OWNER/NAME` pushes a history-cleaned
-      copy and refuses if any .env secret, private key or artifact is in it)
+- [x] **Repository on GitHub**: superseded by the owner's later choice of a
+      PUBLIC repository (below), published 2026-09-24.
 
 ## The editor, to VS Code's standard (owner's request, 2026-09-23)
 
@@ -327,7 +328,7 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
       sees their plan. To open: set it true, deploy, `php artisan
       trials:restart` (every free account: a fresh trial and an email).
       SalesTest (mutation-checked); verified live
-- [ ] **Public repository** (owner's decisions, 2026-09-24): PUBLIC, under the
+- [x] **Public repository** (owner's decisions, 2026-09-24): PUBLIC, under the
       owner's GitHub account (deltacontractingsupplies - the owner chose it over
       a separate organization); FSL-1.1-ALv2 (no competing use, each
       version Apache-2.0 after 2 years), Copyright 2026 Ahmed Omar; contributor
@@ -337,8 +338,17 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
       CONTRIBUTING, SECURITY, CODEOWNERS, PR template; infra/github-setup.sh
       (reviewed pull requests only, CI required, secret scanning); the
       contributor-agreement check as a pinned in-repository action (no external
-      app), signatures on branch cla-signatures. LEFT, in order: owner creates
-      `gh auth login` (workflow scope); infra/go-public.sh
+      app), signatures on branch cla-signatures. PUBLISHED 2026-09-24:
+      github.com/deltacontractingsupplies/codeinchrome, rules read back from
+      GitHub (public; ruleset active: deletion, force-push, pull request with
+      code-owner review, 5 required checks; push protection and secret scanning
+      on; squash only; read-only workflow token; private vulnerability
+      reporting; cla-signatures branch). Every later push passes
+      infra/check-outgoing.sh (pre-push hook; refused a planted address and a
+      planted token in testing). The first CI run exposed tests that leaned on
+      this machine's fleet registry - fixed in pull request #1.
+      LEFT for the owner: read the ruleset once in the GitHub settings; sign
+      the contributor agreement on a first pull request of their own.
 
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):

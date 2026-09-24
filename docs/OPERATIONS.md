@@ -59,16 +59,31 @@ Addresses outside this fleet that must never be touched are listed in
 
 ## The public repository
 
-The repository is published as a cleaned copy, never pushed from here:
-`infra/publish-repo.sh` rewrites a fresh clone's history and refuses to publish
-on any finding - `.env` values, private keys, anything in the uncommitted
+Published 2026-09-24 as `deltacontractingsupplies/codeinchrome`, from a cleaned
+copy: `infra/publish-repo.sh` rewrote a fresh clone's history and refused on
+any finding - `.env` values, private keys, anything in the uncommitted
 `infra/publish-deny.local` (other businesses, personal details), every server
 address in `infra/hosts.local.env`, gitleaks findings, binary artifacts.
+`infra/go-public.sh` did the first publication end to end.
 
-- First publication (as `deltacontractingsupplies/codeinchrome`), once `gh` is
-  signed in as that account with the `workflow` scope: `infra/go-public.sh`
-  (deploys, checks Google sign-in, publishes, applies the GitHub rules, reads
-  them back).
+**Day to day, after publication:**
+
+- The working copy's `main` is built on the PUBLIC history (remote `public`).
+  The history from before publication is the local branch `private-history`
+  (and `.publish/private-history-2026-09-24.bundle`). It still holds what the
+  scrub removed, so it never leaves this machine.
+- `main` on GitHub takes pull requests only. Push a branch
+  (`git push public main:<branch>`), open a pull request, wait for CI, merge.
+  Pull merged work back with `git pull --rebase public main`.
+- Every push to GitHub first runs `infra/check-outgoing.sh` on the commits
+  being sent (`infra/hooks/pre-push`): the same checks as the publication,
+  and it refuses `private-history` outright. The checks fail closed: without
+  `infra/publish-deny.local`, `infra/hosts.local.env` and gitleaks, nothing
+  is pushed. Turn the hook on in each clone with
+  `git config core.hooksPath infra/hooks`.
+- This clone uses `gh`'s credentials for github.com (repository-local
+  `credential.helper`): the macOS keychain holds another GitHub account,
+  which GitHub refuses (403).
 - The GitHub rules are code: `infra/github-setup.sh` (re-run it after changing
   them): `main` takes reviewed pull requests only, with CI and the contributor
   agreement (`.github/workflows/cla.yml`, signatures on branch

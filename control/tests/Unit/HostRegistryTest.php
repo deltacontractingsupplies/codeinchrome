@@ -12,16 +12,31 @@ class HostRegistryTest extends TestCase
 {
     private function hosts(string $registry, string $states = ''): array
     {
-        putenv("CIC_HOSTS=$registry");
-        putenv("CIC_HOST_STATES=$states");
-        $_ENV['CIC_HOSTS'] = $_SERVER['CIC_HOSTS'] = $registry;
-        $_ENV['CIC_HOST_STATES'] = $_SERVER['CIC_HOST_STATES'] = $states;
+        // Put back what was there (phpunit.xml sets both), never just unset:
+        // an unset left every later test with no fleet at all - hidden on a
+        // machine where config/fleet.php falls back to infra/hosts.local.env.
+        $saved = [];
+        foreach (['CIC_HOSTS' => $registry, 'CIC_HOST_STATES' => $states] as $key => $value) {
+            $saved[$key] = [getenv($key), $_ENV[$key] ?? null, $_SERVER[$key] ?? null];
+            putenv("$key=$value");
+            $_ENV[$key] = $_SERVER[$key] = $value;
+        }
         try {
             return (require base_path('config/fleet.php'))['hosts'];
         } finally {
-            putenv('CIC_HOSTS');
-            putenv('CIC_HOST_STATES');
-            unset($_ENV['CIC_HOSTS'], $_SERVER['CIC_HOSTS'], $_ENV['CIC_HOST_STATES'], $_SERVER['CIC_HOST_STATES']);
+            foreach ($saved as $key => [$env, $e, $s]) {
+                putenv($env === false ? $key : "$key=$env");
+                if ($e === null) {
+                    unset($_ENV[$key]);
+                } else {
+                    $_ENV[$key] = $e;
+                }
+                if ($s === null) {
+                    unset($_SERVER[$key]);
+                } else {
+                    $_SERVER[$key] = $s;
+                }
+            }
         }
     }
 
