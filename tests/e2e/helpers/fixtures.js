@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { controlSsh } from './control-host.js';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -10,7 +11,7 @@ function onControl(artisanArgs) {
     return execFileSync('php', ['artisan', ...artisanArgs], { cwd: `${REPO}/control`, stdio: 'pipe' }).toString();
   }
   const quoted = artisanArgs.map((a) => `'${String(a).replace(/'/g, "'\\''")}'`).join(' ');
-  return execFileSync('ssh', ['-o', 'ConnectTimeout=20', process.env.CIC_CONTROL_SSH || 'root@203.0.113.104',
+  return execFileSync('ssh', ['-o', 'ConnectTimeout=20', controlSsh(),
     `cd /srv/control && sudo -u codeinchrome php8.4 artisan ${quoted}`], { stdio: 'pipe' }).toString();
 }
 

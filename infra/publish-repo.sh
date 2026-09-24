@@ -65,10 +65,35 @@ REMOVE_PATHS=(tests/e2e/report)
 PUBLIC_KEYS='^(APP_NAME|APP_ENV|APP_URL|APP_DEBUG|CLOUDFLARE_ZONE_NAME|MAIL_(MAILER|HOST|PORT|SCHEME|FROM_ADDRESS|FROM_NAME)|LOG_.*|DB_CONNECTION|SESSION_.*|CACHE_STORE|QUEUE_CONNECTION|APPLE_CLIENT_ID|SHOWCASE_(URL|ADMIN_URL|ADMIN_EMAIL|FLOWERS_URL|FLOWERS_ADMIN_URL|FLOWERS_ADMIN_EMAIL|RECORDING))$'
 
 [[ -z $(git status --porcelain) ]] || die "commit or stash first: the copy is made from committed history only"
-scrub=$root/infra/publish-scrub.local.pl
-deny=$root/infra/publish-deny.local
+scrub_rules=$root/infra/publish-scrub.local.pl
+deny_rules=$root/infra/publish-deny.local
+# Every server address the operator knows (infra/hosts.local.env: the fleet,
+# the control host, servers outside the fleet) is scrubbed from history and
+# then denied - so a host added later is covered without editing any rule.
+registry_ips=()
+if [[ -f $root/infra/hosts.local.env ]]; then
+  mapfile -t registry_ips < <(grep -E '^CIC_(HOSTS|CONTROL_HOST|FORBIDDEN_HOSTS)=' "$root/infra/hosts.local.env" \
+    | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u)
+fi
+mkdir -p "$work.rules"
+# It holds the patterns being removed: gone when the script ends, however it ends.
+trap 'rm -rf "$work.rules"' EXIT
+scrub=$work.rules/scrub.pl
+deny=$work.rules/deny.txt
+: > "$scrub"; : > "$deny"
+[[ -f $scrub_rules ]] && cat "$scrub_rules" >> "$scrub"
+[[ -f $deny_rules ]] && cat "$deny_rules" >> "$deny"
+n=0
+for ip in "${registry_ips[@]}"; do
+  n=$((n + 1))
+  printf 's/\\Q%s\\E/203.0.113.%d/g;\n' "$ip" "$((100 + n))" >> "$scrub"
+  printf '%s\n' "${ip//./\\.}" >> "$deny"
+done
+[[ -s $scrub ]] || scrub=""
+[[ -s $deny ]] || deny=""
 if [[ $visibility == public ]]; then
-  [[ -f $scrub && -f $deny ]] || die "--public needs infra/publish-scrub.local.pl and infra/publish-deny.local (not committed)"
+  [[ -f $scrub_rules && -f $deny_rules ]] || die "--public needs infra/publish-scrub.local.pl and infra/publish-deny.local (not committed)"
+  (( ${#registry_ips[@]} > 0 )) || die "--public needs infra/hosts.local.env: its addresses are what the scrub removes"
 fi
 if [[ -n $author ]]; then
   [[ $author =~ ^(.+)\ \<([^<>@]+@[^<>]+)\>$ ]] || die "--author must look like: Name <email>"
@@ -98,7 +123,7 @@ rm -rf .git/refs/original
 
 # The scrub: every TEXT file of every commit (lock files excluded - their
 # hashes must stay byte-exact), every message, every note.
-if [[ -f $scrub ]]; then
+if [[ -n $scrub ]]; then
   env_filter=":"
   [[ -n $author ]] && env_filter="export GIT_AUTHOR_NAME='${author_name//\'/}' GIT_AUTHOR_EMAIL='$author_email' GIT_COMMITTER_NAME='${author_name//\'/}' GIT_COMMITTER_EMAIL='$author_email'"
   FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --tree-filter "perl '$root/infra/publish-scrub-tree.pl' '$scrub'" \
@@ -154,7 +179,7 @@ ok "no .env secret in any commit or note"
 grep -qE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' "$hist" && die "a private key block is in history"
 ok "no private key in history"
 
-if [[ -f $deny ]]; then
+if [[ -n $deny ]]; then
   # Text only (a binary patch's base64 can spell anything), plus every
   # author and committer line.
   text=$work/history-text.txt

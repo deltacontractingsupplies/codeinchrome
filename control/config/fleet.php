@@ -45,8 +45,9 @@ return [
     'hosts' => (function () {
         $registry = env('CIC_HOSTS');
         if ($registry === null) {
-            foreach ([base_path('hosts.env'), base_path('../infra/hosts.env')] as $file) {
-                if (is_readable($file) && preg_match('/^CIC_HOSTS="([^"]*)"/m', (string) file_get_contents($file), $m)) {
+            // The addresses are in hosts.local.env (never committed), beside hosts.env.
+            foreach ([base_path('hosts.local.env'), base_path('../infra/hosts.local.env')] as $file) {
+                if (is_readable($file) && preg_match('/^CIC_HOSTS="([^"]+)"/m', (string) file_get_contents($file), $m)) {
                     $registry = $m[1];
                     break;
                 }

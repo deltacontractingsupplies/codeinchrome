@@ -208,7 +208,9 @@ chmod 0644 /etc/cron.d/codeinchrome"
 ok "scheduler installed"
 
 say "tunnels to every customer host"
-scp -q infra/hosts.env infra/tunnels.sh "root@$ip:/srv/control/"
+[[ -f infra/hosts.local.env ]] || die "infra/hosts.local.env is missing: it holds the fleet's addresses"
+scp -q infra/hosts.env infra/hosts.local.env infra/tunnels.sh "root@$ip:/srv/control/"
+ssh_ 'chmod 600 /srv/control/hosts.local.env'
 ssh_ 'cd /srv/control && bash tunnels.sh install'
 sleep 3
 ssh_ 'cd /srv/control && bash tunnels.sh check' || die "tunnels are not up; the control plane cannot reach any agent"

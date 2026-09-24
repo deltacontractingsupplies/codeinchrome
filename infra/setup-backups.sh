@@ -2,7 +2,7 @@
 #
 # Set up nightly, encrypted, append-only, off-host backups for one host.
 #
-#   infra/setup-backups.sh h1 203.0.113.105
+#   infra/setup-backups.sh h1 <ip>
 #
 # Run by deploy-host.sh. Idempotent.
 #

@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { controlSsh } from './control-host.js';
 import { fileURLToPath } from 'node:url';
 import { lsCancelAllTestSubscriptions } from './fixtures.js';
 
@@ -24,7 +25,7 @@ export default async function globalTeardown() {
         cwd: fileURLToPath(new URL('../../../control', import.meta.url)), stdio: 'pipe', timeout: 60_000,
       });
     } else {
-      execFileSync('ssh', ['-o', 'ConnectTimeout=20', process.env.CIC_CONTROL_SSH || 'root@203.0.113.104',
+      execFileSync('ssh', ['-o', 'ConnectTimeout=20', controlSsh(),
         'cd /srv/control && sudo -u codeinchrome php8.4 artisan accounts:purge-test'], { stdio: 'pipe', timeout: 60_000 });
     }
   } catch (error) {

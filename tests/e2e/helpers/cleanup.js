@@ -1,4 +1,5 @@
 import { execFileSync } from 'node:child_process';
+import { controlSsh } from './control-host.js';
 import { fileURLToPath } from 'node:url';
 
 const LOCAL_CONTROL = fileURLToPath(new URL('../../../control', import.meta.url));
@@ -26,7 +27,7 @@ function controlTarget() {
 
   return {
     kind: 'remote',
-    host: process.env.CIC_CONTROL_SSH || 'root@203.0.113.104',
+    host: controlSsh(),
     path: process.env.CIC_CONTROL_PATH || '/srv/control',
   };
 }

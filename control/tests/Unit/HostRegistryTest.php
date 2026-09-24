@@ -27,7 +27,7 @@ class HostRegistryTest extends TestCase
 
     public function test_a_new_host_is_one_more_entry_with_its_tunnel_port_derived(): void
     {
-        $hosts = $this->hosts('h1:203.0.113.105 h3:203.0.113.102 h12:10.1.2.3', 'h3:draining');
+        $hosts = $this->hosts('h1:203.0.113.10 h3:203.0.113.30 h12:10.1.2.3', 'h3:draining');
 
         $this->assertSame(['h1', 'h3', 'h12'], array_keys($hosts));
         $this->assertSame(['ip' => '10.1.2.3', 'tunnel_port' => 9452, 'capacity' => 60, 'state' => 'active'], $hosts['h12']);
@@ -36,7 +36,7 @@ class HostRegistryTest extends TestCase
 
     public function test_malformed_entries_are_left_out_not_guessed(): void
     {
-        $hosts = $this->hosts('h1:203.0.113.105 web:1.2.3.4 h2:not-an-ip h5 h7:10.0.0.7');
+        $hosts = $this->hosts('h1:203.0.113.10 web:1.2.3.4 h2:not-an-ip h5 h7:10.0.0.7');
 
         $this->assertSame(['h1', 'h7'], array_keys($hosts));
     }

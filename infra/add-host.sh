@@ -11,7 +11,7 @@
 #   1. refuse the forbidden hosts, a name or address already in the fleet,
 #      and a server that is not a clean Linux box we can reach
 #   2. deploy-host.sh: harden it, MySQL, the base image, the agent, backups
-#   3. register it in infra/hosts.env - the ONE registry every script and the
+#   3. register it in infra/hosts.local.env (read through infra/hosts.env) - the ONE registry every script and the
 #      control plane read (config/fleet.php derives hosts and tunnels from it)
 #   4. setup-cloudflare-proxy.sh: the origin certificate and its DNS name
 #   5. deploy-control.sh: the control plane learns its token, opens its
@@ -78,7 +78,7 @@ if [[ " $CIC_HOSTS " != *" $name:$ip "* ]]; then
   new_hosts="$CIC_HOSTS $name:$ip"
   python3 - "$new_hosts" <<'PY'
 import re, sys
-p = "infra/hosts.env"
+p = "infra/hosts.local.env"  # the addresses are never in the committed hosts.env
 s = open(p).read()
 s2, n = re.subn(r'^CIC_HOSTS="[^"]*"', f'CIC_HOSTS="{sys.argv[1].strip()}"', s, count=1, flags=re.M)
 assert n == 1, "CIC_HOSTS line not found"
@@ -86,7 +86,7 @@ open(p, "w").write(s2)
 PY
   # shellcheck disable=SC1091
   . infra/hosts.env
-  ok "$name registered in infra/hosts.env"
+  ok "$name registered in infra/hosts.local.env"
 fi
 
 # ── 4. its name and certificate ──────────────────────────────────────────────

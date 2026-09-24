@@ -77,10 +77,10 @@ can open one pipe to the agent port and cannot get a shell.
 
 ```bash
 # One host, bare image to ready-to-serve. Idempotent.
-infra/deploy-host.sh h1 203.0.113.105
+infra/deploy-host.sh h1 <host ip>
 
 # Prove tenant isolation on a host that has two sites.
-ssh root@203.0.113.105 'bash -s' < infra/verify-isolation.sh
+ssh root@<host ip> 'bash -s' < infra/verify-isolation.sh
 
 # The control plane.
 infra/deploy-control.sh

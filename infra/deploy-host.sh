@@ -2,7 +2,7 @@
 #
 # Bring one host from bare Hetzner image to ready-to-serve.
 #
-#   infra/deploy-host.sh h2 203.0.113.104
+#   infra/deploy-host.sh h1 <ip>      (addresses: infra/hosts.local.env)
 #
 # Idempotent end to end: safe to re-run on a host that is already up, which is
 # how an agent upgrade is rolled out.
