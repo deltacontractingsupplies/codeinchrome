@@ -481,6 +481,21 @@ func (m *Manager) Port(ctx context.Context, id string) (string, error) {
 
 const caddyLogDir = "/var/log/caddy"
 
+// deletedLogDir holds the access logs of deleted sites for 30 days.
+var deletedLogDir = caddyLogDir + "/deleted" // a variable for the tests
+
+// keepDeletedLog moves a deleted site's access log aside, stamped with the
+// time, so a site made again under the same name cannot mix with it.
+func keepDeletedLog(logPath, id string) error {
+	if _, err := os.Stat(logPath); os.IsNotExist(err) {
+		return nil
+	}
+	if err := os.MkdirAll(deletedLogDir, 0o750); err != nil {
+		return err
+	}
+	return os.Rename(logPath, filepath.Join(deletedLogDir, id+"-"+time.Now().UTC().Format("20060102T150405Z")+".log"))
+}
+
 // ensureCaddyLog creates a per-site access log the caddy user can write.
 // Idempotent, and deliberately does not chown a file that already exists: an
 // operator who has repointed a log somewhere has a reason.
@@ -743,7 +758,11 @@ func (m *Manager) Delete(ctx context.Context, id string) (map[string]string, err
 	// The access log sits outside the site directory, so RemoveAll misses it.
 	// Left behind, a re-created site with the same id appends to the previous
 	// tenant's log, which is a leak between customers.
-	err = os.Remove(logPath)
+	// Kept, not deleted: a phishing site is often deleted within hours of
+	// its first victim, and its access log is the evidence an abuse report
+	// or the police will ask for. Moved aside, pruned after 30 days
+	// (install-agent.sh's cic-evidence-prune).
+	err = keepDeletedLog(logPath, id)
 	done["log"] = verdict(hadLog, err, func() bool {
 		_, e := os.Stat(logPath)
 		return e == nil

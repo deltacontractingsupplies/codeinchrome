@@ -12,7 +12,9 @@ use Illuminate\Support\Facades\Http;
  * page. So the site's pages are read from outside, as a visitor gets them,
  * and every link, form and meta refresh is checked.
  *
- *   ban:    a link to an executable or installer, on any site
+ *   ban:    a link to an executable or installer, on any site; a script that
+ *           puts a PowerShell/mshta/shell command on the visitor's clipboard
+ *           (ClickFix fake CAPTCHA pages)
  *   review: an archive, a URL shortener (hides where it goes), a raw IP
  *           address, a form that posts to another site (how phishing pages
  *           steal what is typed), a meta refresh to another site, and a
@@ -98,6 +100,15 @@ class LinkScanner
                 } elseif ($kind === 'refresh' && ! $this->allowed($host)) {
                     $review[] = "sends visitors on to another site: $target (on $url)";
                 }
+            }
+            // "ClickFix" fake CAPTCHA pages (Trend Micro, 2025-26, on Lovable,
+            // Netlify and Vercel): the page's script puts a command on the
+            // clipboard and tells the visitor to press Win+R and paste it.
+            if (preg_match('/(clipboard\.writeText|execCommand\(\s*["\']copy)[\s\S]{0,600}(powershell|mshta|cmd(\.exe)?\s*\/c|curl[^|<]{0,200}\|\s*(ba)?sh|iex\b|Invoke-WebRequest|-enc(odedcommand)?\b)/i', $html)) {
+                $ban[] = "puts a command (PowerShell, mshta or a shell) on the visitor's clipboard: a ClickFix malware page (on $url)";
+            } elseif (preg_match('/\b(win(dows)?(\s*key)?\s*\+\s*r|⊞\s*\+\s*r)\b/iu', strip_tags($html))
+                && preg_match('/(ctrl\s*\+\s*v|paste|verify|human|captcha)/i', strip_tags($html))) {
+                $review[] = "tells visitors to press Win+R and paste something: possible ClickFix fake CAPTCHA (on $url)";
             }
             if (preg_match('/<input[^>]+type\s*=\s*["\']?password/i', $html)) {
                 $text = strtolower(strip_tags($html));
