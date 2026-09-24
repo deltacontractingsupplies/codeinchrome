@@ -334,9 +334,11 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
       verified: no server address, no other business, no secret in any commit
       (publish-repo.sh: scrub, .env values, keys, deny list, gitleaks);
       CONTRIBUTING, SECURITY, CODEOWNERS, PR template; infra/github-setup.sh
-      (reviewed pull requests only, CI required, secret scanning). LEFT, in
-      order: owner creates the codeinchrome organization; `gh auth login`;
-      publish; github-setup.sh; CLA check app
+      (reviewed pull requests only, CI required, secret scanning); the
+      contributor-agreement check as a pinned in-repository action (no external
+      app), signatures on branch cla-signatures. LEFT, in order: owner creates
+      the codeinchrome organization; `gh auth login` + `gh auth refresh -s
+      admin:org`; publish-repo.sh --public; github-setup.sh
 
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):
