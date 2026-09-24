@@ -59,7 +59,7 @@ func TestReverbGetsTheWebSocketRouteAndItsAPIStaysPrivate(t *testing.T) {
 	if !strings.Contains(out, "handle /app/* {\n\t\t\treverse_proxy 127.0.0.1:21001\n\t\t}") {
 		t.Errorf("the WebSocket endpoint must go to Reverb's port:\n%s", out)
 	}
-	if !strings.Contains(out, "handle {\n\t\t\treverse_proxy 127.0.0.1:20001\n\t\t}") {
+	if !strings.Contains(out, "handle {\n\t\t\treverse_proxy 127.0.0.1:20001 {") {
 		t.Errorf("everything else must still go to the site:\n%s", out)
 	}
 	if strings.Contains(out, "/apps/") {
@@ -67,7 +67,7 @@ func TestReverbGetsTheWebSocketRouteAndItsAPIStaysPrivate(t *testing.T) {
 	}
 
 	plain := caddyConfig(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com"}, "20001")
-	if strings.Contains(plain, "handle") || strings.Contains(plain, "21001") {
+	if strings.Contains(plain, "handle /app/") || strings.Contains(plain, "21001") {
 		t.Errorf("a site without Reverb gets no WebSocket route:\n%s", plain)
 	}
 }
@@ -165,6 +165,58 @@ func TestEverySiteRunsWithDebugPagesForcedOff(t *testing.T) {
 	} {
 		if !strings.Contains(strings.Join(m.runArgs(s), " "), "--env APP_DEBUG=false") {
 			t.Errorf("APP_DEBUG must be forced off in the container's environment: %v", m.runArgs(s))
+		}
+	}
+}
+
+// The owner's rule while every site is free (2026-09-25): no program or
+// archive downloads, no redirect to another site but payment and sign-in.
+func TestEveryAppResponseIsCheckedForDownloadsAndOffsiteRedirects(t *testing.T) {
+	cfg := Config{PlatformDomain: "codeinchrome.com", OriginCert: "c", OriginKey: "k"}
+	for _, s := range []Site{
+		{ID: "shop", Domain: "shop.codeinchrome.com"},
+		{ID: "chat", Domain: "chat.codeinchrome.com", Reverb: true, WSPort: 21001},
+	} {
+		out := caddyConfig(cfg, s, "20001")
+		for _, want := range []string{"@cic_redirect_ok expression", "handle_response @cic_download_type", "handle_response @cic_download_name",
+			"header Content-Type application/x-msdownload*", "header Content-Disposition *.exe*", "handle_response @cic_redirect", "copy_response"} {
+			if !strings.Contains(out, want) {
+				t.Errorf("%s: missing %q:\n%s", s.ID, want, out)
+			}
+		}
+		// One value per line: Caddy's response header matcher silently ignored
+		// the rest of a line with several (found testing on a host).
+		for _, line := range strings.Split(out, "\n") {
+			if f := strings.Fields(line); len(f) > 3 && f[0] == "header" && (f[1] == "Content-Type" || f[1] == "Content-Disposition") {
+				t.Errorf("several values on one matcher line: %q", line)
+			}
+		}
+	}
+	if out := caddyConfig(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com", Suspended: true}, "20001"); strings.Contains(out, "reverse_proxy") {
+		t.Errorf("a suspended site reaches no app:\n%s", out)
+	}
+}
+
+func TestOnlyRedirectsToThisSiteOrAPaymentOrSignInProviderPass(t *testing.T) {
+	cfg := Config{PlatformDomain: "codeinchrome.com"}
+	abs, scheme, double := redirectRules(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com", Aliases: []string{"myshop.example"}})
+	a, sc, d := regexp.MustCompile(abs), regexp.MustCompile(scheme), regexp.MustCompile(double)
+	allowed := func(loc string) bool { return a.MatchString(loc) || (!sc.MatchString(loc) && !d.MatchString(loc)) }
+	for loc, want := range map[string]bool{
+		"/login": true, "login": true, "?page=2": true, "#top": true, "../up": true, "/login?next=https://evil.example": true,
+		"https://shop.codeinchrome.com/cart": true, "https://SHOP.codeinchrome.com": true, "https://www.myshop.example/": true,
+		"https://myshop.example:8443/x": true, "https://checkout.stripe.com/c/pay/cs_1": true, "https://www.paypal.com/checkoutnow": true,
+		"https://accounts.google.com/o/oauth2/auth": true, "https://appleid.apple.com/auth/authorize": true,
+		"https://app.codeinchrome.com/login": true, "https://store.lemonsqueezy.com/checkout": true,
+		"https://virusdownloadauto.example/get": false, "http://evil.example": false, "//evil.example/x": false,
+		"/\\evil.example": false, "\\\\evil.example": false, " //evil.example": false, "\t//evil.example": false,
+		"javascript:alert(1)": false, "JaVaScRiPt:alert(1)": false, "data:text/html,x": false,
+		"https://checkout.stripe.com.evil.example/": false, "https://checkout.stripe.com@evil.example/": false,
+		"https://evil.example/https://checkout.stripe.com": false, "https://other.codeinchrome.com/": false,
+		"https://shop.codeinchrome.com.evil.example": false, "ftp://shop.codeinchrome.com/": false,
+	} {
+		if got := allowed(loc); got != want {
+			t.Errorf("%q: allowed=%v, want %v", loc, got, want)
 		}
 	}
 }

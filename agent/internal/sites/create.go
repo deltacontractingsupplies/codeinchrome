@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/user"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
@@ -232,6 +233,7 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 	defer m.mu.Unlock()
 
 	var changed []string
+	previous := map[string][]byte{} // vhost file -> what it held before this pass
 	for _, s := range list {
 		// A container must never run without its disk. If the boot-time
 		// mount failed, docker has already started it on a bind mount of an
@@ -280,11 +282,19 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 			changed = append(changed, s.ID+": "+err.Error())
 			continue
 		}
+		previous[m.caddyFile(s.ID)] = have
 		changed = append(changed, s.ID+": vhost rewritten to match the running container")
 	}
 	if len(changed) > 0 {
 		if err := m.ReloadProxy(ctx); err != nil {
-			return changed, err
+			// A rewritten vhost Caddy refuses would stay on disk and block
+			// every later reload, for every site on the host: put each back
+			// as it was, and reload that.
+			for path, data := range previous {
+				_ = os.WriteFile(path, data, 0o644)
+			}
+			_ = m.ReloadProxy(context.Background())
+			return append(changed, "vhosts restored: caddy refused the rewrite"), err
 		}
 	}
 	return changed, nil
@@ -562,9 +572,10 @@ func caddyConfig(cfg Config, s Site, port string) string {
 	// Reverb's WebSocket endpoint (/app/{key}) goes to its own port; its
 	// /apps/* HTTP API, which the app uses to publish events, is NOT routed:
 	// the app reaches it inside the container, and it stays private.
-	route := fmt.Sprintf("	reverse_proxy 127.0.0.1:%s\n", port)
+	route := guardAbuseMatchers(cfg, s) + appProxy(port, "\t")
 	if s.Reverb && s.WSPort != 0 {
-		route = fmt.Sprintf("	handle /app/* {\n		reverse_proxy 127.0.0.1:%d\n	}\n	handle {\n		reverse_proxy 127.0.0.1:%s\n	}\n", s.WSPort, port)
+		route = guardAbuseMatchers(cfg, s) + fmt.Sprintf("	handle /app/* {\n		reverse_proxy 127.0.0.1:%d\n	}\n	handle {\n", s.WSPort) +
+			appProxy(port, "\t\t") + "\t}\n"
 	}
 	if s.Suspended {
 		route = suspendedBody
@@ -979,6 +990,106 @@ const secretPath = `(?i)(\.(env|sql|sqlite|sqlite3|db|log|bak|old|orig|swp|save|
 // guardSecrets wraps a site's routes so the secret check runs first. A route
 // block keeps directives in the order written: at the top level Caddy sorts
 // them, and a handle block (the WebSocket routing) would run before respond.
+// What a customer's app may not hand a visitor (owner's decision, 2026-09-25,
+// while every site is free): a program or archive download, or a redirect to
+// another site - the two ways a free site becomes a malware or phishing relay.
+// Enforced here, on the app's RESPONSE, whatever its PHP does. Proved with an
+// isolated Caddy on a host before it shipped: an .exe by type or by
+// Content-Disposition, and redirects to another site - plain, "//host",
+// "/\host", with leading space, "javascript:", "allowed.com.evil" and
+// "allowed.com@evil" - were all refused; Stripe, Google sign-in, relative and
+// same-site redirects passed untouched, and so did a CSV download.
+//
+// A plain link on a page cannot be stopped here - no browser policy covers
+// navigation - so those are the scanner's job.
+var (
+	blockedDownloadTypes = []string{
+		"application/x-msdownload*", "application/x-msdos-program*", "application/x-msi*",
+		"application/vnd.android.package-archive*", "application/x-apple-diskimage*", "application/java-archive*",
+		"application/x-executable*", "application/x-sh*", "application/zip*", "application/x-zip-compressed*",
+		"application/x-rar-compressed*", "application/vnd.rar*", "application/x-7z-compressed*",
+	}
+	blockedDownloadNames = []string{
+		"*.exe*", "*.msi*", "*.apk*", "*.dmg*", "*.scr*", "*.bat*", "*.cmd*", "*.ps1*",
+		"*.vbs*", "*.jar*", "*.zip*", "*.rar*", "*.7z*",
+	}
+	// Where a site may send its visitors besides itself: payment and sign-in.
+	redirectAllowHosts = []string{
+		`checkout\.stripe\.com`, `billing\.stripe\.com`, `connect\.stripe\.com`,
+		`(www\.)?paypal\.com`, `www\.sandbox\.paypal\.com`, `[a-z0-9-]+\.lemonsqueezy\.com`,
+		`accounts\.google\.com`, `appleid\.apple\.com`,
+	}
+)
+
+const (
+	blockedDownloadMsg = "codeinchrome does not serve program or archive downloads from free sites."
+	blockedRedirectMsg = "This site tried to send you to another website. codeinchrome does not allow that on free sites, except to payment and sign-in pages."
+)
+
+// celString is s as a CEL string literal, for a Caddy expression matcher.
+func celString(s string) string { return `"` + strings.ReplaceAll(s, `\`, `\\`) + `"` }
+
+// guardAbuseMatchers defines @cic_redirect_ok: a Location that stays on this
+// site (relative, or one of its own names) or goes to an allowed provider.
+func guardAbuseMatchers(cfg Config, s Site) string {
+	abs, scheme, double := redirectRules(cfg, s)
+	return fmt.Sprintf("\t@cic_redirect_ok expression `{rp.header.Location}.matches(%s) || (!{rp.header.Location}.matches(%s) && !{rp.header.Location}.matches(%s))`\n",
+		celString(abs), celString(scheme), celString(double))
+}
+
+// redirectRules: a Location is allowed when it matches abs (an absolute URL
+// to this site or an allowed provider), or when it matches neither scheme (it
+// has none) nor double (it does not start "//" or "/\", which browsers read as
+// another host). RE2, as Caddy's CEL matches() is: the Go tests use them as is.
+func redirectRules(cfg Config, s Site) (abs, scheme, double string) {
+	hosts := append([]string{}, redirectAllowHosts...)
+	for _, name := range append([]string{s.Domain}, s.Aliases...) {
+		hosts = append(hosts, `(www\.)?`+regexp.QuoteMeta(strings.ToLower(name)))
+	}
+	if cfg.PlatformDomain != "" {
+		hosts = append(hosts, regexp.QuoteMeta("app."+cfg.PlatformDomain))
+	}
+	abs = `(?i)^[\x00-\x20]*https?://(` + strings.Join(hosts, "|") + `)(:[0-9]+)?([/?#]|$)`
+	scheme = `(?i)^[\x00-\x20]*[a-z][a-z0-9+.-]*:`
+	double = `^[\x00-\x20]*[/\\][/\\]`
+	return abs, scheme, double
+}
+
+// appProxy is the reverse_proxy to the site's app, with its responses checked.
+func appProxy(port, indent string) string {
+	var b strings.Builder
+	w := func(depth int, line string) { b.WriteString(indent + strings.Repeat("\t", depth) + line + "\n") }
+	w(0, "reverse_proxy 127.0.0.1:"+port+" {")
+	w(1, "@cic_download_type {")
+	for _, t := range blockedDownloadTypes {
+		w(2, "header Content-Type "+t)
+	}
+	w(1, "}")
+	w(1, "handle_response @cic_download_type {")
+	w(2, fmt.Sprintf("respond %q 403", blockedDownloadMsg))
+	w(1, "}")
+	w(1, "@cic_download_name {")
+	for _, n := range blockedDownloadNames {
+		w(2, "header Content-Disposition "+n)
+	}
+	w(1, "}")
+	w(1, "handle_response @cic_download_name {")
+	w(2, fmt.Sprintf("respond %q 403", blockedDownloadMsg))
+	w(1, "}")
+	w(1, "@cic_redirect header Location *")
+	w(1, "handle_response @cic_redirect {")
+	w(2, "handle @cic_redirect_ok {")
+	w(3, "copy_response_headers")
+	w(3, "copy_response")
+	w(2, "}")
+	w(2, "handle {")
+	w(3, fmt.Sprintf("respond %q 403", blockedRedirectMsg))
+	w(2, "}")
+	w(1, "}")
+	w(0, "}")
+	return b.String()
+}
+
 func guardSecrets(route string) string {
 	var b strings.Builder
 	b.WriteString("\troute {\n")

@@ -492,14 +492,26 @@ be hard to abuse. Every item is verified live, never assumed.
       each new site can be checked. Sent through the platform's own mail.
 
 **Stop malicious redirects and downloads (free sites)**
-- [ ] **No redirect to an arbitrary site**: a free site may not send visitors to
+- [x] **No redirect to an arbitrary site**: a free site may not send visitors to
       another domain except an allow-list of trusted destinations (payment
       gateways such as Stripe and PayPal checkout, the platform itself). A
       redirect to e.g. a malware download site is refused at the platform edge,
       not trusted to the app.
-- [ ] **No file downloads of executables/archives**: free sites cannot serve
+      DONE 2026-09-25 (agent 0.26.5, all 6 sites on h1/h3/h4): the app's
+      responses are checked at the edge; a Location to another site is
+      refused (403) unless it is this site, the platform, Stripe, PayPal,
+      Lemon Squeezy, Google or Apple sign-in. Tested on a host against
+      "//host", "/\host", leading space, "javascript:", "allowed.com.evil",
+      "allowed.com@evil" and another customer's site - all refused; the
+      allowed ones pass untouched. A plain link on a page is the scanner's job.
+- [x] **No file downloads of executables/archives**: free sites cannot serve
       .exe .msi .apk .dmg .scr .bat .cmd .ps1 .vbs .jar, or archives meant to
       carry them, nor a download button pointing at them.
+      DONE 2026-09-25: refused at the edge by the response's Content-Type
+      (executables, installers, APKs, disk images, JARs, archives) and by a
+      Content-Disposition filename, so a PHP script streaming an .exe from an
+      address with no extension is refused too; a CSV or PDF download still
+      works. LEFT: a link to an executable hosted elsewhere - the scanner.
 - [ ] **ClamAV scanning**: uploaded and written files scanned; a detection, or
       encrypted/obfuscated PHP (eval/base64/gzinflate droppers, ionCube/
       encoded loaders), suspends the site and bans the account (free plan: no
