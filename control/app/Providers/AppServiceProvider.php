@@ -20,6 +20,7 @@ class AppServiceProvider extends ServiceProvider
     public function register(): void
     {
         $this->app->singleton(\App\Billing\Capacity::class);
+        $this->app->singleton(\App\Support\FileIcons::class);
         //
     }
 
@@ -78,6 +79,14 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('lsp', fn (Request $r) => Limit::perMinute(600)->by($by($r)));
         // Each MCP call boots the site's application: bounded like queries.
         RateLimiter::for('mcp', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
+        // PHP in the site's own app, and test sign-ins: an agent checks as it builds.
+        RateLimiter::for('eval', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
+        // An agent testing what it built: a page and its assets, a form, a login.
+        RateLimiter::for('site-request', fn (Request $r) => Limit::perMinute(300)->by($by($r)));
+        // Each check makes ~50 requests to the site from outside.
+        RateLimiter::for('exposure', fn (Request $r) => Limit::perMinute(6)->by($by($r)));
+        // The public demo source pages: generous for a reader, not for a scraper.
+        RateLimiter::for('demo-code', fn (Request $r) => Limit::perMinute(120)->by($r->ip()));
         RateLimiter::for('logs', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
         RateLimiter::for('billing', fn (Request $r) => Limit::perMinute(10)->by($by($r)));
         RateLimiter::for('two-factor', fn (Request $r) => Limit::perMinute(30)->by($r->ip()));

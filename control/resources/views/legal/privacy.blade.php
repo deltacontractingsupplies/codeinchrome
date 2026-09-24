@@ -40,13 +40,23 @@
 <h2>Who else handles it</h2>
 <ul>
     <li><strong>Hetzner Online</strong> - our servers, in the EU (Finland).</li>
-    <li><strong>Cloudflare</strong> - DNS for codeinchrome.com and your site addresses.</li>
+    <li><strong>Cloudflare</strong> - DNS, and the network in front of this service and of every site on it:
+        all web traffic passes through it (including visitors' IP addresses and the pages and requests
+        themselves), and it filters attacks.</li>
     <li><strong>Lemon Squeezy</strong> - payments, as merchant of record. Its own privacy policy
         covers what you give it at checkout.</li>
     <li><strong>Have I Been Pwned</strong> - when you choose a password we check it against known
         breaches using only the first five characters of its hash; the password itself is never sent.</li>
 </ul>
 <p>Email is sent from our own mail server; no email provider sees it.</p>
+
+<h2>AI agents</h2>
+<p>
+    We do not send your code, your sites' data or anything else to an AI provider. If you use an AI
+    agent to work in the editor - Claude in Chrome, for example - it is a separate service you choose
+    and pay its provider for (Anthropic, for Claude in Chrome), and what it reads and does in your
+    browser is handled under that provider's own terms and privacy policy, not ours.
+</p>
 
 <h2>Cookies</h2>
 <p>

@@ -17,8 +17,8 @@
 A=${CIC_A:-demo}
 B=${CIC_B:-tenant2}
 C=cic-$B
-echo "SECRET_OF_DEMO_TENANT" > /srv/customers/$A/app/.tenant-secret
-chown 33:33 /srv/customers/$A/app/.tenant-secret
+echo "SECRET_OF_DEMO_TENANT" > /srv/customers/$A/vol/app/.tenant-secret
+chown 33:33 /srv/customers/$A/vol/app/.tenant-secret
 
 echo "=== POSITIVE CONTROLS - if these fail, every DENIED below is vacuous ==="
 ctl() { printf '  %-46s ' "$1"; shift
@@ -36,8 +36,8 @@ probe() { printf '  %-46s ' "$1"; shift
     echo "*** REACHED: $(echo "$out" | head -1 | cut -c1-40) ***"; fails=$((fails+1))
   else echo "DENIED"; fi; }
 
-probe "read the other tenants .env"          "cat /srv/customers/$A/app/.env"
-probe "read demo secret via the host path"   'cat /srv/customers/$A/app/.tenant-secret'
+probe "read the other tenants .env"          "cat /srv/customers/$A/vol/app/.env"
+probe "read demo secret via the host path"   'cat /srv/customers/$A/vol/app/.tenant-secret'
 probe "list other customers"                 'ls /srv/customers'
 probe "the cloud metadata service"           'php -r "echo @file_get_contents(\"http://169.254.169.254/hetzner/v1/metadata/hostname\", false, stream_context_create([\"http\"=>[\"timeout\"=>5]]));"'
 probe "see the host control-plane dir"       'ls /opt/codeinchrome'
@@ -61,6 +61,6 @@ if [ -n "$out" ]; then echo "*** REACHED ($out bytes) - tenants share the bridge
 
 echo "=== ceilings, read from docker rather than from what we asked for ==="
 docker inspect $C --format '  cpus={{.HostConfig.NanoCpus}} mem={{.HostConfig.Memory}} swap={{.HostConfig.MemorySwap}} pids={{.HostConfig.PidsLimit}} readonly={{.HostConfig.ReadonlyRootfs}} drop={{.HostConfig.CapDrop}} add={{.HostConfig.CapAdd}} secopt={{.HostConfig.SecurityOpt}}'
-rm -f /srv/customers/$A/app/.tenant-secret
+rm -f /srv/customers/$A/vol/app/.tenant-secret
 echo
 [ $fails -eq 0 ] && echo "RESULT: all isolation claims held" || { echo "RESULT: $fails ISOLATION FAILURE(S)"; exit 1; }

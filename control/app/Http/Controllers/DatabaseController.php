@@ -127,7 +127,9 @@ class DatabaseController extends Controller
     private function authorizeSite(Request $request, Site $site): void
     {
         abort_unless($site->user_id === $request->user()->id, 404);
-        abort_unless($site->status === 'live', 409, 'This site is not live yet.');
+        // A paused site's owner may still take their work away; PausedSite
+        // lets only the reading routes through to here.
+        abort_unless(in_array($site->status, ['live', 'suspended'], true), 409, 'This site is not live yet.');
     }
 
     private function attempt(callable $work): JsonResponse

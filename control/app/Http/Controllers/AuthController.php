@@ -36,6 +36,7 @@ class AuthController extends Controller
             'password' => Hash::make($data['password']),
             'plan' => 'free',
         ]);
+        $user->startTrial();
 
         Auth::login($user);
         $request->session()->regenerate();

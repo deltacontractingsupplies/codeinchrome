@@ -21,13 +21,9 @@ and tested without one.
 
 ## Two decisions that need a human
 
-1. **Which store.** The configured store is `100001` = **another business's store**, at
-   `another business's storefront`, in another currency. That is an existing
-   business, the same `another business's domain` as the production mail host. codeinchrome
-   subscriptions sold through it would appear on that storefront and settle in
-   another currency, while the plans below are priced in USD.
-   A separate store for codeinchrome is almost certainly wanted. Creating one
-   is a dashboard action.
+1. **Which store.** Decided: codeinchrome has its own Lemon Squeezy store,
+   priced in USD (`LEMONSQUEEZY_STORE_ID` in `.env`), separate from any other
+   store on the same account.
 
 2. **Who creates the products.** They cannot be made over the API, so someone
    has to make them in the dashboard. Once they exist, put each variant id into

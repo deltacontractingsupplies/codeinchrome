@@ -8,7 +8,7 @@ use Tests\TestCase;
 /**
  * Eloquent discards a non-fillable attribute on update() SILENTLY - no error,
  * no exception, just a value that never lands. It cost real debugging time
- * here: the billing webhook reported `upgraded_to_pro`, wrote a correct
+ * here: the billing webhook reported `upgraded_to_starter`, wrote a correct
  * subscription row, and left the user on the free plan, because Laravel 13
  * declares fillable through the #[Fillable] attribute rather than a $fillable
  * array and an edit to the array had no effect at all.
@@ -35,8 +35,8 @@ class MassAssignmentTest extends TestCase
     {
         $user = User::factory()->create(['plan' => 'free']);
 
-        $user->update(['plan' => 'pro']);
+        $user->update(['plan' => 'starter']);
 
-        $this->assertSame('pro', $user->fresh()->plan, 'update() accepted the value and did not store it.');
+        $this->assertSame('starter', $user->fresh()->plan, 'update() accepted the value and did not store it.');
     }
 }

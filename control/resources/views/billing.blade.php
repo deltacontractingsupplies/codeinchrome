@@ -15,30 +15,43 @@
     </a>
 @endif
 
-<div class="mt-8 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
+@include('partials.trial')
+
+<div class="mt-8 grid max-w-4xl gap-4 md:grid-cols-2">
     @foreach ($plans as $key => $plan)
         <div class="rounded-lg border p-5 {{ $key === $current ? 'border-teal-600' : 'border-neutral-800' }}">
-            <div class="font-medium text-neutral-100">{{ $plan['name'] }}</div>
-            <div class="mt-1 text-2xl font-semibold text-white">${{ $plan['price'] }}<span class="text-sm font-normal text-neutral-500">/mo</span></div>
+            <div class="flex items-start justify-between gap-3">
+                <div class="font-medium text-neutral-100">{{ $plan['name'] }}</div>
+                @if ($plan['price'] > 0 && $key !== $current)
+                    @include('partials.stock', ['left' => $stock[$key] ?? null])
+                @endif
+            </div>
+            <div class="mt-1 text-2xl font-semibold text-white">
+                @if ($plan['price'] > 0)
+                    ${{ $plan['price'] }}<span class="text-sm font-normal text-neutral-500">/month</span>
+                @else
+                    $0<span class="text-sm font-normal text-neutral-500"> for {{ config('billing.trial.days') }} days</span>
+                @endif
+            </div>
             <ul class="mt-3 space-y-1 text-sm text-neutral-400">
                 <li>{{ $plan['sites'] }} {{ Str::plural('site', $plan['sites']) }}</li>
+                <li>{{ $plan['sites'] > 1 ? $plan['disk_gb'].' GB of storage for each site - '.$plan['storage_gb'].' GB in all' : $plan['storage_gb'].' GB of storage for your site' }} (files and databases)</li>
                 @if ($cap = app(\App\Billing\Capacity::class)->forPlan($key))
-                    <li>~{{ number_format($cap['concurrent_visitors']) }} visitors at once</li>
+                    <li>{{ $plan['sites'] > 1 ? 'Each site' : 'Your site' }}: up to ~{{ number_format($cap['concurrent_visitors']) }} visitors at once</li>
                 @endif
-                <li>{{ $plan['disk_gb'] }} GB disk {{ $plan['sites'] > 1 ? 'per site' : '' }}</li>
-                <li>{{ $plan['custom_domains'] ? 'Custom domains' : 'Free subdomain' }}</li>
+                <li>{{ $plan['custom_domains'] ? 'Your own domains' : 'A free .codeinchrome.com address' }}</li>
             </ul>
             <div class="mt-4">
                 @if ($key === $current)
                     <span class="text-sm text-teal-400">Current plan</span>
                 @elseif (! $plan['price'])
-                    <span class="text-sm text-neutral-500">Free</span>
+                    <span class="text-sm text-neutral-500">{{ auth()->user()->trial_ends_at ? 'Trial used' : 'Free' }}</span>
                 @elseif (! $plan['variant_id'])
                     <span class="text-sm text-neutral-500">Not available to buy yet</span>
                 @elseif (($stock[$key] ?? 0) < 1)
                     {{-- Before the portal link too: a plan change there would
                          otherwise bypass the stock check. --}}
-                    <span class="text-sm font-medium text-amber-300" data-stock="out">Out of stock</span>
+                    <span class="text-sm font-medium text-amber-300">Out of stock</span>
                 @elseif ($subscription?->portal_url && $subscription->entitled())
                     {{-- An existing subscriber changes plan in the portal, so they
                          are never charged for two subscriptions at once. --}}
@@ -48,9 +61,6 @@
                         <input type="hidden" name="plan" value="{{ $key }}">
                         <button class="w-full rounded-md bg-teal-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-teal-400">Choose {{ $plan['name'] }}</button>
                     </form>
-                @endif
-                @if ($key !== $current && is_int($stock[$key] ?? null) && $stock[$key] >= 1 && $stock[$key] <= 3)
-                    <p class="mt-2 text-xs text-amber-300" data-stock="{{ $stock[$key] }}">Only {{ $stock[$key] }} left</p>
                 @endif
             </div>
         </div>

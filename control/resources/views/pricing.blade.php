@@ -3,10 +3,21 @@
 @section('content')
 <h1 class="text-3xl font-semibold tracking-tight text-white">Pricing</h1>
 <p class="mt-3 max-w-2xl text-neutral-400">
-    Monthly plans, in US dollars. Cancel any time from the Billing page. Sales tax is added at
-    checkout where it applies.
+    One plan, monthly, in US dollars. Try it free for {{ config('billing.trial.days') }} days with no card; cancel any time from
+    the Billing page. Sales tax is added at checkout where it applies. We sell only as many plans as our
+    servers can hold at full speed, so the count below goes down as they sell.
 </p>
 @include('partials.plans')
+<section class="mt-10 max-w-3xl text-sm text-neutral-400" aria-labelledby="storage-heading">
+    <h2 id="storage-heading" class="font-medium text-neutral-100">Storage, and keeping uploads elsewhere</h2>
+    <p class="mt-2">
+        Your plan's storage covers your sites' files and their databases together. User uploads - images, videos,
+        documents - are usually better kept in object storage, and Laravel supports it out of the box:
+        install <code class="text-neutral-200">league/flysystem-aws-s3-v3</code>, put the bucket's keys in <code class="text-neutral-200">.env</code>
+        and set <code class="text-neutral-200">FILESYSTEM_DISK=s3</code>. It works with Amazon S3 and with Cloudflare R2, which charges nothing for
+        downloads. Files kept there do not count toward your storage. Each site's settings page has the exact steps.
+    </p>
+</section>
 <div class="mt-10 grid gap-6 sm:grid-cols-3 text-sm text-neutral-400">
     <div>
         <div class="font-medium text-neutral-100">Every plan includes</div>
@@ -28,7 +39,10 @@
 <section id="capacity" class="mt-14">
     <h2 class="text-xl font-semibold text-white">How we measured</h2>
     <p class="mt-2 max-w-3xl text-sm text-neutral-400">
-        Each plan's container was put under real load on our fleet: {{ $measured['workload'] }}.
+        One site on each plan, at that plan's limits, was put under real load on our fleet: {{ $measured['workload'] }}.
+        So every figure below is <strong class="font-medium text-neutral-200">per site</strong>: each of your sites has the same limits.
+        Sites share their server's processors with other sites, so if the neighbours on a server are busy at the same
+        moment, a site can serve somewhat less - which is why the plans say "up to".
         Page views per second were stepped up until one step missed the bar -
         p95 under {{ $measured['bar']['p95_ms'] }} ms and under {{ $measured['bar']['errors'] * 100 }}% errors. The last step that
         passed is the plan's number.
@@ -57,6 +71,7 @@
     <details class="mt-4 text-sm text-neutral-400">
         <summary class="cursor-pointer text-neutral-200">View every step of the test</summary>
         @foreach ($measured['plans'] as $key => $p)
+            @continue(! config("billing.plans.$key"))
             <h3 class="mt-4 font-medium text-neutral-200">{{ config("billing.plans.$key.name", $key) }}</h3>
             <table class="mt-1 w-full text-left">
                 <thead class="text-neutral-500"><tr><th class="pr-4">Asked</th><th class="pr-4">Served</th><th class="pr-4">p95</th><th class="pr-4">Errors</th><th>Dropped</th></tr></thead>
@@ -81,6 +96,6 @@
 </section>
 @endif
 <div class="mt-10">
-    <a href="{{ route('register') }}" class="rounded-md bg-teal-500 px-5 py-2.5 font-medium text-neutral-950 hover:bg-teal-400">Start free</a>
+    <a href="{{ route('register') }}" class="rounded-md bg-teal-500 px-5 py-2.5 font-medium text-neutral-950 hover:bg-teal-400">Try it free for {{ config('billing.trial.days') }} days</a>
 </div>
 @endsection

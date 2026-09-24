@@ -73,6 +73,11 @@ backup_site() {
 
 cmd_run() {
   local ids=("$@") failed=0
+  # A lock left by a process that died (found 2026-09-24: one blocked a host's
+  # backups until it was noticed) would fail every backup from here on.
+  # `unlock` removes only STALE locks - a dead process, or older than 30 min -
+  # never one a running backup holds.
+  restic unlock >/dev/null 2>&1 || true
   if (( ${#ids[@]} == 0 )); then
     for img in "$ROOT"/*/disk.img; do
       [[ -e $img ]] && ids+=("$(basename "$(dirname "$img")")")

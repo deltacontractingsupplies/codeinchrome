@@ -25,9 +25,42 @@ use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
 Route::view('/pricing', 'pricing')->name('pricing');
+// RFC 9116: how to report a vulnerability. The contact is the support
+// address; Expires is kept a year ahead, as the RFC asks it never lapse.
+Route::get('/.well-known/security.txt', fn () => response(implode("\n", [
+    'Contact: mailto:'.config('legal.support_email'),
+    'Expires: '.now()->addYear()->startOfDay()->utc()->format('Y-m-d\TH:i:s\Z'),
+    'Preferred-Languages: en',
+    'Canonical: '.url('/.well-known/security.txt'),
+    'Policy: '.route('terms'),
+])."\n", 200, ['Content-Type' => 'text/plain; charset=utf-8']))->name('security.txt');
 Route::view('/terms', 'legal.terms')->name('terms');
+// The demos' source, open to read (DemoCodeController: config-listed sites only).
+Route::get('/demos/{demo}/code', [\App\Http\Controllers\DemoCodeController::class, 'index'])
+    ->where('demo', '[a-z0-9-]+')->middleware('throttle:demo-code')->name('demos.code');
 Route::view('/privacy', 'legal.privacy')->name('privacy');
 Route::view('/refunds', 'legal.refunds')->name('refunds');
+
+// One-time links from `php artisan user:login-link` (App\Auth\LoginLink).
+// Outside the guest group on purpose: a browser already signed in as someone
+// else switches to the link's account, and says so. (Found by an agent that
+// opened a link in a browser holding another session: it was bounced to the
+// OTHER account's dashboard with no word, and could not tell.) Links are
+// minted only on the server's command line, so no one can plant one.
+Route::get('/login/link/{token}', function (\Illuminate\Http\Request $request, string $token) {
+    $user = \App\Auth\LoginLink::consume($token);
+    abort_unless($user, 404);
+    if (\Illuminate\Support\Facades\Auth::check()) {
+        \Illuminate\Support\Facades\Auth::logout();
+        $request->session()->invalidate();
+        $request->session()->regenerateToken();
+    }
+    \Illuminate\Support\Facades\Auth::login($user);
+    $request->session()->regenerate();
+    \App\Audit\Audit::record('auth.login_link');
+
+    return redirect()->route('dashboard')->with('status', "Signed in as {$user->email}.");
+})->middleware('throttle:login')->name('login.link');
 
 Route::middleware('guest')->group(function () {
     // Sign in with Google or Apple. Apple's callback is a POST from its own
@@ -40,16 +73,6 @@ Route::middleware('guest')->group(function () {
     Route::post('/register', [AuthController::class, 'register'])->middleware('throttle:register');
     Route::get('/login', [AuthController::class, 'showLogin'])->name('login');
     Route::post('/login', [AuthController::class, 'login'])->middleware('throttle:login');
-    // One-time links from `php artisan user:login-link` (App\Auth\LoginLink).
-    Route::get('/login/link/{token}', function (\Illuminate\Http\Request $request, string $token) {
-        $user = \App\Auth\LoginLink::consume($token);
-        abort_unless($user, 404);
-        \Illuminate\Support\Facades\Auth::login($user);
-        $request->session()->regenerate();
-        \App\Audit\Audit::record('auth.login_link');
-
-        return redirect()->route('dashboard');
-    })->middleware('throttle:login')->name('login.link');
     Route::get('/two-factor-challenge', [TwoFactorController::class, 'challenge'])->name('two-factor.challenge');
 
     // Password reset. Every action 404s unless mail really leaves the
@@ -107,17 +130,27 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::post('/sites/{site}/domains/{domain}/verify', [DomainController::class, 'verify'])->middleware('throttle:domains')->name('domains.verify');
     Route::delete('/sites/{site}/domains/{domain}', [DomainController::class, 'destroy'])->name('domains.destroy');
     Route::get('/sites/{site}/files', [FileController::class, 'index'])->name('files.index');
-    Route::put('/sites/{site}/files', [FileController::class, 'store'])->name('files.store');
+    Route::put('/sites/{site}/files', [FileController::class, 'store'])->middleware(\App\Http\Middleware\StorageLimit::class)->name('files.store');
+    Route::put('/sites/{site}/files/batch', [FileController::class, 'storeMany'])->middleware(\App\Http\Middleware\StorageLimit::class)->name('files.batch');
+    Route::post('/sites/{site}/files/edit', [FileController::class, 'edit'])->name('files.edit');
+    Route::get('/sites/{site}/exposure', [FileController::class, 'exposure'])->middleware('throttle:exposure')->name('sites.exposure');
+    Route::post('/sites/{site}/eval', [FileController::class, 'eval'])->middleware('throttle:eval')->name('sites.eval');
+    Route::post('/sites/{site}/login-cookie', [FileController::class, 'loginCookie'])->middleware('throttle:eval')->name('sites.login-cookie');
+    Route::post('/sites/{site}/request', [FileController::class, 'request'])->middleware('throttle:site-request')->name('sites.request');
+    // A page as one of the site's users sees it, in a real tab (LookController).
+    Route::post('/sites/{site}/look', [\App\Http\Controllers\LookController::class, 'create'])->middleware('throttle:site-request')->name('sites.look');
+    Route::get('/sites/{site}/look/{token}', [\App\Http\Controllers\LookController::class, 'show'])->whereUuid('token')->middleware('throttle:site-request')->name('sites.look.show');
     Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->name('files.destroy');
     // The rest of the file manager.
     Route::post('/sites/{site}/files/mkdir', [FileManagerController::class, 'mkdir'])->name('files.mkdir');
     Route::post('/sites/{site}/files/move', [FileManagerController::class, 'move'])->name('files.move');
-    Route::post('/sites/{site}/files/copy', [FileManagerController::class, 'copy'])->name('files.copy');
+    Route::post('/sites/{site}/files/copy', [FileManagerController::class, 'copy'])->middleware(\App\Http\Middleware\StorageLimit::class)->name('files.copy');
     Route::post('/sites/{site}/files/zip', [FileManagerController::class, 'zip'])->middleware('throttle:command')->name('files.zip');
-    Route::post('/sites/{site}/files/unzip', [FileManagerController::class, 'unzip'])->middleware('throttle:command')->name('files.unzip');
+    Route::post('/sites/{site}/files/unzip', [FileManagerController::class, 'unzip'])->middleware(['throttle:command', \App\Http\Middleware\StorageLimit::class])->name('files.unzip');
     Route::delete('/sites/{site}/tree', [FileManagerController::class, 'destroyTree'])->name('files.tree.destroy');
+    Route::get('/sites/{site}/paths', [FileManagerController::class, 'paths'])->middleware('throttle:command')->name('files.paths');
     Route::get('/sites/{site}/search', [FileManagerController::class, 'search'])->middleware('throttle:command')->name('files.search');
-    Route::post('/sites/{site}/upload', [FileManagerController::class, 'upload'])->middleware('throttle:command')->name('files.upload');
+    Route::post('/sites/{site}/upload', [FileManagerController::class, 'upload'])->middleware(['throttle:command', \App\Http\Middleware\StorageLimit::class])->name('files.upload');
     Route::get('/sites/{site}/download', [FileManagerController::class, 'download'])->name('files.download');
     // Every version of every file, the bin of deleted ones, and restore.
     Route::get('/sites/{site}/history', [HistoryController::class, 'index'])->name('history.index');
@@ -136,7 +169,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::post('/sites/{site}/mcp', [McpController::class, 'call'])->middleware('throttle:mcp')->name('mcp.call');
     Route::delete('/sites/{site}/lsp/{session}', [LspController::class, 'close'])->name('lsp.close');
     Route::get('/sites/{site}/db/export', [DatabaseController::class, 'export'])->middleware('throttle:db')->name('db.export');
-    Route::post('/sites/{site}/db/import', [DatabaseController::class, 'import'])->middleware('throttle:db')->name('db.import');
+    Route::post('/sites/{site}/db/import', [DatabaseController::class, 'import'])->middleware(['throttle:db', \App\Http\Middleware\StorageLimit::class])->name('db.import');
 });
 
 /*

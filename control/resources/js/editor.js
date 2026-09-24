@@ -1,8 +1,15 @@
 import { monaco, languageFor } from './monaco.js';
 import { startPhpLanguageServer } from './lsp.js';
 import { previewKind, loadPreview, renderPreview } from './preview.js';
+import { installEditingHelp } from './formatting.js';
+import { installTailwind } from './tailwind.js';
 import { installLaravelProviders } from './laravel.js';
 import { renderMarkdown } from './markdown.js';
+import { enabled as extensionOn, setEnabled as setExtension, listExtensions } from './extensions.js';
+
+// Which built-in extensions this editor loaded with (Extensions view): a
+// switch applies at the next load, so this is what is actually running.
+const EXT = Object.fromEntries(['php', 'laravel', 'emmet', 'prettier', 'tailwind', 'markdown', 'icons'].map((id) => [id, extensionOn(id)]));
 /*
  * The codeinchrome editor.
  *
@@ -28,6 +35,14 @@ const SITE = {
   domain: root.dataset.domain,
   url: root.dataset.url,
   filesUrl: root.dataset.files,
+  filesBatchUrl: root.dataset.filesBatch,
+  filesEditUrl: root.dataset.filesEdit,
+  requestUrl: root.dataset.request,
+  lookUrl: root.dataset.look,
+  pathsUrl: root.dataset.paths,
+  evalUrl: root.dataset.eval,
+  exposureUrl: root.dataset.exposure,
+  loginCookieUrl: root.dataset.loginCookie,
   dbTablesUrl: root.dataset.dbTables,
   dbQueryUrl: root.dataset.dbQuery,
   dbExportUrl: root.dataset.dbExport,
@@ -84,7 +99,19 @@ new MutationObserver(() => {
 })
   .observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
 // PHP IntelliSense from Phpactor in the site's container (lsp.js).
-const php = startPhpLanguageServer({
+// PHP IntelliSense switched off in Extensions: no language server is started
+// in the site (none of its memory used), and every question says why.
+function phpSwitchedOff() {
+  const off = { ok: false, error: 'switched_off', hint: 'PHP IntelliSense is switched off in Extensions. Switch it on there and reload.' };
+  const el = document.getElementById('sbLsp');
+  if (el) {
+    el.textContent = 'PHP: off';
+    el.title = off.hint;
+  }
+  return { status: () => ({ switchedOff: true }), complete: async () => off, hover: async () => off, definition: async () => off, stop: () => {} };
+}
+
+const php = !EXT.php ? phpSwitchedOff() : startPhpLanguageServer({
   url: SITE.lspUrl,
   closeUrl: SITE.lspCloseUrl,
   csrf: CSRF,
@@ -100,6 +127,9 @@ const php = startPhpLanguageServer({
 
 // Laravel's string conventions: route and view names, and ⌘-click from a
 // view name to its Blade file (laravel.js). Quiet: no terminal output.
+installEditingHelp(monaco, editor, { emmet: EXT.emmet, prettier: EXT.prettier });
+if (EXT.tailwind) installTailwind({ monaco, search: (q) => apiAt(SITE.searchUrl, 'GET', { q }) });
+
 const laravel = installLaravelProviders({
   monaco,
   listDir: async (path) => {
@@ -115,6 +145,7 @@ const laravel = installLaravelProviders({
     return r.ok ? r.result.output : '';
   },
   fileUri: (path) => monaco.Uri.from({ scheme: 'cic', path }),
+  providers: EXT.laravel,
 });
 
 // A jump to another file (go to definition, a view name, Phpactor into
@@ -176,7 +207,20 @@ function api(method, query = {}, body) {
   return apiAt(SITE.filesUrl, method, query, body);
 }
 
-async function apiAt(base, method, query = {}, body) {
+// One command at a time per site: the agent answers 409 "busy" while another
+// runs (a background lookup, a migration someone started). Nothing ran, so
+// the call is repeated for up to ~15 s rather than failed.
+async function apiAt(base, method, query = {}, body, { onBusy } = {}) {
+  let res = await apiOnce(base, method, query, body);
+  for (let i = 0; i < 10 && res.status === 409 && res.error === 'busy'; i++) {
+    if (i === 0) onBusy?.();
+    await new Promise((r) => setTimeout(r, 1500));
+    res = await apiOnce(base, method, query, body);
+  }
+  return res;
+}
+
+async function apiOnce(base, method, query, body) {
   const url = new URL(base, location.origin);
   for (const [k, v] of Object.entries(query)) url.searchParams.set(k, v);
 
@@ -272,7 +316,7 @@ async function loadDir(path) {
  * the way VS Code's icon themes do; only icons actually shown are fetched.
  */
 let icons = null;
-const iconsReady = fetch('/file-icons/manifest.json', { credentials: 'same-origin' })
+const iconsReady = !EXT.icons ? Promise.resolve() : fetch('/file-icons/manifest.json', { credentials: 'same-origin' })
   .then((r) => (r.ok ? r.json() : null))
   .then((m) => {
     if (m) icons = { ...m, known: new Set(m.icons) };
@@ -304,6 +348,7 @@ async function renderTree() {
   if (!listings.has('/')) await loadDir('/');
   const tree = $('tree');
   tree.replaceChildren();
+  tree.classList.toggle('editing', inlineEdit !== null);
 
   const walk = (dir, depth) => {
     const listing = listings.get(dir);
@@ -312,15 +357,49 @@ async function renderTree() {
       tree.append(note(`Cannot list: ${listing.error}`, depth));
       return;
     }
-    for (const entry of listing.entries) {
-      tree.append(nodeFor(entry, depth));
+    // A new item's input row sits first in its section, as in VS Code: a new
+    // folder above the folders, a new file above the files.
+    const placeholder = inlineEdit && inlineEdit.kind !== 'rename' && inlineEdit.dir === dir;
+    let placed = false;
+    const place = () => {
+      if (placeholder && !placed) {
+        tree.append(editRow(null, depth));
+        placed = true;
+      }
+    };
+    if (placeholder && inlineEdit.kind === 'folder') place();
+    for (const head of sortEntries(listing.entries)) {
+      if (placeholder && inlineEdit.kind === 'file' && !head.dir) place();
+      // Compact folders, as VS Code: a folder whose only entry is a folder
+      // shares its row - "src/main/java" - and the row stands for the last one.
+      // Not while something is being typed into the tree: the row must be real.
+      const chain = [head];
+      while (!inlineEdit && chain.length < 12) {
+        const only = listings.get(chain[chain.length - 1].path)?.entries;
+        if (!chain[chain.length - 1].dir || !only || only.length !== 1 || !only[0].dir) break;
+        chain.push(only[0]);
+      }
+      const entry = chain[chain.length - 1];
+      const renaming = inlineEdit?.kind === 'rename' && inlineEdit.entry.path === entry.path;
+      tree.append(renaming ? editRow(entry, depth) : nodeFor(entry, depth, chain));
       if (entry.dir && expanded.has(entry.path) && listings.has(entry.path)) {
         walk(entry.path, depth + 1);
       }
     }
+    place();
     if (listing.truncated) tree.append(note('More entries not shown', depth));
   };
   walk('/', 0);
+
+  const input = tree.querySelector('input.inline-edit');
+  if (input && document.activeElement !== input) {
+    input.focus();
+    input.scrollIntoView({ block: 'nearest' });
+    // The name without its extension, for a file with one (not a dotfile).
+    const dot = input.value.lastIndexOf('.');
+    const isFile = inlineEdit?.kind === 'rename' && !inlineEdit.entry.dir;
+    input.setSelectionRange(0, isFile && dot > 0 ? dot : input.value.length);
+  }
 }
 
 function note(text, depth) {
@@ -331,13 +410,23 @@ function note(text, depth) {
   return el;
 }
 
-function nodeFor(entry, depth) {
+function nodeFor(entry, depth, chain = [entry]) {
   const el = document.createElement('div');
-  el.className = 'node' + (entry.dir ? ' dir' : '') + (entry.path === active ? ' active' : '');
+  const cut = fileClipboard?.mode === 'cut' && fileClipboard.paths.includes(entry.path);
+  const unsaved = !entry.dir && tabs.get(entry.path)?.dirty;
+  el.className = 'node' + (entry.dir ? ' dir' : '') + (entry.path === active ? ' active' : '')
+    + (entry.path === focusedPath ? ' focused' : '') + (cut ? ' cut' : '') + (unsaved ? ' dirty' : '');
   el.style.paddingLeft = `${8 + depth * 12}px`;
   el.setAttribute('role', 'treeitem');
   el.tabIndex = 0;
   el.dataset.path = entry.path;
+  el.draggable = true;
+  el.addEventListener('focus', () => { focusedPath = entry.path; });
+  el.addEventListener('dragstart', (e) => {
+    e.dataTransfer.setData(DRAG_TYPE, entry.path);
+    e.dataTransfer.setData('text/plain', entry.path.slice(1));
+    e.dataTransfer.effectAllowed = 'copyMove';
+  });
 
   const open = entry.dir && expanded.has(entry.path);
   const twisty = document.createElement('span');
@@ -346,7 +435,11 @@ function nodeFor(entry, depth) {
 
   const name = document.createElement('span');
   name.className = 'nm';
-  name.textContent = entry.name; // textContent: file names are data, never markup
+  name.textContent = chain.map((c) => c.name).join('/'); // textContent: file names are data, never markup
+  if (chain.length > 1) {
+    el.classList.add('compact');
+    el.setAttribute('aria-label', chain.map((c) => c.name).join(' / '));
+  }
 
   el.append(twisty);
   const src = iconFor(entry, open);
@@ -360,6 +453,14 @@ function nodeFor(entry, depth) {
     el.append(img);
   }
   el.append(name);
+  if (entry.path === '/public') {
+    // The web root: the only folder the world can see.
+    const pub = document.createElement('i');
+    pub.className = 'ci ci-globe pub';
+    pub.title = `Public: everything in this folder is served at ${SITE.url}/`;
+    pub.setAttribute('aria-label', 'public, served to the world');
+    name.after(pub);
+  }
   if (entry.dir) el.setAttribute('aria-expanded', String(open));
 
   const more = document.createElement('button');
@@ -374,7 +475,9 @@ function nodeFor(entry, depth) {
   more.append(dots);
   more.addEventListener('click', (e) => {
     e.stopPropagation();
-    openNodeMenu(entry, more);
+    focusedPath = entry.path;
+    const r = more.getBoundingClientRect();
+    showMenu(r.right - 4, r.bottom + 2, menuFor(entry), el);
   });
   el.append(more);
 
@@ -383,15 +486,25 @@ function nodeFor(entry, depth) {
       if (expanded.has(entry.path)) {
         expanded.delete(entry.path);
       } else {
-        expanded.add(entry.path);
+        for (const c of chain) expanded.add(c.path);
         if (!listings.has(entry.path)) await loadDir(entry.path);
+        // Look ahead down a line of single folders, so the whole chain shows
+        // as one row at once (app/Http/Controllers), as VS Code does.
+        let at = entry.path;
+        for (let i = 0; i < 10; i++) {
+          const only = listings.get(at)?.entries;
+          if (!only || only.length !== 1 || !only[0].dir) break;
+          at = only[0].path;
+          expanded.add(at);
+          if (!listings.has(at)) await loadDir(at);
+        }
       }
       await renderTree();
     } else {
       await openFile(entry.path);
     }
   };
-  el.addEventListener('click', activate);
+  el.addEventListener('click', () => { focusedPath = entry.path; activate(); });
   el.setAttribute('aria-level', String(depth + 1));
   if (entry.path === active) el.setAttribute('aria-selected', 'true');
   el.addEventListener('keydown', async (e) => {
@@ -400,6 +513,7 @@ function nodeFor(entry, depth) {
     const i = nodes.indexOf(el);
     const focusAt = (n) => nodes[Math.max(0, Math.min(nodes.length - 1, n))]?.focus();
     const refocus = () => $('tree').querySelector(`.node[data-path="${CSS.escape(entry.path)}"]`)?.focus();
+    if (await explorerKey(e, entry)) return;
     switch (e.key) {
       case 'Enter':
       case ' ':
@@ -426,7 +540,8 @@ function nodeFor(entry, depth) {
           await activate();
           refocus();
         } else {
-          const parent = parentOf(entry.path);
+          // The folder above the whole row (a compact row's first segment).
+          const parent = parentOf(chain[0].path);
           $('tree').querySelector(`.node[data-path="${CSS.escape(parent)}"]`)?.focus();
         }
         break;
@@ -437,6 +552,790 @@ function nodeFor(entry, depth) {
 
   return el;
 }
+
+/* ───────────────────────── the explorer, as VS Code does it ─────────────────────────
+ * Behaviour matched to VS Code's own explorer (MIT; src/vs/workbench/contrib/
+ * files/browser in microsoft/vscode): new files and folders and renames are
+ * typed into the row itself, with its validation and wording; the right-click
+ * menus, keys, sort order, cut/copy/paste and drag and drop are its too.
+ * Never a native dialog: an agent driving the page cannot dismiss one.
+ */
+const IS_MAC = /Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent);
+const collator = new Intl.Collator(undefined, { numeric: true, sensitivity: 'base' });
+const DRAG_TYPE = 'application/x-cic-path';
+let focusedPath = null;
+let inlineEdit = null; // { kind: 'rename' | 'file' | 'folder', dir, entry? }
+let fileClipboard = null; // { mode: 'copy' | 'cut', paths: [] }
+let searchScope = '/';
+const joinPath = (dir, name) => norm(`${dir === '/' ? '' : dir}/${name}`);
+const K = (mac, other) => (IS_MAC ? mac : other);
+
+/* Folders first, then names in natural order: file2 before file10. */
+function sortEntries(entries) {
+  return [...entries].sort((a, b) => (a.dir !== b.dir
+    ? (a.dir ? -1 : 1)
+    : (collator.compare(a.name, b.name) || a.name.length - b.name.length)));
+}
+
+function entryAt(path) {
+  if (!path || path === '/') return null;
+  return listings.get(parentOf(path))?.entries.find((e) => e.path === path) ?? null;
+}
+
+/* Where a new item goes: the focused folder, the focused file's folder, or the root. */
+function targetDir(path = focusedPath) {
+  const entry = entryAt(path);
+  if (!entry) return '/';
+  return entry.dir ? entry.path : parentOf(entry.path);
+}
+
+/* VS Code's validateFileName: errors block, the whitespace warning does not. */
+function validateName(value, dir, current) {
+  const v = value.replace(/^\t+|\t+$/g, '').replace(/[/\\]+$/, '');
+  if (!v.trim()) return { error: 'A file or folder name must be provided.' };
+  if (/^[/\\]/.test(v)) return { error: 'A file or folder name cannot start with a slash.' };
+  const segments = v.split(/[/\\]/);
+  if (segments.some((seg) => seg === '' || seg === '.' || seg === '..' || seg.length > 255 || seg.includes('\0'))) {
+    return { error: `The name ${v.slice(0, 255)} is not valid as a file or folder name. Please choose a different name.` };
+  }
+  const clash = (listings.get(dir)?.entries ?? []).find((e) => e.name === segments[0]);
+  if (clash && segments[0] !== current && (segments.length === 1 || !clash.dir)) {
+    return { error: `A file or folder ${segments[0]} already exists at this location. Please choose a different name.` };
+  }
+  if (segments.some((seg) => seg !== seg.trim())) return { warning: 'Leading or trailing whitespace detected in file or folder name.' };
+  return {};
+}
+
+/* The row being typed into: a new item's placeholder (entry null) or a rename. */
+function editRow(entry, depth) {
+  const kind = entry ? 'rename' : inlineEdit.kind;
+  const isDir = entry ? entry.dir : kind === 'folder';
+  const dir = entry ? parentOf(entry.path) : inlineEdit.dir;
+  const current = entry?.name ?? null;
+
+  const el = document.createElement('div');
+  el.className = 'node editing' + (isDir ? ' dir' : '');
+  el.style.paddingLeft = `${8 + depth * 12}px`;
+  el.setAttribute('role', 'treeitem');
+  const tw = document.createElement('span');
+  tw.className = 'tw';
+  tw.setAttribute('aria-hidden', 'true');
+  const img = document.createElement('img');
+  img.className = 'ic';
+  img.alt = '';
+  img.width = img.height = 16;
+  const setIcon = (name) => {
+    const src = iconFor({ name: name || (isDir ? 'folder' : 'file'), dir: isDir }, false);
+    if (src) img.src = src;
+  };
+  setIcon(current ?? '');
+
+  const input = document.createElement('input');
+  input.className = 'inline-edit';
+  input.value = current ?? '';
+  input.spellcheck = false;
+  input.autocomplete = 'off';
+  input.setAttribute('aria-label', 'Type file name. Press Enter to confirm or Escape to cancel.');
+  const msg = document.createElement('div');
+  msg.className = 'inline-msg';
+  msg.setAttribute('role', 'alert');
+  msg.hidden = true;
+  el.append(tw, img, input, msg);
+
+  let touched = false;
+  let done = false;
+  const check = () => {
+    const r = validateName(input.value, dir, current);
+    const text = (touched && r.error) || r.warning || '';
+    msg.textContent = text;
+    msg.hidden = !text;
+    msg.classList.toggle('warning', !r.error && !!r.warning);
+    input.classList.toggle('invalid', touched && !!r.error);
+    input.setAttribute('aria-invalid', String(touched && !!r.error));
+    return r;
+  };
+  const finish = (commit) => {
+    if (done) return;
+    done = true;
+    const edit = inlineEdit;
+    inlineEdit = null;
+    if (commit) commitEdit(edit, input.value);
+    else renderTree().then(() => focusNode(entry?.path ?? focusedPath));
+  };
+  input.addEventListener('input', () => {
+    touched = true;
+    setIcon(input.value.split('/').pop());
+    check();
+  });
+  input.addEventListener('keydown', (e) => {
+    e.stopPropagation();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      touched = true;
+      if (!check().error) finish(true);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      finish(false);
+    } else if (e.key === 'F2' && entry && !entry.dir && input.value.lastIndexOf('.') > 0) {
+      // F2 cycles the selection: name, whole, extension.
+      e.preventDefault();
+      const dot = input.value.lastIndexOf('.');
+      const { selectionStart: a, selectionEnd: b } = input;
+      if (a === 0 && b === dot) input.setSelectionRange(0, input.value.length);
+      else if (a === 0 && b === input.value.length) input.setSelectionRange(dot + 1, input.value.length);
+      else input.setSelectionRange(0, dot);
+    }
+  });
+  // Clicking away commits a valid name and cancels anything else.
+  input.addEventListener('blur', () => setTimeout(() => {
+    if (done || $('nodeMenu').contains(document.activeElement)) return;
+    const r = validateName(input.value, dir, current);
+    finish(!r.error && input.value.trim() !== '');
+  }, 0));
+  check();
+  return el;
+}
+
+async function startCreate(kind, dir = targetDir()) {
+  if (mode !== 'files') setMode('files');
+  if (dir !== '/') {
+    expanded.add(dir);
+    if (!listings.has(dir)) await loadDir(dir);
+  }
+  inlineEdit = { kind, dir };
+  await renderTree();
+}
+
+async function startRename(entry) {
+  if (!entry) return;
+  inlineEdit = { kind: 'rename', entry, dir: parentOf(entry.path) };
+  await renderTree();
+}
+
+async function commitEdit(edit, raw) {
+  const value = raw.replace(/^\t+|\t+$/g, '');
+  const name = value.replace(/[/\\]+$/, '').replace(/\\/g, '/');
+  const to = joinPath(edit.dir, name);
+  if (edit.kind === 'rename') {
+    if (to === edit.entry.path) return renderTree().then(() => focusNode(to));
+    if (parentOf(to) !== edit.dir) await mkdirAt(parentOf(to));
+    const res = await movePath(edit.entry.path, to);
+    if (res.ok) focusedPath = to;
+    return renderTree().then(() => focusNode(res.ok ? to : edit.entry.path));
+  }
+  // A trailing slash always means a folder; "a/b/c.txt" makes a and b too.
+  if (edit.kind === 'folder' || /[/\\]$/.test(value)) {
+    const res = await mkdirAt(to);
+    if (res.ok) focusedPath = to;
+    return renderTree().then(() => focusNode(to));
+  }
+  if (parentOf(to) !== edit.dir) await mkdirAt(parentOf(to));
+  const res = await createFile(to);
+  if (res.ok) focusedPath = to;
+  else status(res.status === 409 ? `${to} already exists` : `${to}: ${res.hint}`, true);
+  return res;
+}
+
+function focusNode(path) {
+  if (!path) return;
+  $('tree').querySelector(`.node[data-path="${CSS.escape(path)}"]`)?.focus();
+}
+
+function collapseAll() {
+  expanded.clear();
+  expanded.add('/');
+  renderTree();
+  status('Folders collapsed');
+}
+
+async function copyText(text, what) {
+  try {
+    await navigator.clipboard.writeText(text);
+    status(`Copied ${what}: ${text}`);
+  } catch {
+    status('The browser did not allow copying to the clipboard.', true);
+  }
+}
+
+function setClipboard(mode, paths) {
+  fileClipboard = { mode, paths };
+  renderTree().then(() => focusNode(paths[0]));
+  status(`${mode === 'cut' ? 'Cut' : 'Copied'} ${paths.map((p) => p.slice(1)).join(', ')} - paste into a folder with ${K('⌘V', 'Ctrl+V')}`);
+}
+
+/* "name copy.ext", then "name copy 2.ext": VS Code's simple incremental naming. */
+function freeName(dir, name) {
+  const taken = new Set((listings.get(dir)?.entries ?? []).map((e) => e.name));
+  if (!taken.has(name)) return joinPath(dir, name);
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let n = 1; ; n++) {
+    const candidate = `${stem} copy${n > 1 ? ` ${n}` : ''}${ext}`;
+    if (!taken.has(candidate)) return joinPath(dir, candidate);
+  }
+}
+
+async function pasteInto(dir) {
+  if (!fileClipboard) return;
+  const { mode, paths } = fileClipboard;
+  if (!listings.has(dir)) await loadDir(dir);
+  let last = null;
+  for (const from of paths) {
+    if (dir === from || dir.startsWith(`${from}/`)) {
+      status('A folder cannot be pasted into itself.', true);
+      continue;
+    }
+    const to = mode === 'copy' ? freeName(dir, baseName(from)) : joinPath(dir, baseName(from));
+    if (to === from) continue;
+    const res = mode === 'cut' ? await movePath(from, to) : await copyPath(from, to);
+    if (res.ok) last = to;
+  }
+  if (mode === 'cut') fileClipboard = null;
+  if (last) focusedPath = last;
+  await renderTree();
+  focusNode(last);
+}
+
+async function dropMove(from, dir, copy) {
+  const name = baseName(from);
+  if (dir === from || dir.startsWith(`${from}/`) || (!copy && parentOf(from) === dir)) return;
+  if (copy) return copyPath(from, freeName(dir, name));
+  const into = dir === '/' ? 'the site root' : `'${baseName(dir)}'`;
+  if (!(await ask(`Are you sure you want to move '${name}' into ${into}?`, { okLabel: 'Move' }))) return;
+  const res = await movePath(from, joinPath(dir, name));
+  if (res.ok) focusedPath = joinPath(dir, name);
+  return res;
+}
+
+async function deleteEntry(entry) {
+  if (!entry) return;
+  if (entry.dir) {
+    if (await ask(`Are you sure you want to delete '${entry.name}' and its contents?\n\nIts files go to the bin (History), where they can be restored. Dependencies and caches do not.`, { okLabel: 'Delete' })) {
+      deleteFolder(entry.path, { confirm: true });
+    }
+  } else if (await ask(`Are you sure you want to delete '${entry.name}'?\n\nYou can restore it from the bin (History).`, { okLabel: 'Delete' })) {
+    removeFile(entry.path);
+  }
+}
+
+function findInFolder(dir) {
+  if (mode !== 'files') setMode('files');
+  searchScope = dir;
+  $('searchInput').placeholder = dir === '/' ? 'Search in files' : `Search in ${dir.slice(1)}/`;
+  $('searchBar').hidden = false;
+  $('searchInput').focus();
+}
+
+async function showProperties(entry) {
+  const when = entry.mtime ? new Date(entry.mtime * 1000).toLocaleString() : 'unknown';
+  const size = entry.dir ? 'folder' : `${entry.size.toLocaleString()} bytes`;
+  await ask(`${entry.path}\n\nPermissions: ${entry.mode} (owner www-data, the site's own user)\nSize: ${size}\nModified: ${when}`, { okLabel: 'Close' });
+}
+
+/* The context menu for an item, or the root's for empty space (entry null). */
+function menuFor(entry) {
+  const p = entry?.path ?? '/';
+  const isRoot = !entry;
+  const isDir = isRoot || entry.dir;
+  const dir = isDir ? p : parentOf(p);
+  const groups = [];
+  groups.push(isDir
+    ? [{ label: 'New File…', run: () => startCreate('file', dir) }, { label: 'New Folder…', run: () => startCreate('folder', dir) }]
+    : [{ label: 'Open', run: () => openFile(p) }]);
+  if (isDir) groups.push([{ label: 'Find in Folder…', keys: K('⌥⇧F', 'Shift+Alt+F'), run: () => findInFolder(dir) }]);
+  const clip = isRoot ? [] : [
+    { label: 'Cut', keys: K('⌘X', 'Ctrl+X'), run: () => setClipboard('cut', [p]) },
+    { label: 'Copy', keys: K('⌘C', 'Ctrl+C'), run: () => setClipboard('copy', [p]) },
+  ];
+  if (isDir) clip.push({ label: 'Paste', keys: K('⌘V', 'Ctrl+V'), disabled: !fileClipboard, run: () => pasteInto(dir) });
+  groups.push(clip);
+  const io = [];
+  if (isDir) io.push({ label: 'Upload…', run: () => { uploadTarget = dir; $('uploadInput').click(); } });
+  else io.push({ label: 'Download', run: () => downloadPath(p) });
+  if (!isRoot && isDir) {
+    io.push({ label: 'Zip…', run: async () => {
+      const to = await ask(`Archive ${p}/ as:`, { input: `${p.slice(1)}.zip`, okLabel: 'Zip' });
+      if (to) zipPath(p, to.trim());
+    } });
+  }
+  if (!isDir && p.endsWith('.zip')) {
+    io.push({ label: 'Unzip Here…', run: async () => {
+      const into = await ask(`Extract ${p} into:`, { input: p.slice(1, -4), okLabel: 'Extract' });
+      if (into) unzipPath(p, into.trim());
+    } });
+  }
+  groups.push(io);
+  groups.push([
+    { label: 'Copy Path', keys: K('⌥⌘C', 'Shift+Alt+C'), run: () => copyText(`/var/www/html${p === '/' ? '' : p}`, 'path') },
+    { label: 'Copy Relative Path', keys: K('⌥⇧⌘C', 'Ctrl+Shift+Alt+C'), run: () => copyText(p === '/' ? '.' : p.slice(1), 'relative path') },
+  ]);
+  if (!isRoot) {
+    groups.push([
+      { label: 'Rename…', keys: K('↩', 'F2'), run: () => startRename(entry) },
+      { label: 'Delete', keys: K('⌘⌫', 'Delete'), run: () => deleteEntry(entry) },
+    ]);
+    groups.push([{ label: 'Properties', run: () => showProperties(entry) }]);
+  }
+  return groups;
+}
+
+function showMenu(x, y, groups, returnTo) {
+  const menu = $('nodeMenu');
+  menu.replaceChildren();
+  groups.filter((g) => g.length).forEach((group, i) => {
+    if (i) {
+      const sep = document.createElement('div');
+      sep.className = 'sep';
+      sep.setAttribute('role', 'separator');
+      menu.append(sep);
+    }
+    for (const item of group) {
+      const b = document.createElement('button');
+      b.type = 'button';
+      b.setAttribute('role', 'menuitem');
+      b.disabled = !!item.disabled;
+      const label = document.createElement('span');
+      label.textContent = item.label;
+      b.append(label);
+      if (item.keys) {
+        const keys = document.createElement('span');
+        keys.className = 'kb';
+        keys.textContent = item.keys;
+        b.append(keys);
+      }
+      b.addEventListener('click', async (e) => {
+        e.stopPropagation();
+        closeNodeMenu();
+        await item.run();
+      });
+      menu.append(b);
+    }
+  });
+  menu.hidden = false;
+  menuReturn = returnTo;
+  const r = menu.getBoundingClientRect();
+  menu.style.left = `${Math.max(4, Math.min(x, innerWidth - r.width - 4))}px`;
+  menu.style.top = `${Math.max(4, Math.min(y, innerHeight - r.height - 4))}px`;
+  menu.querySelector('button:not(:disabled)')?.focus();
+}
+
+$('nodeMenu').addEventListener('keydown', (e) => {
+  const items = [...$('nodeMenu').querySelectorAll('button:not(:disabled)')];
+  const i = items.indexOf(document.activeElement);
+  const to = { ArrowDown: i + 1, ArrowUp: i - 1, Home: 0, End: items.length - 1 }[e.key];
+  if (to !== undefined) {
+    e.preventDefault();
+    items[(to + items.length) % items.length]?.focus();
+  } else if (e.key === 'Tab') {
+    e.preventDefault();
+    closeNodeMenu(true);
+  }
+});
+
+/* The explorer's own keys, VS Code's bindings. True when the key was used. */
+async function explorerKey(e, entry) {
+  const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+  const key = e.key.toLowerCase();
+  const act = (fn) => { e.preventDefault(); fn(); return true; };
+  if (e.key === 'F2' || (IS_MAC && e.key === 'Enter' && !mod && !e.altKey && !e.shiftKey)) return act(() => startRename(entry));
+  if (mod && e.key === 'ArrowDown' && !entry.dir) return act(() => openFile(entry.path).then(() => editor.focus()));
+  if ((IS_MAC && e.metaKey && e.key === 'Backspace') || (!IS_MAC && e.key === 'Delete')) return act(() => deleteEntry(entry));
+  if (mod && e.altKey && key === 'c') return act(() => copyText(e.shiftKey ? entry.path.slice(1) : `/var/www/html${entry.path}`, e.shiftKey ? 'relative path' : 'path'));
+  if (mod && !e.altKey && key === 'c') return act(() => setClipboard('copy', [entry.path]));
+  if (mod && !e.altKey && key === 'x') return act(() => setClipboard('cut', [entry.path]));
+  if (mod && !e.altKey && key === 'v') return act(() => pasteInto(entry.dir ? entry.path : parentOf(entry.path)));
+  if (mod && e.key === 'ArrowLeft') return act(() => collapseAll());
+  if (e.altKey && e.shiftKey && key === 'f' && entry.dir) return act(() => findInFolder(entry.path));
+  if (e.key === 'Escape' && fileClipboard?.mode === 'cut') return act(() => { fileClipboard = null; renderTree().then(() => focusNode(entry.path)); });
+  return false;
+}
+
+/* ───────────────────────── check every page ─────────────────────────
+ * cic.check(): every page of the site, as a visitor (or signed in with
+ * { as: userId }) - all its GET routes without parameters, then every link on
+ * this site found in those pages - and every error the app logged meanwhile.
+ * What an agent runs before it says "done".
+ */
+const CHECK_SKIP = /^\/(_ignition|_debugbar|telescope|horizon|livewire|sanctum\/csrf-cookie|storage\/|up$)|logout/i;
+
+async function checkSite({ as, session = false, max = 150 } = {}) {
+  const started = Date.now();
+  // A sign-in that cannot work is said once, not as a failure of every page
+  // (an app with no Laravel users - a shared password - has no user 1).
+  if (as !== undefined) {
+    const login = await apiAt(SITE.loginCookieUrl, 'POST', {}, { user: as, guard: 'web' });
+    if (!login.ok) {
+      return { ok: false, error: 'sign_in_failed', checked: 0, problems: [], errors: [],
+        hint: `${login.hint ?? login.error}. If this app signs in some other way (a shared password, a token), sign in `
+          + 'with cic.request (post its login form, follow: true), then cic.check({ session: true }).' };
+    }
+  }
+  // Where the log ends now - its file and size - so only what this check
+  // causes is read back afterwards, never an older error that reads the same.
+  const logBefore = await apiAt(SITE.logsUrl, 'GET', { source: 'app', lines: 1 });
+  const mark = logBefore.ok ? { since: logBefore.log?.size ?? 0, file: logBefore.log?.file || 'laravel.log' } : null;
+
+  const queue = [];
+  const seen = new Set();
+  const push = (p) => {
+    if (!p || seen.has(p) || queue.length + seen.size > max * 3) return;
+    seen.add(p);
+    queue.push(p);
+  };
+  const routes = await apiAt(SITE.commandUrl, 'POST', {}, { tool: 'artisan', args: ['route:list', '--json', '--method=GET'] });
+  let list = [];
+  try {
+    const out = (routes.result?.output ?? '').replace(/\x1b\[[0-9;]*m/g, '');
+    list = JSON.parse(out.slice(out.indexOf('[')));
+  } catch { /* a site whose routes do not load: the crawl from / will say why */ }
+  push('/');
+  for (const r of list) {
+    const uri = `/${String(r.uri ?? '').replace(/^\/+/, '')}`;
+    if (!uri.includes('{') && !CHECK_SKIP.test(uri)) push(uri);
+  }
+
+  const host = new URL(SITE.url).host;
+  const results = [];
+  // session: the cookies cic.request already holds (a login the agent did).
+  if (!session) cic.request.reset();
+  while (queue.length && results.length < max) {
+    const path = queue.shift();
+    const r = await siteRequest(path, as !== undefined && !session ? { as } : {});
+    if (!r.ok) {
+      results.push({ path, status: 0, why: r.hint ?? r.error });
+      continue;
+    }
+    results.push({ path, status: r.status, location: r.location });
+    if (r.location?.startsWith('/') && !r.location.startsWith('//')) push(r.location.split('#')[0]);
+    if (r.status === 200 && /html/.test(r.headers['content-type'] ?? '')) {
+      for (const m of r.body.matchAll(/\bhref\s*=\s*["']([^"'#]+)["']/gi)) {
+        let href = m[1].replace(/&amp;/g, '&');
+        if (/^(mailto|tel|javascript|data):/i.test(href)) continue;
+        try {
+          const u = new URL(href, SITE.url + path);
+          if (u.host !== host) continue;
+          href = u.pathname + u.search;
+        } catch { continue; }
+        if (!CHECK_SKIP.test(href) && !/\.(css|js|png|jpe?g|gif|svg|webp|ico|woff2?|pdf|zip)(\?|$)/i.test(href)) push(href);
+      }
+    }
+  }
+  if (!session) cic.request.reset();
+
+  const logAfter = mark && await apiAt(SITE.logsUrl, 'GET', { source: 'app', ...mark });
+  let errors = [];
+  if (!logAfter?.ok) {
+    // Never report an old error as new, nor say "no errors" unread.
+    errors = ['The log could not be read, so errors were not checked: run cic.check() again.'];
+  } else {
+    errors = (logAfter.log?.lines ?? '').split('\n').filter((l) => /\.(ERROR|CRITICAL|ALERT|EMERGENCY):/.test(l)).map((l) => l.replace(/^\[[^\]]+\]\s*/, '').slice(0, 200));
+  }
+  const problems = results.filter((r) => r.status === 0 || r.status >= 400);
+  return {
+    ok: problems.length === 0 && errors.length === 0,
+    checked: results.length,
+    problems: problems.map((r) => `${r.status || 'no answer'} ${r.path}${r.why ? ` (${r.why})` : ''}`).slice(0, 30),
+    errors: [...new Set(errors)].slice(0, 10),
+    unchecked: queue.length,
+    seconds: Math.round((Date.now() - started) / 1000),
+  };
+}
+
+/* ───────────────────────── what the web can see ─────────────────────────
+ * Only public/ is served. The editor says so for the open file, and "Check what
+ * is public" proves it from outside (App\Fleet\ExposureCheck).
+ */
+// The edge's own rule (agent: create.go secretPath): never served, even in public/.
+const EDGE_BLOCKED = /(^|\/)\.|\.(env|sql|sqlite|sqlite3|db|log|bak|old|orig|swp|save|pem|key)$|\/(composer\.(json|lock)|package(-lock)?\.json|artisan|phpunit\.xml|auth\.json)$/i;
+
+function visibility(path) {
+  if (!path || path.includes('@')) return null;
+  if (path === '/public' || path.startsWith('/public/')) {
+    const url = path.slice('/public'.length) || '/';
+    if (url !== '/' && EDGE_BLOCKED.test(url) && !url.startsWith('/.well-known/')) {
+      return { kind: 'blocked', label: 'In public/, but never served', title: 'This name is refused at the edge (a dotfile, dump, log or key): visitors get 404.' };
+    }
+    return { kind: 'public', label: `Public: ${url}`, url: SITE.url + url, title: `Served to anyone at ${SITE.url}${url}` };
+  }
+  if (/(^|\/)\.env(\.|$)/.test(path) || /\.env$/.test(path)) {
+    return { kind: 'secret', label: 'Private: never served', title: 'Settings and secrets. Outside public/, so never served - and refused at the edge by name as well.' };
+  }
+  return { kind: 'private', label: 'Private', title: 'Outside public/: part of the app, never served to visitors.' };
+}
+
+function paintVisibility(path) {
+  const v = visibility(path);
+  const el = $('sbVis');
+  el.replaceChildren();
+  el.className = v ? v.kind : '';
+  if (!v) return;
+  const icon = document.createElement('i');
+  icon.className = `ci ${v.kind === 'public' ? 'ci-globe' : 'ci-lock'}`;
+  icon.setAttribute('aria-hidden', 'true');
+  el.append(icon, document.createTextNode(v.label));
+  el.title = v.title;
+}
+
+async function checkExposure({ show = true } = {}) {
+  if (show) status('Asking the live site for its private files…');
+  const res = await apiAt(SITE.exposureUrl, 'GET');
+  if (!res.ok) {
+    if (show) status(res.hint || 'The check could not run.', true);
+    return res;
+  }
+  const failed = res.results.filter((r) => !r.ok);
+  if (show) {
+    status(res.passed ? `Nothing private is served (${res.checked} paths asked)` : `${failed.length} path(s) give something away`, !res.passed);
+    await ask(res.passed
+      ? `Only public/ is public.\n\nThe live site was asked, from outside, for ${res.checked} paths a leak would take - .env and its variants, .git, logs, databases and dumps, project files and ways out of public/. Every one was refused or gave nothing away, and no answer held the site's own secrets.`
+      : `These paths give something away:\n\n${failed.map((r) => `${r.path} (HTTP ${r.status}): ${r.why}`).join('\n')}\n\nMove or delete them so they are not in public/.`,
+    { okLabel: 'Close' });
+  }
+  return { ok: true, passed: res.passed, checked: res.checked, failed: failed.map((r) => ({ path: r.path, status: r.status, why: r.why })) };
+}
+
+$('btnExposure').addEventListener('click', () => checkExposure());
+
+/* ───────────────────────── replace across files ─────────────────────────
+ * VS Code's Replace All: every match of the search, in every file it was
+ * found in, replaced and saved in ONE batch - one version, so the whole
+ * replace is undone by restoring one version. Files that changed since they
+ * were read are a conflict, and then nothing is written.
+ */
+const escapeRegExp = (t) => t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+async function replaceAcross(query, replacement, { caseSensitive = false, confirm = true, scope = '/' } = {}) {
+  if (typeof query !== 'string' || query.length < 2 || typeof replacement !== 'string') {
+    return { ok: false, error: 'invalid', hint: 'search for at least 2 characters and give a replacement string' };
+  }
+  const found = await searchSite(query);
+  if (!found.ok) return found;
+  const paths = [...new Set(found.hits.map((h) => h.path))].filter((p) => scope === '/' || p.startsWith(`${scope}/`));
+  if (!paths.length) return { ok: true, files: 0, replacements: 0 };
+  const read = await Promise.all(paths.map((p) => api('GET', { read: 1, path: p })));
+  const re = new RegExp(escapeRegExp(query), caseSensitive ? 'g' : 'gi');
+  let count = 0;
+  const files = [];
+  read.forEach((r, i) => {
+    if (!r.ok) return;
+    const n = (r.content.match(re) || []).length;
+    if (!n) return;
+    count += n;
+    files.push({ path: paths[i], content: r.content.replace(re, () => replacement), expect: r.revision });
+  });
+  if (!files.length) return { ok: true, files: 0, replacements: 0 };
+  if (confirm && !(await ask(`Replace ${count} occurrence${count === 1 ? '' : 's'} of "${query}" across ${files.length} file${files.length === 1 ? '' : 's'} with "${replacement}"?\n\nAll of them are saved as one version, which History can undo.`, { okLabel: 'Replace' }))) {
+    return { ok: false, error: 'cancelled', hint: 'Nothing was replaced.' };
+  }
+  const res = await window.cic.writeMany(files, { message: `replace "${query.slice(0, 60)}" with "${replacement.slice(0, 60)}"` });
+  if (!res.ok) return res;
+  status(`Replaced ${count} in ${files.length} file${files.length === 1 ? '' : 's'}`);
+  return { ok: true, files: files.length, replacements: count, written: res.written.map((w) => w.path), syntaxErrors: res.syntaxErrors };
+}
+
+$('btnReplaceAll').addEventListener('click', async () => {
+  const res = await replaceAcross($('searchInput').value.trim(), $('replaceInput').value, { scope: searchScope });
+  if (res.ok) showSearch($('searchInput').value);
+  else if (res.error !== 'cancelled') status(res.hint || res.error, true);
+});
+
+/* ───────────────────────── Quick Open and the Command Palette ─────────────────────────
+ * ⌘P / Ctrl+P finds a file by any part of its path; ⌘⇧P / Ctrl+Shift+P, or ">"
+ * typed first, runs a command - one input, as in VS Code.
+ */
+let quickPaths = null;
+let quickAt = 0;
+let quickItems = [];
+let quickIndex = 0;
+
+async function quickPathList() {
+  if (!quickPaths || Date.now() - quickAt > 30_000) {
+    const r = await apiAt(SITE.pathsUrl, 'GET');
+    if (r.ok) {
+      quickPaths = r.paths;
+      quickAt = Date.now();
+    }
+  }
+  return quickPaths ?? [];
+}
+
+/* Every character of the query, in order. Matches in the file name, at the
+   start of a word and next to each other count for more, as in VS Code. */
+function fuzzyScore(query, path) {
+  const q = query.toLowerCase().replace(/\s+/g, '');
+  const p = path.toLowerCase();
+  const nameStart = p.lastIndexOf('/') + 1;
+  let score = 0;
+  let j = 0;
+  let prev = -2;
+  const hits = [];
+  for (let i = 0; i < p.length && j < q.length; i++) {
+    if (p[i] !== q[j]) continue;
+    score += 1 + (i >= nameStart ? 3 : 0) + (i === prev + 1 ? 4 : 0) + ('/._-'.includes(p[i - 1] ?? '/') ? 3 : 0);
+    hits.push(i);
+    prev = i;
+    j++;
+  }
+  return j === q.length ? { score: score - p.length * 0.02, hits } : null;
+}
+
+function quickCommands() {
+  return [
+    { label: 'File: New File…', run: () => startCreate('file') },
+    { label: 'File: New Folder…', run: () => startCreate('folder') },
+    { label: 'File: Save', keys: K('⌘S', 'Ctrl+S'), run: () => active && save(active) },
+    { label: 'View: Collapse Folders in Explorer', run: () => collapseAll() },
+    { label: 'Go to Symbol in Editor…', keys: K('⇧⌘O', 'Ctrl+Shift+O'), run: () => { editor.focus(); editor.getAction('editor.action.quickOutline')?.run(); } },
+    { label: 'Format Document', keys: K('⇧⌥F', 'Shift+Alt+F'), run: () => { editor.focus(); editor.getAction('editor.action.formatDocument')?.run(); } },
+    { label: 'View: Toggle Terminal', run: () => showPanel('terminal') },
+    { label: 'View: Show Logs', run: () => showPanel('logs') },
+    { label: 'Search: Find in Files', keys: K('⇧⌘F', 'Ctrl+Shift+F'), run: () => findInFolder('/') },
+    { label: 'Database: Show Tables', run: () => setMode('db') },
+    { label: 'History: Show Versions', run: () => setMode('history') },
+    { label: 'Preferences: Switch Theme', run: () => document.querySelector('[data-theme-toggle]')?.click() },
+    { label: 'Site: Open in Browser', run: () => window.open(SITE.url, '_blank', 'noopener') },
+    { label: 'Help: Show the Agent API (cic.help)', run: () => { showPanel('terminal'); termLine(HELP, 't-dim'); } },
+  ];
+}
+
+async function openQuick(prefix = '') {
+  $('quickOpen').hidden = false;
+  $('quickInput').value = prefix;
+  $('quickInput').focus();
+  await renderQuick();
+}
+
+function closeQuick(refocus = true) {
+  $('quickOpen').hidden = true;
+  if (refocus) editor.focus();
+}
+
+async function renderQuick() {
+  const value = $('quickInput').value;
+  const list = $('quickList');
+  if (value.startsWith('>')) {
+    const q = value.slice(1).trim();
+    quickItems = quickCommands()
+      .map((c) => ({ ...c, m: q ? fuzzyScore(q, c.label) : { score: 0, hits: [] } }))
+      .filter((c) => c.m)
+      .sort((a, b) => b.m.score - a.m.score);
+  } else {
+    const paths = await quickPathList();
+    if ($('quickInput').value !== value) return; // typed on while the list loaded
+    const q = value.trim();
+    const recent = [...tabs.keys()].filter((p) => !p.includes('@'));
+    quickItems = (q
+      ? paths.map((p) => ({ path: p, m: fuzzyScore(q, p) })).filter((x) => x.m).sort((a, b) => b.m.score - a.m.score)
+      : [...new Set([...recent, ...paths])].map((p) => ({ path: p, m: { score: 0, hits: [] } })))
+      .slice(0, 60)
+      .map((x) => ({ label: baseName(x.path), detail: parentOf(x.path).slice(1), path: x.path, m: x.m, run: () => openFile(x.path) }));
+  }
+  quickIndex = 0;
+  list.replaceChildren();
+  if (!quickItems.length) {
+    const empty = document.createElement('div');
+    empty.className = 'quick-empty';
+    empty.textContent = value.startsWith('>') ? 'No matching commands' : 'No matching files';
+    list.append(empty);
+    return;
+  }
+  quickItems.forEach((item, i) => {
+    const row = document.createElement('div');
+    row.className = 'quick-row' + (i === 0 ? ' on' : '');
+    row.id = `quick-${i}`;
+    row.setAttribute('role', 'option');
+    row.setAttribute('aria-selected', String(i === 0));
+    if (item.path) {
+      const img = document.createElement('img');
+      img.className = 'ic';
+      img.alt = '';
+      img.width = img.height = 16;
+      const src = iconFor({ name: item.label, dir: false }, false);
+      if (src) img.src = src;
+      row.append(img);
+    }
+    // The matched characters of the name in bold; names are data, so text nodes only.
+    const label = document.createElement('span');
+    label.className = 'quick-label';
+    const offset = item.path ? item.path.length - item.label.length : 0;
+    const hits = new Set(item.m.hits.map((h) => h - offset));
+    [...item.label].forEach((ch, k) => {
+      if (hits.has(k)) {
+        const b = document.createElement('b');
+        b.textContent = ch;
+        label.append(b);
+      } else {
+        label.append(document.createTextNode(ch));
+      }
+    });
+    row.append(label);
+    if (item.detail || item.keys) {
+      const d = document.createElement('span');
+      d.className = 'quick-detail';
+      d.textContent = item.detail || item.keys;
+      row.append(d);
+    }
+    row.addEventListener('mousedown', (e) => { e.preventDefault(); runQuick(i); });
+    list.append(row);
+  });
+  $('quickInput').setAttribute('aria-activedescendant', 'quick-0');
+}
+
+function moveQuick(delta) {
+  if (!quickItems.length) return;
+  const rows = $('quickList').querySelectorAll('.quick-row');
+  rows[quickIndex]?.classList.remove('on');
+  rows[quickIndex]?.setAttribute('aria-selected', 'false');
+  quickIndex = (quickIndex + delta + quickItems.length) % quickItems.length;
+  rows[quickIndex]?.classList.add('on');
+  rows[quickIndex]?.setAttribute('aria-selected', 'true');
+  rows[quickIndex]?.scrollIntoView({ block: 'nearest' });
+  $('quickInput').setAttribute('aria-activedescendant', `quick-${quickIndex}`);
+}
+
+async function runQuick(i = quickIndex) {
+  const item = quickItems[i];
+  if (!item) return;
+  closeQuick(false);
+  await item.run();
+}
+
+$('quickInput').addEventListener('input', () => renderQuick());
+$('quickInput').addEventListener('keydown', (e) => {
+  if (e.key === 'ArrowDown') { e.preventDefault(); moveQuick(1); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); moveQuick(-1); }
+  else if (e.key === 'Enter') { e.preventDefault(); runQuick(); }
+  else if (e.key === 'Escape') { e.preventDefault(); closeQuick(); }
+});
+$('quickInput').addEventListener('blur', () => setTimeout(() => {
+  if (!$('quickOpen').contains(document.activeElement)) closeQuick(false);
+}, 0));
+// Capture phase, like ⌘S: before Monaco and before the browser's own ⌘P (print).
+document.addEventListener('keydown', (e) => {
+  const mod = IS_MAC ? e.metaKey : e.ctrlKey;
+  if (!mod || e.altKey) return;
+  const key = e.key.toLowerCase();
+  if (key === 'p') {
+    e.preventDefault();
+    e.stopPropagation();
+    openQuick(e.shiftKey ? '>' : '');
+  } else if (key === 'f' && e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    findInFolder('/');
+  } else if (key === 'o' && e.shiftKey) {
+    // Go to Symbol in the file: Monaco's quick outline, fed by Phpactor for PHP.
+    e.preventDefault();
+    e.stopPropagation();
+    editor.focus();
+    editor.getAction('editor.action.quickOutline')?.run();
+  } else if (key === 'b' && !e.shiftKey) {
+    e.preventDefault();
+    e.stopPropagation();
+    document.querySelector('.workbench')?.classList.toggle('no-sidebar');
+  }
+}, true);
 
 async function refreshDir(path) {
   if (listings.has(path) || path === '/') await loadDir(path);
@@ -455,7 +1354,10 @@ function paint() {
 function renderTabs() {
   const bar = $('tabs');
   bar.replaceChildren();
+  // The explorer's unsaved dots follow the tabs, without redrawing the tree.
+  document.querySelectorAll('#tree .node.dirty').forEach((n) => { if (!tabs.get(n.dataset.path)?.dirty) n.classList.remove('dirty'); });
   for (const [path, t] of tabs) {
+    if (t.dirty) document.querySelector(`#tree .node[data-path="${CSS.escape(path)}"]`)?.classList.add('dirty');
     // A container holding two sibling controls - the tab itself and its
     // close button - not a tab with a button inside it: nested interactive
     // controls are unreachable for screen readers (axe: nested-interactive).
@@ -488,7 +1390,43 @@ function renderTabs() {
 
     el.append(name, x);
     el.addEventListener('click', () => show(path));
+    // Middle-click closes, and right-click has VS Code's tab menu.
+    el.addEventListener('auxclick', (e) => { if (e.button === 1) { e.preventDefault(); closeTab(path); } });
+    el.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+      const keys = [...tabs.keys()];
+      const at = keys.indexOf(path);
+      showMenu(e.clientX, e.clientY, [
+        [
+          { label: 'Close', run: () => closeTab(path) },
+          { label: 'Close Others', disabled: keys.length < 2, run: () => closeMany(keys.filter((k) => k !== path)) },
+          { label: 'Close to the Right', disabled: at === keys.length - 1, run: () => closeMany(keys.slice(at + 1)) },
+          { label: 'Close Saved', run: () => closeMany(keys.filter((k) => !tabs.get(k)?.dirty)) },
+          { label: 'Close All', run: () => closeMany(keys) },
+        ],
+        path.includes('@') ? [] : [
+          { label: 'Copy Path', keys: K('⌥⌘C', 'Shift+Alt+C'), run: () => copyText(`/var/www/html${path}`, 'path') },
+          { label: 'Copy Relative Path', keys: K('⌥⇧⌘C', 'Ctrl+Shift+Alt+C'), run: () => copyText(path.slice(1), 'relative path') },
+        ],
+        path.includes('@') ? [] : [{ label: 'Reveal in Explorer View', run: async () => { await revealInTree(path); focusedPath = path; renderTree().then(() => focusNode(path)); } }],
+      ], name);
+    });
     bar.append(el);
+  }
+}
+
+/* Close several tabs; unsaved ones are asked about once, together, never with confirm(). */
+async function closeMany(paths) {
+  const dirty = paths.filter((p) => tabs.get(p)?.dirty);
+  for (const p of paths.filter((q) => !tabs.get(q)?.dirty)) closeTab(p);
+  if (!dirty.length) return;
+  const names = dirty.map((p) => baseName(p)).join(', ');
+  if (await ask(`${dirty.length === 1 ? `${names} has` : `${dirty.length} files have`} unsaved changes (${names}). Close ${dirty.length === 1 ? 'it' : 'them'} and discard the changes?`, { okLabel: 'Discard' })) {
+    for (const p of dirty) {
+      const t = tabs.get(p);
+      if (t) t.dirty = false;
+      closeTab(p);
+    }
   }
 }
 
@@ -499,7 +1437,7 @@ function show(path) {
 
   $('empty').hidden = has;
   const isPreview = Boolean(has && t.preview);
-  const isMd = Boolean(has && !t.preview && /\.(md|markdown)$/i.test(path));
+  const isMd = Boolean(EXT.markdown && has && !t.preview && /\.(md|markdown)$/i.test(path));
   $('btnMdPreview').hidden = !isMd;
   $('btnMdPreview').setAttribute('aria-pressed', String(Boolean(isMd && t.mdPreview)));
   $('btnMdPreview').textContent = isMd && t.mdPreview ? 'Edit' : 'Preview';
@@ -533,6 +1471,7 @@ function show(path) {
   $('winTitle').textContent = has ? `${baseName(path)} — ${SITE.id}` : SITE.id;
   document.title = has ? `${baseName(path)} — ${SITE.id}` : `${SITE.id} — codeinchrome`;
   $('sbRev').textContent = has && t.revision ? `rev ${t.revision.slice(0, 7)}` : '';
+  paintVisibility(has ? path : null);
 
   const conflict = has && t.conflict;
   $('conflict').hidden = !conflict;
@@ -541,7 +1480,12 @@ function show(path) {
   renderTabs();
   paint();
   document.querySelectorAll('.node.active').forEach((n) => n.classList.remove('active'));
-  document.querySelector(`.node[data-path="${CSS.escape(path || '')}"]`)?.classList.add('active');
+  const row = document.querySelector(`.node[data-path="${CSS.escape(path || '')}"]`);
+  row?.classList.add('active');
+  row?.scrollIntoView({ block: 'nearest' });
+  // explorer.autoReveal, as VS Code: the file shown is shown in the tree too -
+  // unless someone is typing into the tree.
+  if (has && !t.version && !row && !inlineEdit && !path.includes('@')) revealInTree(path);
 }
 
 async function openFile(path) {
@@ -643,6 +1587,7 @@ async function save(path = active, { overwrite = false } = {}) {
   const res = await api('PUT', {}, { path, content: t.content, expect });
 
   if (res.ok) {
+    lastWriteAt = Date.now();
     t.saved = t.content;
     t.revision = res.revision;
     t.dirty = false;
@@ -824,18 +1769,8 @@ $('btnRefresh').addEventListener('click', async () => {
   renderTree();
   status('Refreshed');
 });
-$('btnNew').addEventListener('click', async () => {
-  const path = await ask('New file path, relative to the site root:', {
-    input: 'app/',
-    okLabel: 'Create',
-    validate: (v) => (!v.trim() || v.trim().endsWith('/') ? 'Give it a file name.' : null),
-  });
-  if (!path) return;
-  const res = await createFile(path.trim());
-  if (!res.ok) {
-    status(res.status === 409 ? `${norm(path)} already exists` : `${norm(path)}: ${res.hint}`, true);
-  }
-});
+$('btnNew').addEventListener('click', () => startCreate('file'));
+$('btnCollapse').addEventListener('click', () => collapseAll());
 $('btnTheirs').addEventListener('click', () => loadTheirs(active));
 $('btnMine').addEventListener('click', () => save(active, { overwrite: true }));
 
@@ -850,7 +1785,10 @@ function setMode(next) {
   $('modeFiles').classList.toggle('on', next === 'files');
   $('modeDb').classList.toggle('on', next === 'db');
   $('modeHistory').classList.toggle('on', next === 'history');
+  $('modeExt').classList.toggle('on', next === 'ext');
   $('historySide').hidden = next !== 'history';
+  $('extSide').hidden = next !== 'ext';
+  if (next === 'ext') renderExtensions();
   if (next === 'history') loadHistory();
   $('tree').hidden = next !== 'files';
   $('filesHead').hidden = next !== 'files';
@@ -1052,6 +1990,70 @@ async function runSql(sql, { write = false, interactive = true } = {}) {
 $('modeFiles').addEventListener('click', () => setMode('files'));
 $('modeDb').addEventListener('click', () => setMode('db'));
 $('modeHistory').addEventListener('click', () => setMode('history'));
+$('modeExt').addEventListener('click', () => setMode('ext'));
+$('btnExtReload').addEventListener('click', () => { saveDrafts(); location.reload(); });
+
+/* ───────────────────────── extensions ─────────────────────────
+ * The built-ins, as VS Code's Extensions view lists them (extensions.js).
+ * A switch applies at the next load; until then the view says so. */
+function renderExtensions() {
+  const list = $('extList');
+  list.replaceChildren();
+  const all = listExtensions(EXT);
+  for (const ext of all) {
+    const li = document.createElement('li');
+    li.className = 'ext';
+    li.dataset.ext = ext.id;
+    const head = document.createElement('div');
+    head.className = 'ext-head';
+    const name = document.createElement('span');
+    name.className = 'ext-name';
+    name.textContent = ext.name;
+    head.append(name);
+    if (ext.core) {
+      const tag = document.createElement('span');
+      tag.className = 'ext-tag';
+      tag.textContent = 'Built in';
+      head.append(tag);
+    } else {
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'ext-switch';
+      sw.setAttribute('role', 'switch');
+      sw.setAttribute('aria-checked', String(ext.enabled));
+      sw.setAttribute('aria-label', `${ext.name}: ${ext.enabled ? 'on' : 'off'}`);
+      sw.addEventListener('click', () => {
+        setExtension(ext.id, !ext.enabled);
+        renderExtensions();
+      });
+      head.append(sw);
+    }
+    const what = document.createElement('p');
+    what.className = 'ext-what';
+    what.textContent = ext.what;
+    const by = document.createElement('p');
+    by.className = 'ext-by';
+    by.textContent = `${ext.by} · ${ext.licence}`;
+    if (ext.url) {
+      const a = document.createElement('a');
+      a.href = ext.url;
+      a.target = '_blank';
+      a.rel = 'noopener noreferrer';
+      a.textContent = 'Project';
+      by.append(' · ', a);
+    }
+    if (ext.enabled !== ext.running) {
+      const note = document.createElement('p');
+      note.className = 'ext-pending';
+      note.textContent = ext.enabled ? 'On after reload' : 'Off after reload';
+      li.append(head, what, by, note);
+    } else {
+      li.append(head, what, by);
+    }
+    list.append(li);
+  }
+  $('extReload').hidden = !all.some((e) => e.enabled !== e.running);
+}
 $('btnHistoryRefresh').addEventListener('click', () => loadHistory());
 $('btnRestoreVersion').addEventListener('click', () => {
   const t = tabs.get(active);
@@ -1139,14 +2141,9 @@ function splitArgs(line) {
 async function runCommand(tool, args, { confirm = false, interactive = true } = {}) {
   showPanel('terminal');
   termLine(`$ ${tool} ${args.join(' ')}`, 't-cmd');
-  let res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm });
-  // One command at a time per site. If another is finishing (a background
-  // lookup, a migration someone started), wait for it rather than fail.
-  for (let i = 0; i < 10 && res.status === 409 && res.error === 'busy'; i++) {
-    if (i === 0) termLine('Another command is running; waiting for it to finish…', 't-dim');
-    await new Promise((r) => setTimeout(r, 1500));
-    res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm });
-  }
+  let res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm }, {
+    onBusy: () => termLine('Another command is running; waiting for it to finish…', 't-dim'),
+  });
 
   if (res.status === 409 && res.error === 'needs_confirm' && interactive) {
     const yes = await ask(`"${tool} ${args[0]}" destroys data in this site. Run it?`, { okLabel: 'Run it' });
@@ -1162,10 +2159,18 @@ async function runCommand(tool, args, { confirm = false, interactive = true } = 
     const r = res.result;
     termLine(`${r.timedOut ? 'stopped at the time limit' : `exit ${r.exitCode}`} · ${(r.elapsedMs / 1000).toFixed(1)} s${r.truncated ? ' · output truncated' : ''}`,
       r.exitCode === 0 ? 't-dim' : 't-err');
-    // make:* and composer write files; show them.
+    // For code rather than eyes: the output without colour codes, and the
+    // files a make:* command created ("Model [app/Models/Item.php] created").
+    r.text = (r.output || '').replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+    const created = [...r.text.matchAll(/\[([^\]\n]+\.[a-z]+)\] created/g)].map((m) => `/${m[1].replace(/^\/+/, '')}`);
+    if (created.length) res.created = created;
+    // make:* and composer write files; show them - in the background, so the
+    // caller does not wait for the tree.
     if (r.exitCode === 0 && (tool === 'composer' || /^make:/.test(args[0]))) {
-      for (const dir of ['/', ...expanded]) await loadDir(dir);
-      renderTree();
+      (async () => {
+        for (const dir of ['/', ...expanded]) await loadDir(dir);
+        renderTree();
+      })();
     }
   } else {
     termLine(res.hint || res.error || 'failed', 't-err');
@@ -1214,18 +2219,89 @@ document.addEventListener('keydown', (e) => {
 
 /* ───────────────────────── agent API ───────────────────────── */
 
-const HELP = `window.cic — drive this editor from code. Every call returns the server's answer:
-  ok (the verdict), plus error and hint when ok is false. Nothing is paraphrased.
+const HELP = `window.cic — build this LIVE Laravel site from code. This page IS the site's editor:
+work here, by running JavaScript in this page. Never write the app on your own computer -
+nothing local reaches the site. Every save is live at once, and every save is a version.
+
+FAST PATH - the fewest calls (each is one round trip; batch everything you can):
+  0. await cic.overview()                          what the app already has, in one call
+  1. await cic.run('artisan', ['make:model', 'Item', '-mcr'])   scaffold with make:* (no --force needed)
+  2. await cic.writeMany({ '/app/Models/Item.php': '...', '/routes/web.php': '...', ... })
+                                                   every new or rewritten file in ONE call
+  3. await cic.run('artisan', ['migrate'])          run migrations (forced for you)
+  4. await cic.request('/items')                    check a page as a visitor -> { status, body }
+  5. await cic.logs('app', 40)                      the error behind a 500 (debug pages are off)
+  Small change to an existing file: cic.edit(path, { find, replace }) - never resend it whole.
+  Read several files at once: await cic.readMany(['/routes/web.php', '/app/Models/User.php']).
+  The site is a standard Laravel app with Blade and MySQL (already configured in .env).
+  There is no Node here, so assets are NOT built: do not use @vite in a layout (it fails
+  with "Vite manifest not found"). Use a CSS file in /public/css, or a CDN stylesheet.
+
+Every call returns the server's answer: ok (the verdict), plus error and hint when ok is
+false. Nothing is paraphrased.
 
   cic.site                     { id, domain, url }
   cic.ls(path = '/')           list a directory                 -> { ok, listing }
-  cic.read(path)               read a file and its revision     -> { ok, content, revision }
+  cic.view(path, { from, to, match }) READ a file as an agent: numbered lines, as many as a
+                               browser tool shows in full (~900 characters). The LAST line says which
+                               lines you got and the next call, e.g. [lines 1-24 of 60 - more:
+                               cic.view('/x.php', { from: 25 })] - no such line means the answer was
+                               cut off. Every equals sign shown as '＝', long base64 hidden - so browser
+                               tools do not block or cut off the answer. match: only the lines
+                               that match, e.g. { match: 'function|Route::' } to learn a file fast.
+                               -> { ok, lines, next, text }. Copying from it is safe: cic.edit and
+                               cic.writeMany turn '＝' back into a real equals sign.
+  cic.eval(php)                run PHP in the site's booted app, like tinker; return a value to
+                               see it: cic.eval('return App\\Models\\User::count();')
+                               -> { ok, output, exitCode }
+  cic.read(path)               the exact content and its revision -> { ok, content, revision }
+                               (for code that uses the content; to LOOK at a file use view)
+  cic.readMany(paths)          several files in parallel -> { ok, files: { path: content }, errors }
+  cic.overview()               START HERE: what the app has, in one call - Laravel and PHP versions,
+                               packages, models, controllers, migrations, views, tables, routes/web.php
   cic.write(path, content, { expect })
                                save a file. expect defaults to the last revision this page
                                saw for that path; if the file changed since, NOTHING is
                                written and you get status 409 / error "conflict". Pass
                                expect: 'absent' to create only if missing, or '' to write
                                unconditionally (the result then says so in "note").
+  cic.writeMany(files, { message })
+                               MANY files in ONE call and ONE version - the fast way to build.
+                               files: { '/app/Models/Item.php': '<?php ...', ... } or
+                               [{ path, content, expect }]. All are checked before any is
+                               written: one bad path or conflict and NOTHING is written
+                               (the answer names the file). -> { ok, written: [{ path, revision,
+                               lint }], syntaxErrors } - PHP files are checked with php -l as they
+                               are written: syntaxErrors maps a path to "line N: message".
+                               WRITE PHP INSIDE String.raw\`...\` - a plain template literal
+                               eats backslashes: App\\Models becomes AppModels.
+  cic.edit(path, edits)        change part of a file without resending it. edits: { find,
+                               replace, all? } or a list, applied in order; each find must
+                               appear exactly once (or pass all: true). Any failure writes
+                               nothing. -> { ok, revision }
+  cic.request(path, { method, json, form, headers, body, follow })
+                               ask the LIVE site, as a visitor, from its own host (no CORS):
+                               -> { ok, status, location, headers, cookies, body, json, ms }.
+                               headers: a plain object, lower-case names. location: a redirect's
+                               target as a path ('/items/3'). Redirects are NOT followed unless
+                               follow: true (then redirects lists the hops). Cookies are kept
+                               in the page between calls - cookies lists their NAMES only - and
+                               POST/PUT/PATCH/DELETE send Laravel's X-XSRF-TOKEN from them, so a
+                               form works: cic.request('/items', { method: 'POST', form: {...},
+                               follow: true }). Update/delete forms: form: { _method: 'PUT', ... }.
+                               as: USER_ID signs in as one of the SITE's users (its own
+                               session store, no password): cic.request('/dashboard', { as: 1 }).
+                               Headers you may set: accept, accept-language, content-type,
+                               cookie, authorization, x-requested-with, x-csrf-token,
+                               x-xsrf-token, if-none-match, if-modified-since, user-agent.
+                               A request within 2 s of a PHP save waits for Apache to see it.
+                               cic.request.reset() forgets the cookies (signs out).
+  cic.lookUrl(path, { as, session }) SEE a page as one of the site's users - even behind its
+                               login: an address, valid 10 minutes, to open in a new tab and take a
+                               screenshot of. -> { ok, url }. Shown, not run: no script, no forms.
+                               session: true uses the login cic.request holds instead of as.
+  cic.show(text, part)         READ any long text (a page's HTML, a command's output) safely, in
+                               ~900-character parts; the last line says which part, and the next call.
   cic.rm(path)                 delete a file (not recursive)    -> { ok, deleted }
                                It goes to the bin and can be restored.
   cic.mkdir(path)              create a folder (and its parents)
@@ -1235,6 +2311,22 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
                                delete a folder and all it holds; without confirm: 409
                                needs_confirm and NOTHING is deleted. Files go to the bin.
   cic.search(q)                case-insensitive text search     -> { ok, hits: [{ path, line, text }] }
+  cic.check({ as, session, max }) CHECK EVERY PAGE before you say "done": all GET routes without
+                               parameters, then every link on the site found in them (up to max,
+                               150), as a visitor - or signed in as the SITE's user { as: 1 } -
+                               and every error the app logged meanwhile.
+                               -> { ok, checked, problems: ['404 /x', '500 /y'], errors, unchecked }
+                               An app with no Laravel users (one shared password): sign in with
+                               cic.request (post its login form, follow: true), then
+                               cic.check({ session: true }) crawls with that login.
+  cic.exposure()               ask the LIVE site, from outside, for every path a leak would take
+                               (.env and variants, .git, logs, dumps, project files, ways out of
+                               public/) -> { ok, passed, checked, failed: [{ path, status, why }] }
+  cic.visibility(path)         is a file served? { kind: public|private|secret|blocked, label, url }
+                               Only public/ is served; .env and the rest never are.
+  cic.replaceAll(find, with, { caseSensitive })
+                               replace a text in every file that has it, saved as ONE version
+                               -> { ok, files, replacements, written, syntaxErrors }
                                (vendor, node_modules, storage, .env are not searched)
   cic.zip(from, to) / cic.unzip(archive, into)
                                archives stay inside the site; .env is never zipped;
@@ -1254,7 +2346,9 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
                                run ONE allow-listed command in the site's container:
                                tool 'artisan' (migrate, route:list, make:*, cache:clear, ...)
                                or 'composer' (require, remove, install, update, dump-autoload).
-                               -> { ok, result: { exitCode, output, truncated, timedOut } }
+                               -> { ok, created, result: { exitCode, text, output, truncated, timedOut } }
+                               text is the output without colour codes; created lists the files
+                               a make:* command made, e.g. ['/app/Models/Item.php'].
                                ok is false when the command exits non-zero; the output is
                                still in result. Destructive commands (migrate:fresh,
                                migrate:rollback, db:seed, key:generate) are refused with 409 /
@@ -1269,6 +2363,8 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
                                config, last error, logs, version-specific docs -> { ok, tools }
   cic.mcp.call(name, args)     run one, answered by the site's own app -> { ok, text, result }
                                e.g. cic.mcp.call('database-schema'), cic.mcp.call('search-docs', { queries: ['queues'] })
+  cic.extensions()             the editor's built-in extensions (the Extensions view): which are on,
+                               their project and licence -> { ok, extensions: [{ id, name, enabled, running }] }
   cic.php.status()             PHP IntelliSense: { initialized, capabilities, openPhpFiles, lastError }
   cic.php.complete(path, line, col)   PHP completions at a position (1-based) -> { ok, items: [{ label, kind, detail }] }
   cic.php.hover(path, line, col)      what the symbol there is, with its docs  -> { ok, text }
@@ -1293,7 +2389,133 @@ const HELP = `window.cic — drive this editor from code. Every call returns the
                                Database view to undo the import.
 
   Limits: text files only (binary files are refused rather than corrupted), 2 MB per file,
-  paths are confined to this site. Anything outside it is refused with one vague message.`;
+  paths are confined to this site. Anything outside it is refused with one vague message.
+
+  Storage: the plan's storage counts this site's files and database. Over it, uploads, unzip,
+  copy and db.import answer 507 "storage_full". User uploads belong in object storage:
+  composer require league/flysystem-aws-s3-v3 "^3.0", then set in .env: FILESYSTEM_DISK to s3,
+  and AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_BUCKET; for Cloudflare R2 also
+  AWS_DEFAULT_REGION to auto and AWS_ENDPOINT to your account's r2.cloudflarestorage.com address.
+  Ask the site's owner for the keys; never invent or print them.`;
+
+/* What an agent's browser tool will return: no key=value, no long base64. */
+// What a browser tool returns in full: Claude in Chrome shows exactly 1,000
+// characters and then "[TRUNCATED]" (measured 2026-09-24), less a margin for
+// the JSON an agent may wrap around the text.
+const VIEW_CHARS = 900;
+// A line longer than a page (minified HTML) is cut into page-sized pieces.
+const splitLong = (lines, chars = VIEW_CHARS) => lines.flatMap((l) => (l.length <= chars ? [l] : l.match(new RegExp(`.{1,${chars}}`, 'gs'))));
+const pageLines = (lines, chars = VIEW_CHARS) => {
+  const pages = [[]];
+  let used = 0;
+  for (const line of lines) {
+    if (pages.at(-1).length && used + line.length + 1 > chars) {
+      pages.push([]);
+      used = 0;
+    }
+    pages.at(-1).push(line);
+    used += line.length + 1;
+  }
+  return pages;
+};
+const agentSafe = (text) => String(text)
+  .replace(/[A-Za-z0-9+/]{40,}={0,2}/g, '[long value hidden]')
+  .replaceAll('=', '＝');
+/* ...and back: text copied from cic.view is written as it really was. */
+const fromView = (text) => (typeof text === 'string' ? text.replaceAll('＝', '=') : text);
+
+/* A file the agent changed on disk: keep the person's view truthful. */
+// When PHP last changed on disk. Apache caches compiled PHP and looks for
+// changes every 2 seconds (opcache.revalidate_freq), so a request sooner than
+// that can still run the old code - cic.request waits it out.
+let lastWriteAt = 0;
+
+function agentWrote(path, content, revision) {
+  lastWriteAt = Date.now();
+  seenRevision.set(path, revision);
+  const t = tabs.get(path);
+  if (t && !t.dirty && typeof content === 'string') {
+    Object.assign(t, { content, saved: content, revision, conflict: null });
+  } else if (t && t.dirty) {
+    t.conflict = 'This file was just changed by the agent. Your unsaved edits would overwrite that change.';
+  }
+  if (t && path === active) show(path);
+}
+
+/* cic.request: the site as a visitor sees it, with a cookie jar. */
+const cookieJar = new Map();
+let signedInAs = null;
+
+async function siteRequest(path, options = {}) {
+  if (typeof path !== 'string' || !path.startsWith('/')) {
+    return { ok: false, error: 'invalid', hint: 'path must start with /, e.g. cic.request("/items")' };
+  }
+  const settle = 2100 - (Date.now() - lastWriteAt);
+  if (settle > 0) await new Promise((r) => setTimeout(r, settle));
+  // as: a user id of the SITE's own app - signed in from its own session
+  // store, no password. The session then stays in the jar like any login.
+  if (options.as !== undefined && options.as !== signedInAs) {
+    const login = await apiAt(SITE.loginCookieUrl, 'POST', {}, { user: options.as, guard: options.guard ?? 'web' });
+    if (!login.ok) return login;
+    cookieJar.clear();
+    cookieJar.set(login.name, encodeURIComponent(login.value));
+    signedInAs = options.as;
+  }
+  const method = String(options.method ?? 'GET').toUpperCase();
+  const headers = { Accept: 'text/html,application/json;q=0.9,*/*;q=0.8', ...(options.headers ?? {}) };
+  let body = options.body ?? '';
+  if (options.json !== undefined) {
+    body = JSON.stringify(options.json);
+    headers['Content-Type'] = 'application/json';
+    headers.Accept = 'application/json';
+  } else if (options.form !== undefined) {
+    body = new URLSearchParams(options.form).toString();
+    headers['Content-Type'] = 'application/x-www-form-urlencoded';
+  }
+  if (cookieJar.size && !Object.keys(headers).some((k) => k.toLowerCase() === 'cookie')) {
+    headers.Cookie = [...cookieJar].map(([k, v]) => `${k}=${v}`).join('; ');
+  }
+  // What axios does for Laravel: echo the XSRF-TOKEN cookie on unsafe methods.
+  if (!['GET', 'HEAD', 'OPTIONS'].includes(method) && cookieJar.has('XSRF-TOKEN')) {
+    headers['X-XSRF-TOKEN'] = decodeURIComponent(cookieJar.get('XSRF-TOKEN'));
+  }
+  const res = await apiAt(SITE.requestUrl, 'POST', {}, { method, path, headers, body });
+  if (!res.ok) return res;
+  const r = res.response;
+  // Cookies go into the jar and stay there: their values are sessions and
+  // tokens, and an agent's browser tool refuses to return a result that
+  // carries them (measured: a whole test run's answer was blocked). Only
+  // their names come back.
+  const cookies = [];
+  for (const line of (r.headers['set-cookie'] ?? '').split('\n')) {
+    const m = line.match(/^\s*([^=;\s]+)=([^;]*)/);
+    if (!m) continue;
+    cookies.push(m[1]);
+    if (/;\s*max-age=0|;\s*expires=Thu, 01 Jan 1970/i.test(line)) cookieJar.delete(m[1]);
+    else cookieJar.set(m[1], m[2]);
+  }
+  delete r.headers['set-cookie'];
+  // A redirect's target as a path on this site, which is what a test checks.
+  let location = r.headers.location ?? null;
+  if (location) {
+    try {
+      const u = new URL(location, SITE.url);
+      if (u.host === new URL(SITE.url).host) location = u.pathname + u.search;
+    } catch { /* kept as sent */ }
+  }
+  let json;
+  if ((r.headers['content-type'] ?? '').includes('json')) {
+    try { json = JSON.parse(r.body); } catch { /* the body says what it is */ }
+  }
+  const out = { ok: true, status: r.status, location, headers: r.headers, cookies, body: r.body, json, truncated: r.truncated, ms: r.ms };
+  // follow: true - a redirect on this site is followed with a GET, as a
+  // browser does after a form post, so validation errors are on the page returned.
+  if (options.follow && location?.startsWith('/') && r.status >= 300 && r.status < 400 && (options.hops ?? 0) < 5) {
+    const next = await siteRequest(location, { follow: true, hops: (options.hops ?? 0) + 1 });
+    return { ...next, redirects: [{ status: r.status, location }, ...(next.redirects ?? [])] };
+  }
+  return out;
+}
 
 /* ───────────────────────── file manager ─────────────────────────
  * Folders, move, copy, upload, download, folder delete, search, zip, unzip.
@@ -1419,8 +2641,9 @@ async function showSearch(q) {
   $('tree').hidden = true;
   box.hidden = false;
   if (!res.ok) { box.append(note(res.hint, 0)); return; }
-  if (!res.hits.length) { box.append(note('No matches (dependencies, caches and .env are not searched).', 0)); return; }
-  for (const hit of res.hits) {
+  const hits = searchScope === '/' ? res.hits : res.hits.filter((h) => h.path.startsWith(`${searchScope}/`));
+  if (!hits.length) { box.append(note(`No matches${searchScope === '/' ? '' : ` in ${searchScope.slice(1)}/`} (dependencies, caches and .env are not searched).`, 0)); return; }
+  for (const hit of hits) {
     const row = document.createElement('div');
     row.className = 'node version';
     const nm = document.createElement('span');
@@ -1442,86 +2665,39 @@ async function showSearch(q) {
   }
 }
 
-function closeNodeMenu() {
+let menuReturn = null;
+function closeNodeMenu(refocus = false) {
   $('nodeMenu').hidden = true;
   $('nodeMenu').replaceChildren();
-}
-
-function openNodeMenu(entry, anchor) {
-  const menu = $('nodeMenu');
-  menu.replaceChildren();
-  const item = (label, fn) => {
-    const b = document.createElement('button');
-    b.type = 'button';
-    b.setAttribute('role', 'menuitem');
-    b.textContent = label;
-    b.addEventListener('click', async (e) => { e.stopPropagation(); closeNodeMenu(); await fn(); });
-    menu.append(b);
-  };
-  const p = entry.path;
-  item('Properties', async () => {
-    // What a hosting panel shows. Everything in a site belongs to the site's
-    // own user (www-data), set by the platform; there is nothing to chown.
-    const when = entry.mtime ? new Date(entry.mtime * 1000).toLocaleString() : 'unknown';
-    const size = entry.dir ? 'folder' : `${entry.size.toLocaleString()} bytes`;
-    await ask(`${p}\n\nPermissions: ${entry.mode} (owner www-data, the site's own user)\nSize: ${size}\nModified: ${when}`, { okLabel: 'Close' });
-  });
-  item('Rename / move…', async () => {
-    const to = await ask(`Move ${p} to:`, { input: p.slice(1), okLabel: 'Move', validate: (v) => (!v.trim() ? 'Give a path.' : null) });
-    if (to) movePath(p, to.trim());
-  });
-  item('Copy…', async () => {
-    const to = await ask(`Copy ${p} to:`, { input: p.slice(1) + (entry.dir ? '-copy' : '.copy'), okLabel: 'Copy' });
-    if (to) copyPath(p, to.trim());
-  });
-  if (entry.dir) {
-    item('New file here…', async () => {
-      const name = await ask(`New file in ${p}/:`, { input: '', okLabel: 'Create' });
-      if (name) createFile(`${p}/${name.trim()}`);
-    });
-    item('New folder here…', async () => {
-      const name = await ask(`New folder in ${p}/:`, { input: '', okLabel: 'Create' });
-      if (name) mkdirAt(`${p}/${name.trim()}`);
-    });
-    item('Upload here…', () => { uploadTarget = p; $('uploadInput').click(); });
-    item('Zip…', async () => {
-      const to = await ask(`Archive ${p}/ as:`, { input: p.slice(1) + '.zip', okLabel: 'Zip' });
-      if (to) zipPath(p, to.trim());
-    });
-  } else {
-    item('Download', () => downloadPath(p));
-    if (p.endsWith('.zip')) {
-      item('Unzip here…', async () => {
-        const into = await ask(`Extract ${p} into:`, { input: p.slice(1, -4), okLabel: 'Extract' });
-        if (into) unzipPath(p, into.trim());
-      });
-    }
-  }
-  item('Delete…', async () => {
-    if (entry.dir) {
-      if (await ask(`Delete the folder ${p}/ and everything in it? Its files go to the bin (History); dependencies and caches do not.`, { okLabel: 'Delete folder' })) {
-        deleteFolder(p, { confirm: true });
-      }
-    } else {
-      confirmDelete(p);
-    }
-  });
-  const r = anchor.getBoundingClientRect();
-  menu.style.top = `${r.bottom + 2}px`;
-  menu.style.left = `${Math.max(8, r.right - 180)}px`;
-  menu.hidden = false;
-  menu.querySelector('button')?.focus();
+  if (refocus) menuReturn?.focus?.();
+  menuReturn = null;
 }
 
 let uploadTarget = '/';
 document.addEventListener('click', (e) => { if (!$('nodeMenu').contains(e.target)) closeNodeMenu(); });
-document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeNodeMenu(); });
-$('btnNewFolder').addEventListener('click', async () => {
-  const path = await ask('New folder path, relative to the site root:', { input: 'app/', okLabel: 'Create',
-    validate: (v) => (!v.trim() ? 'Give it a name.' : null) });
-  if (path) mkdirAt(path.trim().replace(/\/$/, ''));
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('nodeMenu').hidden) closeNodeMenu(true); });
+// Right-click anywhere in the explorer: the item's menu, or the root's on empty space.
+$('tree').addEventListener('contextmenu', (e) => {
+  if (e.target.closest('input')) return;
+  e.preventDefault();
+  const node = e.target.closest('.node');
+  const entry = node ? entryAt(node.dataset.path) : null;
+  focusedPath = entry?.path ?? null;
+  showMenu(e.clientX, e.clientY, menuFor(entry), node ?? $('tree'));
 });
-$('btnUpload').addEventListener('click', () => { uploadTarget = parentOf(active ?? '/x') || '/'; $('uploadInput').click(); });
+// The site's own row (the workspace root, in VS Code terms) has the root's menu.
+document.querySelector('.side-site').addEventListener('contextmenu', (e) => {
+  e.preventDefault();
+  focusedPath = null;
+  showMenu(e.clientX, e.clientY, menuFor(null), $('tree'));
+});
+// Double-click on empty space: a new file at the root, as in VS Code.
+$('tree').addEventListener('dblclick', (e) => {
+  if (!e.target.closest('.node')) startCreate('file', '/');
+});
+$('btnNewFolder').addEventListener('click', () => startCreate('folder'));
+// Into the folder selected in the explorer (or the selected file's folder), as VS Code.
+$('btnUpload').addEventListener('click', () => { uploadTarget = targetDir(); $('uploadInput').click(); });
 $('uploadInput').addEventListener('change', async (e) => {
   const files = [...e.target.files];
   e.target.value = '';
@@ -1529,19 +2705,59 @@ $('uploadInput').addEventListener('change', async (e) => {
 });
 $('btnSearch').addEventListener('click', () => {
   const bar = $('searchBar');
+  searchScope = '/';
+  $('searchInput').placeholder = 'Search in files';
   bar.hidden = !bar.hidden;
   if (!bar.hidden) $('searchInput').focus();
   else { $('searchResults').hidden = true; $('tree').hidden = false; }
 });
 $('searchBar').addEventListener('submit', (e) => { e.preventDefault(); showSearch($('searchInput').value); });
 // Files dropped onto the explorer are uploaded to the folder they land on.
-$('tree').addEventListener('dragover', (e) => { e.preventDefault(); });
-$('tree').addEventListener('drop', (e) => {
+let dragHover = { dir: null, timer: 0 };
+const dropDirFor = (target) => {
+  const node = target.closest('.node');
+  if (!node || !node.dataset.path) return '/';
+  return node.classList.contains('dir') ? node.dataset.path : parentOf(node.dataset.path);
+};
+$('tree').addEventListener('dragover', (e) => {
   e.preventDefault();
-  const node = e.target.closest('.node');
-  let dir = '/';
-  if (node) dir = node.classList.contains('dir') ? node.dataset.path : parentOf(node.dataset.path);
-  if (e.dataTransfer?.files?.length) uploadFiles(dir || '/', [...e.dataTransfer.files]);
+  const internal = e.dataTransfer.types.includes(DRAG_TYPE);
+  e.dataTransfer.dropEffect = internal ? (e.altKey ? 'copy' : 'move') : 'copy';
+  const dir = dropDirFor(e.target);
+  if (dragHover.dir !== dir) {
+    clearTimeout(dragHover.timer);
+    dragHover = { dir, timer: 0 };
+    $('tree').querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
+    $('tree').querySelector(`.node[data-path="${CSS.escape(dir)}"]`)?.classList.add('drop-target');
+    // Hovering a closed folder opens it after half a second, as in VS Code.
+    if (dir !== '/' && !expanded.has(dir)) {
+      dragHover.timer = setTimeout(async () => {
+        expanded.add(dir);
+        if (!listings.has(dir)) await loadDir(dir);
+        renderTree();
+      }, 500);
+    }
+  }
+});
+$('tree').addEventListener('dragleave', (e) => {
+  if (!$('tree').contains(e.relatedTarget)) {
+    clearTimeout(dragHover.timer);
+    dragHover = { dir: null, timer: 0 };
+    $('tree').querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
+  }
+});
+$('tree').addEventListener('drop', async (e) => {
+  e.preventDefault();
+  clearTimeout(dragHover.timer);
+  const dir = dropDirFor(e.target);
+  dragHover = { dir: null, timer: 0 };
+  $('tree').querySelectorAll('.drop-target').forEach((n) => n.classList.remove('drop-target'));
+  const from = e.dataTransfer.getData(DRAG_TYPE);
+  if (from) {
+    await dropMove(from, dir, e.altKey);
+  } else if (e.dataTransfer?.files?.length) {
+    uploadFiles(dir || '/', [...e.dataTransfer.files]);
+  }
 });
 
 /* ───────────────────────── history & bin ─────────────────────────
@@ -1687,7 +2903,22 @@ async function confirmRestore(path, rev, at) {
 window.cic = Object.freeze({
   version: '1.0',
   site: Object.freeze({ id: SITE.id, domain: SITE.domain, url: SITE.url }),
-  help: () => HELP,
+  // cic.help('request') shows only the lines about one call or topic.
+  // Shaped like cic.view: pages of what a browser tool shows in full (about
+  // 1,000 characters), "=" as "＝" so the answer is not blocked as a query
+  // string. A simulated agent had cic.help('edit') refused whole.
+  help: (topic, page = 1) => {
+    let text = HELP;
+    if (topic) {
+      const hit = HELP.split(/\n(?=  \S)/).filter((b) => b.toLowerCase().includes(String(topic).toLowerCase()));
+      if (!hit.length) return `Nothing about "${topic}". cic.help() lists everything.`;
+      text = hit.join('\n');
+    }
+    const pages = pageLines(agentSafe(text).split('\n'));
+    const n = Math.min(Math.max(1, page), pages.length);
+    const more = n < pages.length ? `\n[page ${n} of ${pages.length}: cic.help(${topic ? JSON.stringify(topic) : 'null'}, ${n + 1}) for more]` : '';
+    return pages[n - 1].join('\n') + more;
+  },
 
   async ls(path = '/') {
     const res = await api('GET', { path: norm(path) });
@@ -1704,6 +2935,85 @@ window.cic = Object.freeze({
     return res;
   },
 
+  // Everything an agent needs to know before building, in ONE call: what the
+  // app already has and which versions it runs. Nothing is changed.
+  async overview() {
+    const names = async (dir) => {
+      const r = await api('GET', { path: dir });
+      return r.ok ? r.listing.entries.map((e) => (e.dir ? `${e.name}/` : e.name)) : [];
+    };
+    const [models, controllers, migrations, views, tables, files] = await Promise.all([
+      names('/app/Models'), names('/app/Http/Controllers'), names('/database/migrations'),
+      laravel.viewNames(), apiAt(SITE.dbTablesUrl, 'GET'),
+      window.cic.readMany(['/routes/web.php', '/composer.json', '/resources/views/welcome.blade.php']),
+    ]);
+    let composer = {};
+    try { composer = JSON.parse(files.files['/composer.json'] ?? '{}'); } catch { /* shown as is below */ }
+    return {
+      ok: true,
+      site: { id: SITE.id, url: SITE.url },
+      php: composer.require?.php, laravel: composer.require?.['laravel/framework'],
+      packages: Object.keys(composer.require ?? {}), devPackages: Object.keys(composer['require-dev'] ?? {}),
+      models, controllers, migrations, views,
+      tables: tables.ok ? tables.tables.map((t) => `${t.name} (~${t.rowsEstimate} rows)`) : [],
+      routesWeb: files.files['/routes/web.php'] != null ? agentSafe(files.files['/routes/web.php']) : null,
+      welcomeUsesVite: /@vite/.test(files.files['/resources/views/welcome.blade.php'] ?? ''),
+    };
+  },
+
+  // A file for READING by a browser-driving agent: numbered lines, "=" shown as
+  // "＝" and long base64-like values hidden. Browser tools refuse to return
+  // text that looks like cookies, query strings or base64 - which is most of
+  // any PHP file - and the agent then sees nothing at all. Copying from a view
+  // is safe: cic.edit and cic.writeMany turn "＝" back into "=".
+  //
+  // A page is as many lines as a browser tool shows in full (it cuts a result
+  // off at 1,000 characters, silently), so nothing is lost mid-line;
+  // `next` is where the next page starts. `match` returns only the lines that
+  // match (a RegExp or its source, case-insensitive) - learning a codebase is
+  // often `cic.view(path, { match: 'function|Route::' })`, not every line.
+  async view(path, { from = 1, to = Infinity, match = null, chars = VIEW_CHARS - 100 } = {}) {
+    const res = await api('GET', { read: 1, path: norm(path) });
+    if (!res.ok) return res;
+    seenRevision.set(norm(path), res.revision);
+    const lines = res.content.split('\n');
+    const re = match ? (match instanceof RegExp ? match : new RegExp(String(match), 'i')) : null;
+    const out = [];
+    let used = 0;
+    let n = Math.max(1, from);
+    for (; n <= Math.min(lines.length, to); n++) {
+      if (re && !re.test(lines[n - 1])) continue;
+      const line = `${String(n).padStart(4)}| ${agentSafe(lines[n - 1])}`;
+      if (out.length && used + line.length + 1 > chars) break;
+      out.push(line);
+      used += line.length + 1;
+    }
+    const last = Math.min(lines.length, to);
+    const next = n <= last ? n : null;
+    // The last line says what this page is, so a page cut short by a tool is
+    // noticed (no footer = not all of it), and names the next call.
+    const shown = out.length ? `lines ${out[0].trim().split('|')[0]}-${out.at(-1).trim().split('|')[0]} of ${lines.length}` : `no lines of ${lines.length}`;
+    const footer = `[${shown}${re ? ' matching' : ''} - ${next ? `more: cic.view(${JSON.stringify(norm(path))}, { from: ${next}${re ? ', match' : ''} })` : 'end of file'}]`;
+    return { ok: true, path: norm(path), lines: lines.length, next, text: `${out.join('\n')}\n${footer}` };
+  },
+
+  // Several files at once, in parallel -> { ok, files: { path: content }, errors: { path: hint } }.
+  async readMany(paths) {
+    const list = [...new Set((paths ?? []).map(norm))];
+    const results = await Promise.all(list.map((p) => api('GET', { read: 1, path: p })));
+    const files = {};
+    const errors = {};
+    results.forEach((res, i) => {
+      if (res.ok) {
+        seenRevision.set(list[i], res.revision);
+        files[list[i]] = res.content;
+      } else {
+        errors[list[i]] = res.hint ?? res.error;
+      }
+    });
+    return { ok: Object.keys(errors).length === 0, files, errors };
+  },
+
   async write(path, content, options = {}) {
     path = norm(path);
     if (typeof content !== 'string') {
@@ -1714,23 +3024,106 @@ window.cic = Object.freeze({
     const res = await api('PUT', {}, { path, content, expect });
 
     if (res.ok) {
-      seenRevision.set(path, res.revision);
       if (expect === '') {
         res.note = 'Written unconditionally: no revision was checked, so a concurrent change would have been overwritten. Read the file first, or pass expect.';
       }
-      // Keep the person's view truthful about what just happened on disk.
-      const t = tabs.get(path);
-      if (t && !t.dirty) {
-        Object.assign(t, { content, saved: content, revision: res.revision, conflict: null });
-      } else if (t && t.dirty) {
-        t.conflict = 'This file was just changed by the agent. Your unsaved edits would overwrite that change.';
-      }
-      if (t && path === active) show(path);
+      agentWrote(path, content, res.revision);
       await refreshAncestors(path);
       status(`Agent wrote ${path}`);
     }
     return res;
   },
+
+  // Many files in ONE call and ONE version. Accepts { path: content, ... } or
+  // [{ path, content, expect? }]. Checked together: if any file fails its
+  // check, nothing is written. An unset expect means "create or replace".
+  async writeMany(files, options = {}) {
+    const list = Array.isArray(files)
+      ? files.map((f) => ({ path: norm(f.path), content: fromView(f.content), expect: f.expect ?? '' }))
+      : Object.entries(files ?? {}).map(([path, content]) => ({ path: norm(path), content: fromView(content), expect: '' }));
+    if (!list.length || list.some((f) => typeof f.content !== 'string')) {
+      return { ok: false, error: 'invalid', hint: 'pass { "/path": "content", ... } or [{ path, content }] with string contents' };
+    }
+    const res = await apiAt(SITE.filesBatchUrl, 'PUT', {}, { files: list, message: options.message ?? '' });
+    if (res.ok) {
+      // PHP syntax errors, from php -l in the site's container: the files are
+      // written, but the caller should fix these before anything else.
+      const bad = res.written.filter((w) => w.lint && w.lint !== 'ok');
+      if (bad.length) res.syntaxErrors = Object.fromEntries(bad.map((w) => [norm(w.path), w.lint]));
+      const byPath = new Map(list.map((f) => [f.path, f.content]));
+      for (const w of res.written) agentWrote(norm(w.path), byPath.get(norm(w.path)), w.revision);
+      // One refresh per folder, not per file, and in the background: the
+      // files are saved, and the caller should not wait for the tree.
+      const oneEach = new Map(list.map((f) => [f.path.slice(0, f.path.lastIndexOf('/')) || '/', f.path]));
+      (async () => { for (const p of oneEach.values()) await refreshAncestors(p); })();
+      status(`Agent wrote ${res.written.length} files`);
+    }
+    return res;
+  },
+
+  // Change part of a file without sending all of it. edits: one { find,
+  // replace, all? } or a list, applied in order; each find must occur exactly
+  // once unless all: true. Any failure writes nothing.
+  async edit(path, edits, options = {}) {
+    path = norm(path);
+    const list = (Array.isArray(edits) ? edits : [edits])
+      .map((e) => ({ ...e, find: fromView(e?.find), replace: fromView(e?.replace ?? '') }));
+    const expect = options.expect !== undefined ? options.expect : (seenRevision.get(path) ?? '');
+    const res = await apiAt(SITE.filesEditUrl, 'POST', {}, { path, edits: list, expect });
+    if (res.ok) {
+      const t = tabs.get(path);
+      seenRevision.set(path, res.revision);
+      if (t) {
+        const fresh = await api('GET', { read: 1, path });
+        if (fresh.ok) agentWrote(path, fresh.content, fresh.revision);
+      }
+      status(`Agent edited ${path}`);
+    }
+    return res;
+  },
+
+  // Ask the live site something, the way a visitor would - from its own host,
+  // so there is no cross-origin refusal. Cookies are kept between calls like a
+  // browser (cic.request.reset() forgets them), and a non-GET request carries
+  // Laravel's XSRF token automatically, so forms and logins can be tested.
+  // options: { method, headers, body, json, form }.
+  // PHP run inside the site's booted Laravel app, like tinker: models, config,
+  // the database, the container. `return` a value to see it (arrays as JSON).
+  async eval(code) {
+    if (typeof code !== 'string' || !code.trim()) return { ok: false, error: 'invalid', hint: 'pass PHP code as a string' };
+    const res = await apiAt(SITE.evalUrl, 'POST', {}, { code: fromView(code) });
+    if (!res.ok) return res;
+    lastWriteAt = Date.now();
+    const r = res.result;
+    return { ok: r.exitCode === 0 && !r.timedOut, output: r.output, exitCode: r.exitCode, truncated: r.truncated, timedOut: r.timedOut, ms: r.elapsedMs };
+  },
+
+  // A signed, ten-minute address that shows the page as the site's user `as`
+  // in a real tab (LookController): open it with your browser tool and take a
+  // screenshot. Shown, not run - no script, no forms.
+  // session: true sends the cookies cic.request holds (a login the agent did
+  // through the app's own form) instead of `as`.
+  async lookUrl(path, { as, session = false } = {}) {
+    if (typeof path !== 'string' || !path.startsWith('/')) return { ok: false, error: 'invalid', hint: "pass a path such as '/tasks'" };
+    if (session && !cookieJar.size) return { ok: false, error: 'no_session', hint: 'no cookies yet: sign in with cic.request first' };
+    const cookie = session ? [...cookieJar].map(([k, v]) => `${k}=${v}`).join('; ') : undefined;
+    return apiAt(SITE.lookUrl, 'POST', {}, { path, ...(as !== undefined && !session ? { as } : {}), ...(cookie ? { cookie } : {}) });
+  },
+
+  // Any long text - a page's HTML, a command's output - shaped and paged like
+  // cic.view: every equals sign as '＝', long base64 hidden, ~900 characters
+  // a part, and a last line that says which part this is and what comes next.
+  show(text, part = 1) {
+    const chunks = pageLines(splitLong(agentSafe(String(text ?? '')).split('\n')));
+    const n = Math.min(Math.max(1, part), chunks.length);
+    const more = n < chunks.length ? ` - more: cic.show(text, ${n + 1})` : ' - the end';
+    return `${chunks[n - 1].join('\n')}\n[part ${n} of ${chunks.length}${more}]`;
+  },
+
+  request: Object.assign(async (path, options = {}) => siteRequest(path, options), {
+    reset: () => { cookieJar.clear(); signedInAs = null; return { ok: true }; },
+    cookies: () => Object.fromEntries(cookieJar),
+  }),
 
   rm: (path) => removeFile(path),
 
@@ -1740,6 +3133,10 @@ window.cic = Object.freeze({
   cp: (from, to) => copyPath(from, to),
   rmdir: (path, options = {}) => deleteFolder(path, { confirm: options.confirm === true }),
   search: (q) => searchSite(String(q)),
+  check: (options = {}) => checkSite(options),
+  exposure: () => checkExposure({ show: false }),
+  visibility: (path) => visibility(norm(path)),
+  replaceAll: (find, replacement, options = {}) => replaceAcross(String(find), String(replacement), { ...options, confirm: false }),
   zip: (from, to) => zipPath(from, to),
   unzip: (archive, into) => unzipPath(archive, into),
   upload: (dir, files) => uploadFiles(dir, [...files]),
@@ -1786,6 +3183,7 @@ window.cic = Object.freeze({
     config: async () => ({ ok: true, names: await laravel.configNames() }),
     components: async () => ({ ok: true, names: await laravel.componentNames() }),
   }),
+  extensions: () => ({ ok: true, extensions: listExtensions(EXT).map(({ id, name, by, licence, core, enabled, running }) => ({ id, name, by, licence, core: Boolean(core), enabled, running })) }),
   // Laravel Boost's MCP tools, answered by the site's own application.
   mcp: Object.freeze({
     tools: async () => {

@@ -10,10 +10,15 @@ use Illuminate\Support\Facades\Cache;
  * What the fleet can still sell.
  *
  * A plan is in stock only if the fleet can hold ALL of it - every site the
- * plan allows, at the plan's per-site CPU, memory and disk - on top of
- * everything already promised. Paid accounts are promised their whole plan
- * the moment they buy it (they may create their sites at any time); free
- * accounts are counted by the sites they actually run.
+ * plan allows, at the plan's per-site CPU and memory, and the plan's storage -
+ * on top of everything already promised to paying customers. Paid accounts
+ * are promised their whole plan the moment they buy it (they may create their
+ * sites at any time).
+ *
+ * Free trials reserve nothing. They are counted by the sites they actually
+ * run, and only when deciding whether one more trial site fits: a trial takes
+ * what paying customers have left over, never the other way round, so the
+ * "N left" a buyer sees does not shrink because someone is trying us out.
  *
  * Capacity is each host's REAL resources, as the host itself last reported
  * them to the monitor (fleet:monitor, every minute), minus a reserve for the
@@ -45,7 +50,11 @@ class Stock
         $cfg = config('fleet.stock');
         $cap = ['cpu' => 0.0, 'memory_mb' => 0, 'disk_gb' => 0];
 
-        foreach (array_keys(config('fleet.hosts')) as $host) {
+        foreach (config('fleet.hosts') as $host => $hostCfg) {
+            // A draining host is on its way out: nothing new is sold into it.
+            if (($hostCfg['state'] ?? 'active') !== 'active') {
+                continue;
+            }
             $h = Cache::get(self::KEY.$host);
             if (! $h || now()->getTimestamp() - $h['at'] > $cfg['fresh_seconds']) {
                 continue;
@@ -71,7 +80,7 @@ class Stock
     }
 
     /** @return array{cpu: float, memory_mb: int, disk_gb: int} */
-    public function committed(?User $except = null): array
+    public function committed(?User $except = null, bool $paidOnly = false): array
     {
         $sum = ['cpu' => 0.0, 'memory_mb' => 0, 'disk_gb' => 0];
         $add = function (array $f) use (&$sum) {
@@ -84,21 +93,30 @@ class Stock
         User::whereIn('plan', $paid)->when($except, fn ($q) => $q->whereKeyNot($except->getKey()))
             ->pluck('plan')->each(fn ($plan) => $add(self::footprint($plan)));
 
-        // Free accounts: the sites they run, at their own recorded limits.
-        Site::whereIn('status', ['provisioning', 'live'])
+        if ($paidOnly) {
+            return $sum;
+        }
+
+        // Free accounts: the sites they run, at their own recorded limits. A
+        // paused site holds no CPU or memory, only its disk.
+        Site::whereIn('status', ['provisioning', 'live', 'suspended'])
             ->whereHas('user', fn ($q) => $q->whereNotIn('plan', $paid))
             ->when($except, fn ($q) => $q->where('user_id', '!=', $except->getKey()))
-            ->get(['cpu_limit', 'memory_limit', 'disk_gb'])
+            ->get(['status', 'cpu_limit', 'memory_limit', 'disk_gb'])
             ->each(fn ($s) => $add([
-                'cpu' => (float) $s->cpu_limit,
-                'memory_mb' => self::megabytes((string) $s->memory_limit),
+                'cpu' => $s->status === 'suspended' ? 0.0 : (float) $s->cpu_limit,
+                'memory_mb' => $s->status === 'suspended' ? 0 : self::megabytes((string) $s->memory_limit),
                 'disk_gb' => (int) ($s->disk_gb ?: config('billing.plans.free.disk_gb')),
             ]));
 
         return $sum;
     }
 
-    /** Everything a plan may use: its site allowance at its per-site limits. */
+    /**
+     * Everything a plan may use: its site allowance at its per-site CPU and
+     * memory, and its storage - the plan total where it has one, since each
+     * site's own ceiling is only a ceiling and together they share the total.
+     */
     public static function footprint(string $planKey, ?int $sites = null): array
     {
         $p = config("billing.plans.$planKey");
@@ -107,14 +125,14 @@ class Stock
         return [
             'cpu' => $n * (float) $p['cpu'],
             'memory_mb' => $n * self::megabytes($p['memory']),
-            'disk_gb' => $n * (int) $p['disk_gb'],
+            'disk_gb' => min($n * (int) $p['disk_gb'], (int) ($p['storage_gb'] ?? PHP_INT_MAX)),
         ];
     }
 
     /** How many more of this plan the fleet can take. 0 is out of stock. */
     public function available(string $planKey): int
     {
-        return $this->fits(self::footprint($planKey), $this->committed());
+        return $this->fits(self::footprint($planKey), $this->committed(paidOnly: true));
     }
 
     /**
@@ -123,10 +141,14 @@ class Stock
      */
     public function availableFor(User $user, string $planKey): int
     {
-        return $this->fits(self::footprint($planKey), $this->committed($user));
+        return $this->fits(self::footprint($planKey), $this->committed($user, paidOnly: true));
     }
 
-    /** Whether one more site of this plan's size fits (a free account's new site). */
+    /**
+     * Whether one more site of this plan's size fits (a trial's new site):
+     * counted against everything, trials included, so trials only ever use
+     * room that is really free.
+     */
     public function siteFits(string $planKey): bool
     {
         return $this->fits(self::footprint($planKey, 1), $this->committed()) > 0;

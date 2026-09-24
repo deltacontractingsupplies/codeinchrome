@@ -542,4 +542,113 @@ Route::get('/', function () {
     });
     expect(before).not.toContain('e2e_import');
   });
+  await test.step('cic.check reports a failing page with its error, then only NEW errors, and waits for a busy site', async () => {
+    const marker = `e2e-boom-${Date.now()}`;
+    const web = (await page.evaluate(() => cic.read('/routes/web.php'))).content;
+    const boom = `\nRoute::get('/e2e-boom', fn () => throw new RuntimeException('${marker}'));\n`;
+    expect((await page.evaluate(([c]) => cic.write('/routes/web.php', c), [web + boom])).ok).toBe(true);
+
+    const bad = await page.evaluate(() => cic.check());
+    expect(bad.ok).toBe(false);
+    expect(bad.problems).toContain('500 /e2e-boom');
+    expect(bad.errors.join('\n')).toContain(marker);
+
+    // Fixed: the same log still holds that error, and it must not be reported again.
+    expect((await page.evaluate(([c]) => cic.write('/routes/web.php', c), [web])).ok).toBe(true);
+    // A command already running holds the site: the check waits for it instead of failing.
+    const [, good] = await page.evaluate(() => Promise.all([cic.run('artisan', ['about']), cic.check()]));
+    expect(good.problems).toEqual([]);
+    expect(good.errors).toEqual([]);
+    expect(good.ok).toBe(true);
+  });
+
+  await test.step('reading as an agent: every page says what it is, and a sign-in that cannot work is said once', async () => {
+    const v = await page.evaluate(() => cic.view('/routes/web.php'));
+    expect(v.ok).toBe(true);
+    expect(v.text.split('\n').at(-1)).toMatch(/^\[lines 1-\d+ of \d+ - (end of file|more: cic\.view\("\/routes\/web\.php", \{ from: \d+ \}\))\]$/);
+    expect(v.text.length).toBeLessThan(1000);
+
+    const parts = await page.evaluate(() => {
+      const long = Array.from({ length: 120 }, (_, i) => `<div class="row" data-n="${i}">row ${i}</div>`).join('\n');
+      return [cic.show(long), cic.show(long, 2)];
+    });
+    expect(parts[0]).toMatch(/\[part 1 of \d+ - more: cic\.show\(text, 2\)\]$/);
+    expect(parts[0]).not.toContain('class="row"'); // shown with '＝', so a browser tool does not block it
+    expect(parts[0].length).toBeLessThan(1000);
+    expect(parts[1]).toMatch(/^\[?.*row/);
+
+    const nobody = await page.evaluate(() => cic.check({ as: 999999 }));
+    expect(nobody).toMatchObject({ ok: false, error: 'sign_in_failed', checked: 0 });
+    expect(nobody.hint).toContain('session: true');
+  });
+
+  await test.step("the app's tests run in the site, on an in-memory database", async () => {
+    const r = await page.evaluate(() => cic.run('artisan', ['test']));
+    expect(r.ok, r.hint).toBe(true);
+    expect(r.result.exitCode, r.result.text).toBe(0);
+    expect(r.result.text).toMatch(/passed/i);
+
+    // The worst case: phpunit.xml without its DB_URL line, and a DB_URL in .env
+    // pointing at MySQL. Laravel lets a URL override driver, host and database,
+    // so only the agent's forced environment keeps the run in memory.
+    const before = await page.evaluate(async () => ({
+      xml: (await cic.read('/phpunit.xml')).content, env: (await cic.read('/.env')).content,
+    }));
+    await page.evaluate(async ([xml, env]) => cic.writeMany({
+      '/phpunit.xml': xml.replace(/\s*<env name="DB_URL"[^>]*\/>/, ''),
+      '/.env': `${env.replace(/\n*$/, '\n')}DB_URL=mysql://root:nope@db.invalid:3306/live\n`,
+      '/tests/Feature/NeverLiveTest.php': `<?php
+
+namespace Tests\\Feature;
+
+use Illuminate\\Support\\Facades\\DB;
+use Tests\\TestCase;
+
+class NeverLiveTest extends TestCase
+{
+    public function test_the_run_is_on_an_in_memory_database(): void
+    {
+        $this->assertSame('sqlite', DB::connection()->getDriverName());
+        $this->assertSame(':memory:', DB::connection()->getDatabaseName());
+    }
+}
+`,
+    }), [before.xml, before.env]);
+    const live = await page.evaluate(() => cic.run('artisan', ['test', '--filter=NeverLiveTest']));
+    expect(live.result.exitCode, live.result.text).toBe(0);
+    expect(live.result.text).toMatch(/1 passed/);
+    await page.evaluate(async ([xml, env]) => {
+      await cic.writeMany({ '/phpunit.xml': xml, '/.env': env });
+      await cic.rm('/tests/Feature/NeverLiveTest.php');
+    }, [before.xml, before.env]);
+  });
+
+  await test.step('Extensions lists the built-ins, and a switch really turns one off after a reload', async () => {
+    await page.locator('#modeExt').click();
+    const list = page.locator('#extList');
+    for (const name of ['PHP IntelliSense', 'Emmet', 'Prettier', 'Material Icon Theme', 'PDF and image preview', 'Laravel Boost MCP']) {
+      await expect(list.getByText(name, { exact: true })).toBeVisible();
+    }
+    await expect(list.locator('[data-ext="pdf"]')).toContainText('Built in');
+    await expect(list.locator('[data-ext="pdf"]')).toContainText('Apache-2.0');
+
+    const sw = list.locator('[data-ext="tailwind"] [role="switch"]');
+    await expect(sw).toHaveAttribute('aria-checked', 'true');
+    await sw.click();
+    await expect(sw).toHaveAttribute('aria-checked', 'false');
+    await expect(page.locator('#extReload')).toBeVisible();
+    await page.locator('#btnExtReload').click();
+    await page.waitForFunction(() => window.cic?.extensions);
+    let state = await page.evaluate(() => Object.fromEntries(cic.extensions().extensions.map((e) => [e.id, e])));
+    expect(state.tailwind).toMatchObject({ enabled: false, running: false });
+    expect(state.php.running).toBe(true);
+
+    // Back on, so nothing is left switched off in this browser.
+    await page.locator('#modeExt').click();
+    await page.locator('[data-ext="tailwind"] [role="switch"]').click();
+    await page.locator('#btnExtReload').click();
+    await page.waitForFunction(() => window.cic?.extensions);
+    state = await page.evaluate(() => Object.fromEntries(cic.extensions().extensions.map((e) => [e.id, e])));
+    expect(state.tailwind).toMatchObject({ enabled: true, running: true });
+  });
 });

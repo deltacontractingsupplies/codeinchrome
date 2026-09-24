@@ -13,7 +13,7 @@ class BillingTest extends TestCase
     protected function setUp(): void
     {
         parent::setUp();
-        config(['billing.api_key' => 'key', 'billing.store_id' => '100001', 'billing.plans.pro.variant_id' => '777']);
+        config(['billing.api_key' => 'key', 'billing.store_id' => '100001', 'billing.plans.starter.variant_id' => '777']);
     }
 
     public function test_checkout_carries_the_user_id_and_redirects_to_lemon_squeezy(): void
@@ -21,21 +21,29 @@ class BillingTest extends TestCase
         Http::fake(['api.lemonsqueezy.com/v1/checkouts' => Http::response(['data' => ['attributes' => ['url' => 'https://codeinchrome.lemonsqueezy.com/checkout/abc']]], 201)]);
         $user = User::factory()->create(['plan' => 'free']);
 
-        $this->actingAs($user)->post(route('billing.checkout'), ['plan' => 'pro'])
+        $this->actingAs($user)->post(route('billing.checkout'), ['plan' => 'starter'])
             ->assertRedirect('https://codeinchrome.lemonsqueezy.com/checkout/abc');
 
         Http::assertSent(fn ($r) => $r['data']['attributes']['checkout_data']['custom']['user_id'] === (string) $user->id
             && $r['data']['relationships']['variant']['data']['id'] === '777'
             && $r['data']['relationships']['store']['data']['id'] === '100001');
         $this->assertSame('free', $user->fresh()->plan, 'Starting a checkout must not change the plan; only the signed webhook does.');
+
+        // The checkout describes the plan from our config, and never in CPU or memory.
+        Http::assertSent(function ($r) {
+            $text = $r['data']['attributes']['product_options']['description'] ?? '';
+
+            return str_contains($text, '3 sites') && str_contains($text, config('billing.plans.starter.disk_gb').' GB of storage each ('.config('billing.plans.starter.storage_gb').' GB in all)')
+                && ! preg_match('/\bCPU\b|\bRAM\b|\bMB\b|memory/i', $text);
+        });
     }
 
     public function test_a_plan_without_a_product_says_so_and_calls_nothing(): void
     {
-        config(['billing.plans.studio.variant_id' => null]);
+        config(['billing.plans.starter.variant_id' => null]);
         $user = User::factory()->create();
 
-        $this->actingAs($user)->post(route('billing.checkout'), ['plan' => 'studio'])->assertSessionHas('error');
+        $this->actingAs($user)->post(route('billing.checkout'), ['plan' => 'starter'])->assertSessionHas('error');
         $this->actingAs($user)->get(route('billing'))->assertSee('Not available to buy yet');
         Http::assertNothingSent();
     }
@@ -44,7 +52,7 @@ class BillingTest extends TestCase
     {
         Http::fake(['api.lemonsqueezy.com/*' => Http::response(['errors' => [['detail' => 'The variant is not published.']]], 422)]);
 
-        $this->actingAs(User::factory()->create())->post(route('billing.checkout'), ['plan' => 'pro'])
+        $this->actingAs(User::factory()->create())->post(route('billing.checkout'), ['plan' => 'starter'])
             ->assertSessionHas('error', fn ($m) => str_contains($m, 'The variant is not published.'));
     }
 
@@ -59,7 +67,7 @@ class BillingTest extends TestCase
             return Http::response(['data' => ['attributes' => ['url' => 'https://codeinchrome.lemonsqueezy.com/checkout/x']]], 201);
         }]);
 
-        $this->actingAs(User::factory()->create())->post(route('billing.checkout'), ['plan' => 'pro'])
+        $this->actingAs(User::factory()->create())->post(route('billing.checkout'), ['plan' => 'starter'])
             ->assertRedirect('https://codeinchrome.lemonsqueezy.com/checkout/x');
         $this->assertSame(2, $calls);
     }
@@ -68,7 +76,7 @@ class BillingTest extends TestCase
     {
         Http::fake(['api.lemonsqueezy.com/*' => fn () => throw new ConnectionException('cURL error 52: Empty reply from server')]);
 
-        $this->actingAs(User::factory()->create())->from(route('billing'))->post(route('billing.checkout'), ['plan' => 'pro'])
+        $this->actingAs(User::factory()->create())->from(route('billing'))->post(route('billing.checkout'), ['plan' => 'starter'])
             ->assertRedirect(route('billing'))
             ->assertSessionHas('error', 'The payment provider could not be reached. Please try again in a minute.');
     }
@@ -76,7 +84,7 @@ class BillingTest extends TestCase
     public function test_an_http_refusal_is_not_retried(): void
     {
         Http::fake(['api.lemonsqueezy.com/*' => Http::response(['errors' => [['detail' => 'nope']]], 422)]);
-        $this->actingAs(User::factory()->create())->post(route('billing.checkout'), ['plan' => 'pro'])->assertSessionHas('error');
+        $this->actingAs(User::factory()->create())->post(route('billing.checkout'), ['plan' => 'starter'])->assertSessionHas('error');
         Http::assertSentCount(1);
     }
 
@@ -96,7 +104,7 @@ class BillingTest extends TestCase
             'portal_url' => 'https://codeinchrome.lemonsqueezy.com/billing?signed=1']);
 
         $this->actingAs($user)->get(route('billing'))
-            ->assertSee('Change in billing portal')
-            ->assertDontSee('Choose Pro');
+            ->assertSee('Current plan')
+            ->assertDontSee('Choose Starter');
     }
 }

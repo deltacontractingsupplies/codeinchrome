@@ -11,7 +11,7 @@ class Subscription extends Model
 
     protected function casts(): array
     {
-        return ['renews_at' => 'datetime', 'ends_at' => 'datetime'];
+        return ['renews_at' => 'datetime', 'ends_at' => 'datetime', 'payment_failed_at' => 'datetime', 'payment_warned_at' => 'datetime'];
     }
 
     public function user(): BelongsTo
@@ -19,24 +19,39 @@ class Subscription extends Model
         return $this->belongsTo(User::class);
     }
 
-    /**
-     * Statuses that entitle the customer to paid service RIGHT NOW.
-     *
-     * `past_due` is deliberately included: a failed card is a billing problem,
-     * and taking a customer's sites offline over one - while Lemon Squeezy is
-     * still retrying the charge - loses the customer as well as the payment.
-     * `cancelled` is included too, because Lemon Squeezy keeps a cancelled
-     * subscription active until `ends_at`; entitlement stops there, not at the
-     * moment the customer clicks cancel.
-     */
-    public const ENTITLED = ['active', 'on_trial', 'past_due', 'cancelled'];
+    /** Statuses that mean a payment failed and has not yet been made good. */
+    public const PAYMENT_FAILED = ['past_due', 'unpaid'];
 
+    /**
+     * Whether the customer is entitled to paid service RIGHT NOW.
+     *
+     * A failed payment keeps the plan for billing.payment_grace_days from the
+     * moment it first failed: a declined card is a billing problem, and taking
+     * a customer's sites offline over one loses the customer as well as the
+     * payment. `cancelled` runs to ends_at, because Lemon Squeezy keeps a
+     * cancelled subscription active until then. An `expired` subscription that
+     * expired because of a failed payment still gets the rest of its grace.
+     *
+     * Time-based, so trials:expire re-checks it on a schedule: nothing has to
+     * arrive from Lemon Squeezy for a grace period to end.
+     */
     public function entitled(): bool
     {
-        if (! in_array($this->status, self::ENTITLED, true)) {
-            return false;
-        }
+        return match ($this->status) {
+            'active', 'on_trial' => true,
+            'cancelled' => ! $this->ends_at || $this->ends_at->isFuture(),
+            'past_due', 'unpaid', 'expired' => $this->inPaymentGrace(),
+            default => false,
+        };
+    }
 
-        return ! $this->ends_at || $this->ends_at->isFuture();
+    public function inPaymentGrace(): bool
+    {
+        return $this->payment_failed_at !== null && $this->graceEndsAt()->isFuture();
+    }
+
+    public function graceEndsAt(): ?\Illuminate\Support\Carbon
+    {
+        return $this->payment_failed_at?->copy()->addDays((int) config('billing.payment_grace_days'));
     }
 }

@@ -7,7 +7,6 @@ use App\Models\Product;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Str;
 use Illuminate\View\View;
 
@@ -82,22 +81,41 @@ class ShopController extends Controller
         return ['lines' => $lines, 'subtotal' => $subtotal, 'shipping' => $shipping, 'total' => $subtotal + $shipping];
     }
 
-    // ── checkout, through Stripe Checkout in TEST mode ──
+    // ── checkout: cash on delivery ──
 
+    /**
+     * Place the order. Nothing is charged: the customer pays the total in
+     * cash when it arrives. The stock is taken at once, inside the same
+     * transaction, and only if there is enough - two people ordering the last
+     * bag cannot both get it.
+     */
     public function checkout(Request $request): RedirectResponse
     {
-        $secret = (string) config('shop.stripe_secret');
-        // Test keys only: this is a public demo and must never take real money.
-        if (! str_starts_with($secret, 'sk_test_')) {
-            return back()->with('error', 'Checkout is switched off: this demo store has no Stripe test key yet.');
-        }
+        $data = $request->validate([
+            'name' => ['required', 'string', 'max:120'],
+            'email' => ['required', 'email', 'max:190'],
+            'phone' => ['required', 'string', 'max:40', 'regex:/^[0-9 +()\-]{6,40}$/'],
+            'address' => ['required', 'string', 'max:500'],
+        ]);
         $t = $this->totals($this->cart($request));
         if ($t['lines'] === []) {
             return redirect()->route('shop')->with('error', 'Your bag is empty.');
         }
 
-        $order = DB::transaction(function () use ($t) {
-            $order = Order::create(['reference' => 'EO-'.strtoupper(Str::random(8)), 'total_cents' => $t['total']]);
+        $order = DB::transaction(function () use ($t, $data) {
+            foreach ($t['lines'] as $line) {
+                $product = Product::lockForUpdate()->find($line['product']->id);
+                if (! $product || $product->stock < $line['quantity']) {
+                    return null;
+                }
+                $product->decrement('stock', $line['quantity']);
+            }
+            $order = Order::create($data + [
+                'reference' => 'EO-'.strtoupper(Str::random(8)),
+                'total_cents' => $t['total'],
+                'status' => 'placed',
+                'payment_method' => 'cash',
+            ]);
             foreach ($t['lines'] as $line) {
                 $order->items()->create([
                     'product_id' => $line['product']->id, 'name' => $line['product']->name,
@@ -107,71 +125,24 @@ class ShopController extends Controller
 
             return $order;
         });
-
-        $form = [
-            'mode' => 'payment',
-            'client_reference_id' => $order->reference,
-            'metadata[order]' => $order->reference,
-            'success_url' => route('checkout.success').'?session_id={CHECKOUT_SESSION_ID}',
-            'cancel_url' => route('cart'),
-        ];
-        $i = 0;
-        foreach ($t['lines'] as $line) {
-            $form["line_items[$i][quantity]"] = $line['quantity'];
-            $form["line_items[$i][price_data][currency]"] = config('shop.currency');
-            $form["line_items[$i][price_data][unit_amount]"] = $line['product']->price_cents;
-            $form["line_items[$i][price_data][product_data][name]"] = $line['product']->name.' - 250 g';
-            $i++;
-        }
-        if ($t['shipping'] > 0) {
-            $form["line_items[$i][quantity]"] = 1;
-            $form["line_items[$i][price_data][currency]"] = config('shop.currency');
-            $form["line_items[$i][price_data][unit_amount]"] = $t['shipping'];
-            $form["line_items[$i][price_data][product_data][name]"] = 'Shipping';
+        if (! $order) {
+            return back()->withInput()->with('error', 'Something in your bag has just sold out. Please check the quantities.');
         }
 
-        $response = Http::asForm()->withToken($secret)->timeout(20)->post('https://api.stripe.com/v1/checkout/sessions', $form);
-        if (! $response->successful()) {
-            $order->update(['status' => 'cancelled']);
-            report(new \RuntimeException('Stripe refused the checkout: '.$response->json('error.message')));
+        $request->session()->forget('cart');
+        // The confirmation shows only the order this visitor just placed.
+        $request->session()->put('last_order', $order->id);
 
-            return back()->with('error', 'The payment page could not be opened. Please try again.');
-        }
-        $order->update(['stripe_session_id' => $response->json('id')]);
-
-        return redirect()->away($response->json('url'));
+        return redirect()->route('checkout.success');
     }
 
-    /**
-     * Stripe sends the customer back here. The order is marked paid only
-     * after asking Stripe itself - the query string alone proves nothing.
-     */
     public function success(Request $request): View|RedirectResponse
     {
-        $id = (string) $request->query('session_id');
-        $order = $id !== '' ? Order::where('stripe_session_id', $id)->first() : null;
+        $order = Order::with('items')->find($request->session()->get('last_order'));
         if (! $order) {
             return redirect()->route('shop');
         }
-        if ($order->status !== 'paid') {
-            $session = Http::withToken((string) config('shop.stripe_secret'))->timeout(20)
-                ->get('https://api.stripe.com/v1/checkout/sessions/'.urlencode($id));
-            if ($session->successful() && $session->json('payment_status') === 'paid') {
-                DB::transaction(function () use ($order, $session) {
-                    $fresh = Order::lockForUpdate()->find($order->id);
-                    if ($fresh->status === 'paid') {
-                        return; // a second visit to this page does not sell the stock twice
-                    }
-                    $fresh->update(['status' => 'paid', 'paid_at' => now(), 'email' => $session->json('customer_details.email')]);
-                    foreach ($fresh->items as $item) {
-                        Product::where('id', $item->product_id)->where('stock', '>=', $item->quantity)->decrement('stock', $item->quantity);
-                    }
-                });
-                $order->refresh();
-            }
-        }
-        $request->session()->forget('cart');
 
-        return view('shop.success', ['order' => $order->load('items')]);
+        return view('shop.success', ['order' => $order]);
     }
 }

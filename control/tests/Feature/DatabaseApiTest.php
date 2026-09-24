@@ -39,7 +39,7 @@ class DatabaseApiTest extends TestCase
             },
         ]);
 
-        $this->owner = User::factory()->create(['plan' => 'pro']);
+        $this->owner = User::factory()->create(['plan' => 'starter']);
         $this->site = Site::create([
             'user_id' => $this->owner->id, 'site_id' => 'mine', 'domain' => 'mine.codeinchrome.com',
             'host' => 'h1', 'status' => 'live', 'cpu_limit' => '1.0', 'memory_limit' => '1024m',

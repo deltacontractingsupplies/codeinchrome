@@ -77,7 +77,8 @@ func (m *Manager) Stats(ctx context.Context) HostStats {
 	st.SitesNotRunning, st.DisksUnmounted = []string{}, []string{}
 	if list, err := m.List(ctx); err == nil {
 		for _, s := range list {
-			if s.State != "running" {
+			// A paused site is stopped on purpose (suspend.go): not an outage.
+			if s.State != "running" && !s.Suspended {
 				st.SitesNotRunning = append(st.SitesNotRunning, s.ID)
 			}
 			if _, err := os.Stat(m.diskImage(s.ID)); err == nil && !isMounted(m.volume(s.ID)) {

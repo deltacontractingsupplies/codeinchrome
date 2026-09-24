@@ -26,6 +26,13 @@ class SecurityHeaders
     {
         $response = $next($request);
 
+        // A signed-in page or answer is never stored by a browser or a proxy:
+        // it is one person's, and an editor read must always be fresh (a
+        // browser agent once had to add &t= to see a file it had just saved).
+        if ($request->user()) {
+            $response->headers->set('Cache-Control', 'no-store, private');
+        }
+
         // A response that set its own policy keeps it: a file download says
         // `sandbox`, stricter than anything below, and must not be loosened.
         if (! $response->headers->has('Content-Security-Policy')) {

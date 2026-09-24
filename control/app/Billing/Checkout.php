@@ -5,6 +5,7 @@ namespace App\Billing;
 use App\Models\User;
 use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
+use Illuminate\Support\Str;
 use RuntimeException;
 
 /**
@@ -61,6 +62,9 @@ class Checkout
                             ],
                             'product_options' => [
                                 'redirect_url' => route('billing.return'),
+                                // Written from the plan here, not typed in the Lemon Squeezy
+                                // dashboard, so the checkout never drifts from what we sell.
+                                'description' => self::description($plan),
                             ],
                         ],
                         'relationships' => [
@@ -80,5 +84,28 @@ class Checkout
         }
 
         return $url;
+    }
+
+    /**
+     * What the customer is buying, in the words of the plans page: sites,
+     * storage and what comes with them. Never CPU or memory figures - those
+     * are ours to tune; what a plan holds is shown as measured capacity.
+     */
+    public static function description(array $plan): string
+    {
+        $parts = [
+            $plan['sites'].' '.Str::plural('site', $plan['sites']),
+            // Per site, with the account's total (disk_gb per site, storage_gb in all).
+            $plan['sites'] > 1 ? $plan['disk_gb'].' GB of storage each ('.$plan['storage_gb'].' GB in all)' : $plan['storage_gb'].' GB of storage',
+        ];
+        if ($plan['custom_domains'] ?? false) {
+            $parts[] = 'your own domains';
+        }
+        if ($plan['background'] ?? false) {
+            $parts[] = 'queue worker, scheduler and WebSockets';
+        }
+        $parts[] = 'nightly backups and HTTPS';
+
+        return 'Laravel hosting with an AI agent in the editor: '.implode(', ', $parts).'. Billed monthly.';
     }
 }

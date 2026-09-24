@@ -36,7 +36,6 @@ class User extends Authenticatable implements MustVerifyEmail
         return in_array(strtolower($this->email), array_map('strtolower', config('fleet.admin_emails')), true);
     }
 
-    /** The plan config this user is entitled to right now. */
     /**
      * The confirmation email carries a fresh six-digit code as well as the
      * link. Sending a new one replaces the old code and resets its tries.
@@ -53,9 +52,50 @@ class User extends Authenticatable implements MustVerifyEmail
         $this->notify(new VerifyEmailWithCode($code));
     }
 
+    /** The plan config this user is entitled to right now. */
     public function planConfig(): array
     {
         return config("billing.plans.{$this->plan}") ?: config('billing.plans.free');
+    }
+
+    /** Starts the free trial of a new account. Never extends one. */
+    public function startTrial(): void
+    {
+        if ($this->trial_ends_at === null) {
+            $this->forceFill(['trial_ends_at' => now()->addDays((int) config('billing.trial.days'))])->save();
+        }
+    }
+
+    public function isPaid(): bool
+    {
+        return (int) $this->planConfig()['price'] > 0;
+    }
+
+    /** A free account whose trial clock is still running. */
+    public function onTrial(): bool
+    {
+        return ! $this->isPaid() && $this->trial_ends_at?->isFuture() === true;
+    }
+
+    /**
+     * A free account whose trial is over: it may not build, and its sites are
+     * paused, then deleted (trials:expire). Accounts with no trial clock -
+     * operators, and accounts from before trials existed - never expire.
+     */
+    public function trialExpired(): bool
+    {
+        return ! $this->isPaid() && ! $this->isOperator() && $this->trial_ends_at?->isPast() === true;
+    }
+
+    /** When a paused account's sites are deleted, or null if none are paused. */
+    public function deletesAt(): ?\Illuminate\Support\Carbon
+    {
+        if (! $this->suspended_at) {
+            return null;
+        }
+        $lapsed = $this->subscriptions()->exists();
+
+        return $this->suspended_at->copy()->addDays((int) config($lapsed ? 'billing.trial.lapsed_grace_days' : 'billing.trial.grace_days'));
     }
 
     /**
@@ -72,6 +112,10 @@ class User extends Authenticatable implements MustVerifyEmail
             'two_factor_secret' => 'encrypted',
             'two_factor_recovery_codes' => 'encrypted:array',
             'two_factor_confirmed_at' => 'datetime',
+            'trial_ends_at' => 'datetime',
+            'trial_warned_at' => 'datetime',
+            'suspended_at' => 'datetime',
+            'storage_over_at' => 'datetime',
         ];
     }
 }

@@ -161,7 +161,7 @@ class ProvisioningTest extends TestCase
 
         Provisioner::make()->provision($user, 'first');
 
-        $this->expectExceptionMessage('The Free plan includes 1 site and you have 1');
+        $this->expectExceptionMessage('The Free trial plan includes 1 site and you have 1');
         Provisioner::make()->provision($user, 'second');
     }
 
@@ -177,7 +177,7 @@ class ProvisioningTest extends TestCase
         $user->update(['plan' => 'free']);
 
         $this->assertSame(3, $user->sites()->where('status', 'live')->count());
-        $this->expectExceptionMessage('The Free plan includes 1 site and you have 3');
+        $this->expectExceptionMessage('The Free trial plan includes 1 site and you have 3');
         Provisioner::make()->provision($user, 'd-site');
     }
 
@@ -318,10 +318,11 @@ class ProvisioningTest extends TestCase
     public function test_it_packs_hosts_and_refuses_to_overflow_a_full_fleet(): void
     {
         $this->fakeAgent();
-        $user = User::factory()->create(['plan' => 'studio']); // 40 sites
+        // Two Starter accounts, 3 sites each: more than the fleet can place.
+        [$a, $b] = User::factory()->count(2)->create(['plan' => 'starter'])->all();
 
         // capacity is 2 per host, 2 hosts = 4 sites total
-        foreach (['one', 'two', 'three', 'four'] as $id) {
+        foreach (['one' => $a, 'two' => $a, 'three' => $a, 'four' => $b] as $id => $user) {
             Provisioner::make()->provision($user, $id);
         }
 
@@ -329,7 +330,7 @@ class ProvisioningTest extends TestCase
         $this->assertSame(2, Site::where('host', 'h2')->count());
 
         $this->expectExceptionMessage('The fleet is at capacity');
-        Provisioner::make()->provision($user, 'five');
+        Provisioner::make()->provision($b, 'five');
     }
 
     public function test_a_fully_removed_site_is_deleted_from_our_records(): void
@@ -425,5 +426,18 @@ class ProvisioningTest extends TestCase
         // Both fresh now; h1 has far more to spare.
         Stock::remember('h1', ['cpus' => 64, 'memTotalBytes' => 512 * 1024 ** 3, 'diskTotalBytes' => 4096 * 1024 ** 3]);
         $this->assertSame('h1', Provisioner::make()->provision($user, 'second')->host);
+    }
+
+    public function test_a_draining_host_takes_no_new_sites(): void
+    {
+        $this->fakeAgent();
+        config(['fleet.hosts.h1.state' => 'draining']);
+        $user = User::factory()->create(['plan' => 'starter']);
+
+        foreach (['one', 'two'] as $id) {
+            $this->assertSame('h2', Provisioner::make()->provision($user, $id)->host);
+        }
+        $this->expectExceptionMessage('The fleet is at capacity');
+        Provisioner::make()->provision($user, 'three'); // h2 is full (capacity 2), h1 is draining
     }
 }

@@ -2,8 +2,8 @@
 #
 # Measure how many live WebSocket connections each paid plan holds.
 #
-#   tests/load/ws.sh                 starter pro studio
-#   tests/load/ws.sh pro             just this plan
+#   tests/load/ws.sh                 starter (the one paid plan)
+#   tests/load/ws.sh starter         just this plan
 #   KEEP=1 tests/load/ws.sh ...      leave the bench site up afterwards
 #
 # The bench site ("loadbench", as in run.sh) gets Laravel Reverb and has its
@@ -23,7 +23,7 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/../.."
 . infra/hosts.env
 
-PLANS=${*:-starter pro studio}
+PLANS=${*:-starter}
 SITE=loadbench
 EMAIL=loadtest@codeinchrome.test
 STEPS=${STEPS:-"100 250 500 1000 2000 3000 4000 6000 8000 10000"}
@@ -42,7 +42,7 @@ tinker() { artisan "tinker --execute=$(printf %q "$1")" | tail -1; }
 
 # The bench account is moved through the paid plans, and a paid plan reserves
 # its whole allowance in the fleet's stock (control/app/Fleet/Stock.php). Left
-# on Studio, it made the whole fleet read out of stock for real customers. So
+# on a paid plan, it made the whole fleet read out of stock for real customers. So
 # it goes back to free however this script ends.
 restore_bench_plan() {
   tinker "\$u = App\Models\User::where('email', '$EMAIL')->first(); if (\$u) { \$u->update(['plan' => 'free']); app(App\Fleet\PlanLimits::class)->applyTo(\$u); } echo 'ok';" >/dev/null 2>&1 || true
@@ -54,7 +54,7 @@ for forbidden in $CIC_FORBIDDEN_HOSTS; do
 done
 
 # ── the bench site, as run.sh makes it ───────────────────────────────────────
-tinker "\$u = App\Models\User::firstOrCreate(['email' => '$EMAIL'], ['name' => 'Load test', 'password' => Str::random(40)]); \$u->forceFill(['email_verified_at' => now(), 'plan' => 'studio'])->save(); echo 'ok';" >/dev/null
+tinker "\$u = App\Models\User::firstOrCreate(['email' => '$EMAIL'], ['name' => 'Load test', 'password' => Str::random(40)]); \$u->forceFill(['email_verified_at' => now(), 'plan' => 'starter'])->save(); echo 'ok';" >/dev/null
 if [[ $(tinker "echo App\Models\Site::where('site_id', '$SITE')->where('status', 'live')->exists() ? 'yes' : 'no';") != yes ]]; then
   artisan "site:provision $EMAIL $SITE" >/dev/null || die "could not provision $SITE"
 fi

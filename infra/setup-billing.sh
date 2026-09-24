@@ -4,14 +4,14 @@
 #
 #   infra/setup-billing.sh
 #
-# Run after the store, its three subscription products and the webhook exist
+# Run after the store, its subscription product and the webhook exist
 # in the Lemon Squeezy dashboard (products cannot be created through the API),
 # and after LEMONSQUEEZY_API_KEY and LEMONSQUEEZY_WEBHOOK_SECRET for THAT store
 # are in the operator's .env. It:
 #
 #   - finds the store named "codeinchrome" and REFUSES any other - the same
-#     account also holds another business's store, which is another business
-#   - finds Starter, Pro and Studio and checks each against
+#     account also holds another business's store
+#   - finds Starter (the one paid plan) and checks it against
 #     control/config/billing.php: a monthly subscription at the same price, so
 #     a customer can never be charged something the app does not describe
 #   - checks the webhook points at the control plane with every event the
@@ -28,7 +28,7 @@ STORE_NAME=codeinchrome
 WEBHOOK_URL=https://app.codeinchrome.com/webhooks/lemonsqueezy
 EVENTS="subscription_created subscription_updated subscription_resumed subscription_unpaused subscription_paused subscription_cancelled subscription_expired"
 # name:price-in-cents, from control/config/billing.php
-PLANS="Starter:1200 Pro:2900 Studio:7900"
+PLANS="Starter:2000"
 
 ok()  { printf '\033[32m  ok\033[0m %s\n' "$*"; }
 die() { printf '\033[31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }

@@ -151,7 +151,7 @@ class DomainTest extends TestCase
         $this->add('free.example.com')->assertForbidden();
 
         $this->flushSession();
-        $this->actingAs(User::factory()->create(['plan' => 'pro']))->get(route('domains.index', $this->site))->assertNotFound();
+        $this->actingAs(User::factory()->create(['plan' => 'starter']))->get(route('domains.index', $this->site))->assertNotFound();
     }
 
     public function test_removing_a_verified_domain_resyncs_the_host(): void

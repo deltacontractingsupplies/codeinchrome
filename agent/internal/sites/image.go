@@ -64,6 +64,10 @@ func (m *Manager) Recreate(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("no such site %q", id)
 	}
+	// Moved onto the new image when it is resumed, not before.
+	if site.Suspended {
+		return "suspended", nil
+	}
 	current, err := m.currentImageID(ctx)
 	if err != nil {
 		return "", err
@@ -81,6 +85,10 @@ func (m *Manager) Recreate(ctx context.Context, id string) (string, error) {
 // replaceContainer removes a site's container and starts a new one from its
 // stored settings, then waits for it to answer. Caller holds the lock.
 func (m *Manager) replaceContainer(ctx context.Context, site Site) error {
+	// A suspended site stays stopped until it is resumed, whatever else changes.
+	if site.Suspended {
+		return fmt.Errorf("%s is suspended; resume it first", site.ID)
+	}
 	// The container is replaced; its disk must be there for the new one.
 	if !isMounted(m.volume(site.ID)) {
 		return fmt.Errorf("the disk for %s is not mounted; refusing to start a container on an empty directory", site.ID)
@@ -102,7 +110,11 @@ func (m *Manager) replaceContainer(ctx context.Context, site Site) error {
 // waitForHTTP returns once the site's port answers any HTTP response below
 // 500 - its own 404 counts; Apache or PHP failing to start does not.
 func waitForHTTP(ctx context.Context, port int, limit time.Duration) error {
-	client := &http.Client{Timeout: 5 * time.Second}
+	// A redirect is an answer, not something to follow: an app that sends /
+	// to https://its-own-name/login redirects to a URL this loopback check
+	// cannot reach, and a healthy site was reported DOWN (found rolling an
+	// image onto sites with a login).
+	client := &http.Client{Timeout: 5 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}
 	deadline := time.Now().Add(limit)
 	var last error
 	for time.Now().Before(deadline) {

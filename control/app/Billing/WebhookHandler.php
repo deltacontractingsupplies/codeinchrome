@@ -4,9 +4,11 @@ namespace App\Billing;
 
 use App\Audit\Audit;
 use App\Fleet\PlanLimits;
+use App\Fleet\Suspension;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Models\WebhookEvent;
+use App\Notifications\PlanNotice;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -109,6 +111,18 @@ class WebhookHandler
             ],
         );
 
+        // The payment-grace clock: started by the first failure, stopped by a
+        // payment that goes through. Never restarted by a repeat of the same
+        // failure, so retries cannot stretch the grace period.
+        if (in_array($status, Subscription::PAYMENT_FAILED, true) && ! $subscription->payment_failed_at) {
+            $subscription->update(['payment_failed_at' => now()]);
+            Audit::record('billing.payment_failed', $user, detail: ['status' => $status]);
+            DB::afterCommit(fn () => $user->notify(new PlanNotice('payment_failed', $subscription->fresh()->graceEndsAt())));
+        } elseif (in_array($status, ['active', 'on_trial'], true) && $subscription->payment_failed_at) {
+            $subscription->update(['payment_failed_at' => null, 'payment_warned_at' => null]);
+            Audit::record('billing.payment_recovered', $user);
+        }
+
         if ($plan === null) {
             // The variant is real but not in our catalog - someone added a
             // product in the dashboard and did not wire it up. Recording the
@@ -133,13 +147,28 @@ class WebhookHandler
         // marked limits_pending and fleet:apply-limits finishes the job.
         if ($user->plan !== $before) {
             Audit::record('billing.plan_changed', $user, detail: ['from' => $before, 'to' => $user->plan, 'status' => $status]);
-            DB::afterCommit(fn () => app(PlanLimits::class)->applyTo($user->fresh()));
+            if ($user->isPaid()) {
+                // Anything paused by an ended trial comes back first, then
+                // every site gets the plan's limits.
+                DB::afterCommit(function () use ($user) {
+                    app(Suspension::class)->resumeAll($user->fresh());
+                    app(PlanLimits::class)->applyTo($user->fresh());
+                });
+            } else {
+                // Lapsed to free: the free plan is a trial, and this one is
+                // over. trials:expire pauses the sites and deletes them after
+                // the longer, lapsed-customer grace period, with an email at
+                // each step - never here, on a webhook.
+                if (! $user->trial_ends_at || $user->trial_ends_at->isFuture()) {
+                    $user->forceFill(['trial_ends_at' => now()])->save();
+                }
+                DB::afterCommit(fn () => app(PlanLimits::class)->applyTo($user->fresh()));
+            }
         }
 
-        // Downgrading does NOT delete sites that now exceed the new limit.
-        // Deleting a paying-customer-turned-free customer's work on a webhook
-        // is irreversible and is not a decision a payment event gets to make.
-        // They keep what exists and cannot create more; see Provisioner.
+        // Downgrading does NOT delete anything here. Deleting a customer's
+        // work is irreversible and is not a decision a payment event gets to
+        // make; it happens only after the grace period, see TrialsExpire.
         return $subscription->entitled() ? "upgraded_to_$plan" : 'downgraded_to_free';
     }
 

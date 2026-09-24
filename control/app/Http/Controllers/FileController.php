@@ -58,6 +58,108 @@ class FileController extends Controller
             ->writeFile($site->site_id, $data['path'], $data['content'] ?? '', $data['expect'] ?? ''));
     }
 
+    /** Many files in one call: all checked first, all written, one version. */
+    public function storeMany(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+
+        $data = $request->validate([
+            'files' => ['required', 'array', 'min:1', 'max:200'],
+            'files.*.path' => ['required', 'string', 'max:1024'],
+            'files.*.content' => ['present', 'nullable', 'string', 'max:2097152'],
+            'files.*.expect' => ['nullable', 'string', 'max:64'],
+            'message' => ['nullable', 'string', 'max:200'],
+        ]);
+        $files = array_map(fn ($f) => [
+            'path' => $f['path'], 'content' => $f['content'] ?? '', 'expect' => $f['expect'] ?? '',
+        ], $data['files']);
+
+        return $this->attempt(fn () => ['written' => AgentClient::for($site->host)
+            ->writeMany($site->site_id, $files, (string) ($data['message'] ?? ''))['written'] ?? []]);
+    }
+
+    /** Find-and-replace edits to one file, without sending the whole file. */
+    public function edit(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+
+        $data = $request->validate([
+            'path' => ['required', 'string', 'max:1024'],
+            'edits' => ['required', 'array', 'min:1', 'max:100'],
+            'edits.*.find' => ['required', 'string', 'max:2097152'],
+            'edits.*.replace' => ['present', 'nullable', 'string', 'max:2097152'],
+            'edits.*.all' => ['sometimes', 'boolean'],
+            'expect' => ['nullable', 'string', 'max:64'],
+        ]);
+        $edits = array_map(fn ($e) => [
+            'find' => $e['find'], 'replace' => $e['replace'] ?? '', 'all' => (bool) ($e['all'] ?? false),
+        ], $data['edits']);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)
+            ->editFile($site->site_id, $data['path'], $edits, (string) ($data['expect'] ?? '')));
+    }
+
+    /**
+     * A request to the site itself, the way a visitor would make it, from its
+     * own host. Only ever this site: the agent fixes the destination.
+     */
+    public function request(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+
+        $data = $request->validate([
+            'method' => ['nullable', 'string', 'in:GET,HEAD,POST,PUT,PATCH,DELETE,OPTIONS,get,head,post,put,patch,delete,options'],
+            'path' => ['required', 'string', 'max:4096', 'starts_with:/'],
+            'headers' => ['nullable', 'array', 'max:20'],
+            'headers.*' => ['string', 'max:8192'],
+            'body' => ['nullable', 'string', 'max:2097152'],
+        ]);
+
+        return $this->attempt(fn () => ['response' => AgentClient::for($site->host)->siteRequest($site->site_id, [
+            'method' => strtoupper($data['method'] ?? 'GET'),
+            'path' => $data['path'],
+            'headers' => (object) ($data['headers'] ?? []),
+            'body' => $data['body'] ?? '',
+        ])]);
+    }
+
+    /**
+     * PHP run in the site's own application (tinker without the shell). The
+     * owner's own code already runs there; this is that, on demand. The code
+     * itself is not written to the audit log - it may hold data - only that
+     * it ran, and its size.
+     */
+    public function eval(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $data = $request->validate(['code' => ['required', 'string', 'max:262144']]);
+        Audit::record('site.eval', site: $site, detail: ['bytes' => strlen($data['code'])]);
+
+        return $this->attempt(fn () => ['result' => AgentClient::for($site->host)->evalPhp($site->site_id, $data['code'])]);
+    }
+
+    /** Sign in as one of the SITE's users, for testing pages behind its login. */
+    public function loginCookie(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $data = $request->validate(['user' => ['required', 'integer', 'min:1'], 'guard' => ['nullable', 'string', 'regex:/^[a-z][a-z0-9_]{0,30}$/']]);
+        Audit::record('site.test_login', site: $site, detail: ['user' => (int) $data['user']]);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->loginCookie($site->site_id, (int) $data['user'], $data['guard'] ?? 'web'));
+    }
+
+    /**
+     * Ask the live site, from outside, for every path a leak would take, and
+     * say which gave nothing away (App\Fleet\ExposureCheck). The site's own
+     * secrets are compared on the server and never included in the answer.
+     */
+    public function exposure(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+
+        return $this->attempt(fn () => (new \App\Fleet\ExposureCheck($site))->run());
+    }
+
     public function destroy(Request $request, Site $site): JsonResponse
     {
         $this->authorizeSite($request, $site);
@@ -84,7 +186,9 @@ class FileController extends Controller
     protected function authorizeSite(Request $request, Site $site): void
     {
         abort_unless($site->user_id === $request->user()->id, 404);
-        abort_unless($site->status === 'live', 409, 'This site is not live yet.');
+        // A paused site's owner may still take their work away; PausedSite
+        // lets only the reading routes through to here.
+        abort_unless(in_array($site->status, ['live', 'suspended'], true), 409, 'This site is not live yet.');
     }
 
     /**
@@ -104,10 +208,12 @@ class FileController extends Controller
                 'ok' => false,
                 'error' => $error,
                 'hint' => $e->detail['hint'] ?? $e->getMessage(),
+                // Which file of a batch it was about.
+                ...(isset($e->detail['path']) ? ['path' => $e->detail['path']] : []),
                 // 409 for a stale save or an unconfirmed destructive request,
                 // so a client can tell "decide first" from "this request is
                 // invalid" by status alone.
-            ], in_array($error, ['conflict', 'needs_confirm'], true) ? 409 : 422);
+            ], in_array($error, ['conflict', 'needs_confirm', 'busy'], true) ? 409 : 422);
         } catch (AgentUnreachable $e) {
             return response()->json([
                 'ok' => false,

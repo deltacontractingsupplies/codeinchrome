@@ -2,8 +2,8 @@
 #
 # Measure what each plan's container really serves.
 #
-#   tests/load/run.sh                  every paid plan and free
-#   tests/load/run.sh starter pro      just these
+#   tests/load/run.sh                  Starter (the free trial runs at the same limits)
+#   tests/load/run.sh starter free     just these
 #   KEEP=1 tests/load/run.sh ...       leave the bench site up afterwards
 #
 # A real site ("loadbench") is provisioned on the fleet like any customer's,
@@ -23,7 +23,7 @@ set -Eeuo pipefail
 cd "$(dirname "$0")/../.."
 . infra/hosts.env
 
-PLANS=${*:-free starter pro studio}
+PLANS=${*:-starter}
 SITE=loadbench
 EMAIL=loadtest@codeinchrome.test
 STEPS=${STEPS:-"2 4 6 8 10 15 20 30 40 50 60 80 100 130 160 200 250 300 400"}
@@ -41,7 +41,7 @@ tinker() { artisan "tinker --execute=$(printf %q "$1")" | tail -1; }
 
 # The bench account is moved through the paid plans, and a paid plan reserves
 # its whole allowance in the fleet's stock (control/app/Fleet/Stock.php). Left
-# on Studio, it made the whole fleet read out of stock for real customers. So
+# on a paid plan, it made the whole fleet read out of stock for real customers. So
 # it goes back to free however this script ends.
 restore_bench_plan() {
   tinker "\$u = App\Models\User::where('email', '$EMAIL')->first(); if (\$u) { \$u->update(['plan' => 'free']); app(App\Fleet\PlanLimits::class)->applyTo(\$u); } echo 'ok';" >/dev/null 2>&1 || true
@@ -53,7 +53,7 @@ for forbidden in $CIC_FORBIDDEN_HOSTS; do
 done
 
 # ── the bench account and site ───────────────────────────────────────────────
-tinker "\$u = App\Models\User::firstOrCreate(['email' => '$EMAIL'], ['name' => 'Load test', 'password' => Str::random(40)]); \$u->forceFill(['email_verified_at' => now(), 'plan' => 'studio'])->save(); echo 'ok';" >/dev/null
+tinker "\$u = App\Models\User::firstOrCreate(['email' => '$EMAIL'], ['name' => 'Load test', 'password' => Str::random(40)]); \$u->forceFill(['email_verified_at' => now(), 'plan' => 'starter'])->save(); echo 'ok';" >/dev/null
 if [[ $(tinker "echo App\Models\Site::where('site_id', '$SITE')->where('status', 'live')->exists() ? 'yes' : 'no';") != yes ]]; then
   artisan "site:provision $EMAIL $SITE" >/dev/null || die "could not provision $SITE"
 fi

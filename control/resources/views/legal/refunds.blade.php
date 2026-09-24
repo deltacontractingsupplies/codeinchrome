@@ -5,7 +5,7 @@
 @php($mail = config('legal.support_email'))
 @section('body')
 <p>
-    Start on the Free plan and upgrade only when it works for you. If a paid plan still turns out
+    Start with the free trial and upgrade only when it works for you. If Starter still turns out
     not to be right, these are the rules.
 </p>
 
@@ -33,5 +33,10 @@
     Write to <a href="mailto:{{ $mail }}">{{ $mail }}</a> from your account's email address, or
     reply to your Lemon Squeezy receipt. Refunds go back to the original payment method through
     Lemon Squeezy, our merchant of record, and usually appear within 5-10 business days.
+</p>
+<h2>Your AI agent's subscription</h2>
+<p>
+    An AI agent such as Claude in Chrome is paid for to its own provider (Anthropic, for Claude in
+    Chrome), not to us, so we cannot refund it; its provider's own refund terms apply.
 </p>
 @endsection

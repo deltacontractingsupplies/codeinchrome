@@ -59,6 +59,13 @@ var ErrLSPSessions = errors.New("too many editor sessions are open for this site
 
 // lspCommand starts the language server. A variable so tests can stand in a
 // fake server without docker.
+// lspConfig is Phpactor's own settings: index the application, never its
+// dependencies, caches or build output.
+const lspConfig = `{"indexer.exclude_patterns":["/vendor/**/*","/node_modules/**/*","/storage/**/*","/bootstrap/cache/**/*","/public/build/**/*"]}`
+
+// lspMaxCacheFiles bounds Phpactor's cache on the site's disk.
+const lspMaxCacheFiles = "30000"
+
 var lspCommand = func(ctx context.Context, container, session string) *exec.Cmd {
 	return exec.CommandContext(ctx, "docker", "exec", "-i", "-u", "33:33", "-w", "/var/www/html",
 		// Its cache (the class index) AND its temporary files live on the
@@ -74,10 +81,33 @@ var lspCommand = func(ctx context.Context, container, session string) *exec.Cmd 
 		// and a language server left behind holds up to 256 MB of the
 		// site's own memory limit. exec keeps the pid: sh becomes php.
 		"-e", "CIC_LSP_PID="+lspPidFile(session),
+		// Its settings, written to the container's own /tmp - never into the
+		// site's code. The index covers the APP, not vendor/: indexing
+		// vendor/ wrote ~54,000 tiny files per site and exhausted the inodes
+		// of a 1 GB disk, so the site could no longer save anything (found on
+		// a live site). Completion, hover and definition into vendor/ do not
+		// need the index - Phpactor finds those classes through Composer.
+		"-e", "XDG_CONFIG_HOME=/tmp/cic-phpactor-config",
 		container, "sh", "-c",
-		`mkdir -p "$TMPDIR" && find "$TMPDIR" -type f -mmin +60 -delete 2>/dev/null; echo $$ > "$CIC_LSP_PID"; `+
-			`exec php -d memory_limit=`+lspPHPMemory+` -d sys_temp_dir="$TMPDIR" -d upload_tmp_dir="$TMPDIR" /usr/local/bin/phpactor language-server`)
+		lspPrelude+`exec php -d memory_limit=`+lspPHPMemory+` -d sys_temp_dir="$TMPDIR" -d upload_tmp_dir="$TMPDIR" /usr/local/bin/phpactor language-server`)
 }
+
+// lspPrelude readies a site for its language server, in the container:
+// temp files swept, settings written, and the index kept to what the
+// settings say.
+//
+// An index built under OTHER settings is dropped whole, and rebuilt: Phpactor
+// only adds to an index, so records from before a setting changed stay for
+// ever. (Found on a live site: an index from before vendor/ was excluded kept
+// its 2,752 vendor files and grew past 32,000 files; a fresh one holds 15,700,
+// 12,000 of them PHP's own functions and constants.) The cap is a backstop
+// for an index that grows past it anyway.
+const lspPrelude = `mkdir -p "$TMPDIR" "$XDG_CONFIG_HOME/phpactor" && find "$TMPDIR" -type f -mmin +60 -delete 2>/dev/null; ` +
+	`printf '%s' '` + lspConfig + `' > "$XDG_CONFIG_HOME/phpactor/phpactor.json"; ` +
+	`[ "$(cat "$XDG_CACHE_HOME/cic-index-settings" 2>/dev/null)" = '` + lspConfig + `' ] || ` +
+	`{ rm -rf "$XDG_CACHE_HOME/phpactor"; printf '%s' '` + lspConfig + `' > "$XDG_CACHE_HOME/cic-index-settings"; }; ` +
+	`[ "$(find "$XDG_CACHE_HOME" -type f 2>/dev/null | head -n ` + lspMaxCacheFiles + ` | wc -l)" -ge ` + lspMaxCacheFiles + ` ] && rm -rf "$XDG_CACHE_HOME/phpactor"; ` +
+	`echo $$ > "$CIC_LSP_PID"; `
 
 type lspSession struct {
 	site      string

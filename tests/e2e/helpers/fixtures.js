@@ -25,6 +25,22 @@ export function setPlan(email, plan) {
 }
 
 /**
+ * Move a TEST account's trial clock and run trials:expire, as the scheduler
+ * would ten minutes later. `ended` puts the end a minute in the past;
+ * `pastGrace` also backdates the pause beyond the grace period.
+ */
+export function runTrialClock(email, { ended = false, pastGrace = false } = {}) {
+  if (!email.endsWith('@codeinchrome.test')) throw new Error('runTrialClock is for test accounts only');
+  const set = [];
+  if (ended) set.push(`'trial_ends_at' => now()->subMinute()`);
+  if (pastGrace) set.push(`'suspended_at' => now()->subDays(30)`);
+  if (set.length) {
+    onControl(['tinker', `--execute=App\\Models\\User::where('email', '${email}')->first()->forceFill([${set.join(', ')}])->save();`]);
+  }
+  return onControl(['trials:expire']);
+}
+
+/**
  * Mark a TEST account's email as confirmed. Test addresses are under the
  * reserved .test TLD and cannot receive the real confirmation mail, so the
  * suite does what clicking the link would do - for @codeinchrome.test only.

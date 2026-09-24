@@ -134,7 +134,7 @@ class AccountSecurityTest extends TestCase
     public function test_account_deletion_is_refused_while_a_subscription_is_active(): void
     {
         $user = User::factory()->create(['password' => bcrypt('the-password-1')]);
-        Subscription::create(['user_id' => $user->id, 'ls_subscription_id' => 's', 'plan' => 'pro', 'status' => 'active']);
+        Subscription::create(['user_id' => $user->id, 'ls_subscription_id' => 's', 'plan' => 'starter', 'status' => 'active']);
 
         $this->actingAs($user)->delete(route('account.destroy'), ['password' => 'the-password-1'])->assertSessionHas('error');
         $this->assertNotNull(User::find($user->id));

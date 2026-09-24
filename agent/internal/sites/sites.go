@@ -92,6 +92,9 @@ type Site struct {
 	// read-only, so the site's own code cannot change or widen it.
 	PHP PHPSettings `json:"php,omitzero"`
 
+	// Suspended sites are kept but not served (suspend.go).
+	Suspended bool `json:"suspended,omitempty"`
+
 	DiskGB        int   `json:"diskGb"`
 	DiskUsedBytes int64 `json:"diskUsedBytes"`
 	DiskSizeBytes int64 `json:"diskSizeBytes"`

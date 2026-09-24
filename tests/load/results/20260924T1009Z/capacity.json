@@ -1,0 +1,100 @@
+{
+  "measured_at": "20260924T1009Z",
+  "bar": {
+    "p95_ms": 500,
+    "errors": 0.01
+  },
+  "workload": "Laravel storefront page: session, 2 MySQL queries over 200 products, Blade render (tests/load/app)",
+  "plans": {
+    "starter": {
+      "page_views_per_second": 60,
+      "p95_ms": 10,
+      "steps": [
+        {
+          "rate": 2,
+          "achieved_rps": 2.0325970925865207,
+          "p95_ms": 12.779283,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 4,
+          "achieved_rps": 4.03195651735281,
+          "p95_ms": 12.412069,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 6,
+          "achieved_rps": 6.031190590034078,
+          "p95_ms": 12.169494,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 8,
+          "achieved_rps": 8.030482258635962,
+          "p95_ms": 11.398191,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 10,
+          "achieved_rps": 9.99986879138826,
+          "p95_ms": 11.3799116,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 15,
+          "achieved_rps": 14.999752356088567,
+          "p95_ms": 10.955471549999999,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 20,
+          "achieved_rps": 19.99953201628403,
+          "p95_ms": 10.579014349999996,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 30,
+          "achieved_rps": 30.02240084119022,
+          "p95_ms": 10.088028,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 40,
+          "achieved_rps": 40.019768508736014,
+          "p95_ms": 10.217493,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 50,
+          "achieved_rps": 49.99781384059004,
+          "p95_ms": 10.0158533,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 60,
+          "achieved_rps": 59.99765330978617,
+          "p95_ms": 10.12774355,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 80,
+          "achieved_rps": 60.19167316420173,
+          "p95_ms": 10000.130817,
+          "failed_ratio": 0.059975010412328195,
+          "dropped": 0
+        }
+      ]
+    }
+  }
+}

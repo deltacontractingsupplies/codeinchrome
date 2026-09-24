@@ -25,7 +25,7 @@
 </main>
 <footer class="foot">
     <div class="wrap">
-        <span>A demo store. Payments run in Stripe's test mode: no card is ever charged.</span>
+        <span>A demo store. Orders are cash on delivery: nothing is ever charged, and nothing is sent.</span>
         <span>Built by an AI agent in the <a href="https://codeinchrome.com">codeinchrome</a> editor.</span>
     </div>
 </footer>

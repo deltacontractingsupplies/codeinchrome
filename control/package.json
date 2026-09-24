@@ -19,9 +19,18 @@
         "@laravel/multiplex": "^0.4.1"
     },
     "dependencies": {
+        "@prettier/plugin-php": "^0.25.0",
         "dompurify": "^3.4.16",
+        "emmet-monaco-es": "^5.7.0",
+        "highlight.js": "^11.12.0",
         "marked": "^18.0.14",
         "monaco-editor": "^0.56.0",
-        "pdfjs-dist": "^6.3.289"
+        "pdfjs-dist": "^6.3.289",
+        "prettier": "^3.9.9"
+    },
+    "overrides": {
+        "monaco-editor": {
+            "dompurify": "$dompurify"
+        }
     }
 }

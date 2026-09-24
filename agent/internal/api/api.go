@@ -253,6 +253,112 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}))
 	})
 
+	// Many files in one call and one version (sites/batch.go).
+	mux.HandleFunc("PUT /v1/sites/{id}/files/batch", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Files   []sites.FileWrite `json:"files"`
+			Message string            `json:"message"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*16<<20)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {files: [{path, content, expect?}], message?}"))
+			return
+		}
+		written, err := mgr.WriteMany(r.Context(), r.PathValue("id"), body.Files, body.Message)
+		var be *sites.BatchError
+		switch {
+		case errors.Is(err, sites.ErrConflict):
+			writeJSON(w, http.StatusConflict, resp{"ok": false, "error": "conflict", "path": be0(err),
+				"hint": "That file changed since you read it, or already exists. NOTHING in this batch was written: re-read it and send the batch again."})
+		case errors.As(err, &be) && len(written) == 0:
+			writeJSON(w, http.StatusBadRequest, resp{"ok": false, "error": "cannot_write", "path": be.Path,
+				"hint": be.Err.Error() + ". NOTHING in this batch was written."})
+		case err != nil && len(written) == 0:
+			writeJSON(w, http.StatusBadRequest, fail("cannot_write", err.Error()))
+		case err != nil:
+			writeJSON(w, http.StatusInternalServerError, resp{"ok": false, "error": "partially_written", "written": written, "hint": err.Error()})
+		default:
+			writeJSON(w, http.StatusOK, ok(resp{"written": written}))
+		}
+	})
+
+	mux.HandleFunc("POST /v1/sites/{id}/files/edit", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Path   string       `json:"path"`
+			Edits  []sites.Edit `json:"edits"`
+			Expect string       `json:"expect"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*sites.MaxFileSize)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {path, edits: [{find, replace, all?}], expect?}"))
+			return
+		}
+		out, err := mgr.EditFile(r.Context(), r.PathValue("id"), body.Path, body.Edits, body.Expect)
+		if errors.Is(err, sites.ErrConflict) {
+			writeJSON(w, http.StatusConflict, fail("conflict", "The file changed since you read it. Nothing was written: re-read it and edit again."))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_edit", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"path": out.Path, "bytes": out.Bytes, "revision": out.Revision, "lint": out.Lint}))
+	})
+
+	// PHP in the site's own booted application (sites/eval.go).
+	mux.HandleFunc("POST /v1/sites/{id}/eval", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Code string `json:"code"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 512<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {code}"))
+			return
+		}
+		res, err := mgr.Eval(r.Context(), r.PathValue("id"), body.Code)
+		if errors.Is(err, sites.ErrBusy) {
+			writeJSON(w, http.StatusConflict, fail("busy", "Another command is running on this site; try again in a moment."))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("eval_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"result": res}))
+	})
+	mux.HandleFunc("POST /v1/sites/{id}/login-cookie", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			UserID int64  `json:"userId"`
+			Guard  string `json:"guard"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {userId, guard?}"))
+			return
+		}
+		name, value, err := mgr.LoginCookie(r.Context(), r.PathValue("id"), body.UserID, body.Guard)
+		if errors.Is(err, sites.ErrBusy) {
+			writeJSON(w, http.StatusConflict, fail("busy", "Another command is running on this site; try again in a moment."))
+			return
+		}
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("login_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"name": name, "value": value}))
+	})
+
+	// A request to the site itself, from its host (sites/batch.go).
+	mux.HandleFunc("POST /v1/sites/{id}/request", func(w http.ResponseWriter, r *http.Request) {
+		var body sites.SiteRequest
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 2*sites.MaxFileSize)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {method, path, headers?, body?}"))
+			return
+		}
+		out, err := mgr.Request(r.Context(), r.PathValue("id"), body)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("request_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"response": out}))
+	})
+
 	mux.HandleFunc("DELETE /v1/sites/{id}/files", func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Query().Get("path")
 		if path == "" {
@@ -321,6 +427,15 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"deleted": true}))
 	})
+	mux.HandleFunc("GET /v1/sites/{id}/paths", func(w http.ResponseWriter, r *http.Request) {
+		paths, truncated, err := mgr.Paths(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_list", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"paths": paths, "truncated": truncated}))
+	})
+
 	mux.HandleFunc("GET /v1/sites/{id}/search", func(w http.ResponseWriter, r *http.Request) {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		hits, err := mgr.Search(r.Context(), r.PathValue("id"), r.URL.Query().Get("q"), limit)
@@ -501,8 +616,15 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	})
 
 	mux.HandleFunc("GET /v1/sites/{id}/logs", func(w http.ResponseWriter, r *http.Request) {
-		n, _ := strconv.Atoi(r.URL.Query().Get("lines"))
-		res, err := mgr.Logs(r.Context(), r.PathValue("id"), r.URL.Query().Get("source"), n)
+		q := r.URL.Query()
+		n, _ := strconv.Atoi(q.Get("lines"))
+		var res sites.LogResult
+		var err error
+		if since, perr := strconv.ParseInt(q.Get("since"), 10, 64); perr == nil && q.Get("source") == "app" {
+			res, err = mgr.LogsSince(r.PathValue("id"), q.Get("file"), since)
+		} else {
+			res, err = mgr.Logs(r.Context(), r.PathValue("id"), q.Get("source"), n)
+		}
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, fail("logs_unavailable", err.Error()))
 			return
@@ -710,6 +832,22 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"result": res}))
 	})
 
+	mux.HandleFunc("PUT /v1/sites/{id}/suspended", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Suspended *bool `json:"suspended"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil || body.Suspended == nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {suspended: true|false}"))
+			return
+		}
+		applied, err := mgr.SetSuspended(r.Context(), r.PathValue("id"), *body.Suspended)
+		if err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, fail("cannot_apply", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"applied": applied}))
+	})
+
 	mux.HandleFunc("PUT /v1/sites/{id}/php", func(w http.ResponseWriter, r *http.Request) {
 		var body sites.PHPSettings
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
@@ -722,6 +860,57 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"applied": applied}))
+	})
+
+	// Moving a site between hosts (sites/transfer.go). Streams, never buffered.
+	stream := func(w http.ResponseWriter, r *http.Request, name string, export func(io.Writer) error) {
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(2 * time.Hour))
+		w.Header().Set("Trailer", "X-Export-Status")
+		w.Header().Set("Content-Type", "application/gzip")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", name))
+		if err := export(w); err != nil {
+			w.Header().Set("X-Export-Status", "failed: "+err.Error())
+			return
+		}
+		w.Header().Set("X-Export-Status", "ok")
+	}
+	receive := func(w http.ResponseWriter, r *http.Request, what string, imp func(io.Reader) error) {
+		_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(2 * time.Hour))
+		if err := imp(http.MaxBytesReader(w, r.Body, 16<<30)); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, fail("import_failed", what+": "+err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"imported": what}))
+	}
+	mux.HandleFunc("GET /v1/sites/{id}/transfer/files", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		stream(w, r, id+"-files.tar.gz", func(out io.Writer) error { return mgr.ExportFiles(r.Context(), id, out) })
+	})
+	mux.HandleFunc("PUT /v1/sites/{id}/transfer/files", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		receive(w, r, "files", func(in io.Reader) error { return mgr.ImportFiles(r.Context(), id, in) })
+	})
+	mux.HandleFunc("GET /v1/sites/{id}/transfer/history", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		stream(w, r, id+"-history.tar.gz", func(out io.Writer) error { return mgr.ExportHistory(r.Context(), id, out) })
+	})
+	mux.HandleFunc("PUT /v1/sites/{id}/transfer/history", func(w http.ResponseWriter, r *http.Request) {
+		id := r.PathValue("id")
+		receive(w, r, "history", func(in io.Reader) error { return mgr.ImportHistory(r.Context(), id, in) })
+	})
+	mux.HandleFunc("PUT /v1/sites/{id}/maintenance", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Down *bool `json:"down"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil || body.Down == nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {down: true|false}"))
+			return
+		}
+		if err := mgr.SetMaintenance(r.Context(), r.PathValue("id"), *body.Down); err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, fail("maintenance_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"down": *body.Down}))
 	})
 
 	mux.HandleFunc("DELETE /v1/sites/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -771,4 +960,13 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	})
 
 	return mux
+}
+
+// be0 names the file a batch error is about, or "".
+func be0(err error) string {
+	var be *sites.BatchError
+	if errors.As(err, &be) {
+		return be.Path
+	}
+	return ""
 }

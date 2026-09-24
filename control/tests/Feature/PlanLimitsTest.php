@@ -21,7 +21,7 @@ class PlanLimitsTest extends TestCase
         config([
             'fleet.hosts' => ['h1' => ['ip' => '10.0.0.1', 'tunnel_port' => 9441, 'capacity' => 10]],
             'fleet.tokens' => ['h1' => 'token-h1'],
-            'billing.plans.pro.variant_id' => '777',
+            'billing.plans.starter.variant_id' => '777',
         ]);
 
         Http::fake([
@@ -65,12 +65,12 @@ class PlanLimitsTest extends TestCase
 
     public function test_an_upgrade_is_applied_to_sites_that_already_exist(): void
     {
-        $user = User::factory()->create(['plan' => 'starter']);
+        $user = User::factory()->create(['plan' => 'free']);
         $site = $this->siteFor($user);
 
         $this->upgradeWebhook($user)->assertOk();
 
-        $pro = config('billing.plans.pro');
+        $pro = config('billing.plans.starter');
         Http::assertSent(fn ($r) => $r->method() === 'PUT' && str_ends_with($r->url(), '/v1/sites/shop/limits')
             && $r['cpuLimit'] === $pro['cpu'] && $r['memLimit'] === $pro['memory'] && $r['diskGb'] === $pro['disk_gb']);
 
@@ -82,26 +82,26 @@ class PlanLimitsTest extends TestCase
 
     public function test_a_host_being_down_never_fails_the_payment_and_is_retried(): void
     {
-        $user = User::factory()->create(['plan' => 'starter']);
+        $user = User::factory()->create(['plan' => 'free']);
         $site = $this->siteFor($user);
         $this->hostDown = true;
 
         // The payment is recorded regardless: a 500 here would make Lemon
         // Squeezy retry an event we have already applied.
         $this->upgradeWebhook($user)->assertOk();
-        $this->assertSame('pro', $user->fresh()->plan);
+        $this->assertSame('starter', $user->fresh()->plan);
         $this->assertTrue($site->fresh()->limits_pending, 'An unapplied upgrade must be marked, not forgotten.');
 
         // The host comes back; the retry finishes the job.
         $this->hostDown = false;
         $this->assertSame(0, Artisan::call('fleet:apply-limits'));
         $this->assertFalse($site->fresh()->limits_pending);
-        $this->assertSame(config('billing.plans.pro.cpu'), $site->fresh()->cpu_limit);
+        $this->assertSame(config('billing.plans.starter.cpu'), $site->fresh()->cpu_limit);
     }
 
     public function test_a_downgrade_never_records_a_smaller_disk_than_the_site_has(): void
     {
-        $user = User::factory()->create(['plan' => 'free']); // 1 GB plan
+        $user = User::factory()->create(['plan' => 'free']); // 2 GB plan
         $site = $this->siteFor($user);                        // but the site has 5 GB
 
         app(\App\Fleet\PlanLimits::class)->applyTo($user);
@@ -132,11 +132,11 @@ class PlanLimitsTest extends TestCase
             '127.0.0.1:944*/v1/host' => Http::response(['ok' => true, 'version' => config('fleet.min_agent_version'), 'sites' => 0, 'running' => 0]),
             '127.0.0.1:944*/v1/sites' => Http::response(['ok' => true, 'site' => ['id' => 'big', 'port' => 20000]], 201),
         ]);
-        $user = User::factory()->create(['plan' => 'studio']);
+        $user = User::factory()->create(['plan' => 'starter']);
 
         $site = \App\Fleet\Provisioner::make()->provision($user, 'big');
 
-        Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/v1/sites') && $r['diskGb'] === config('billing.plans.studio.disk_gb'));
-        $this->assertSame(config('billing.plans.studio.disk_gb'), $site->disk_gb);
+        Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/v1/sites') && $r['diskGb'] === config('billing.plans.starter.disk_gb'));
+        $this->assertSame(config('billing.plans.starter.disk_gb'), $site->disk_gb);
     }
 }

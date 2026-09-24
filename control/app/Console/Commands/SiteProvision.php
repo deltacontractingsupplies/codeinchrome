@@ -8,13 +8,20 @@ use Illuminate\Console\Command;
 
 class SiteProvision extends Command
 {
-    protected $signature = 'site:provision {email} {name}';
+    protected $signature = 'site:provision {email} {name} {--host= : put it on this host (probing a new one)} {--create : create the account if missing - @codeinchrome.test addresses only}';
 
     protected $description = 'Create a site for a user, end to end';
 
     public function handle(): int
     {
-        $user = User::where('email', $this->argument('email'))->first();
+        $email = (string) $this->argument('email');
+        if ($this->option('create') && str_ends_with($email, '@codeinchrome.test')) {
+            // An operator's probe account: free, with no trial clock, so it
+            // reserves nothing and nothing it owns ever expires on its own.
+            User::firstOrCreate(['email' => $email], ['name' => 'Probe', 'password' => \Illuminate\Support\Str::random(40), 'plan' => 'free'])
+                ->forceFill(['email_verified_at' => now()])->save();
+        }
+        $user = User::where('email', $email)->first();
         if (! $user) {
             $this->error("No user with email {$this->argument('email')}.");
 
@@ -22,7 +29,7 @@ class SiteProvision extends Command
         }
 
         try {
-            $site = Provisioner::make()->provision($user, $this->argument('name'));
+            $site = Provisioner::make()->provision($user, $this->argument('name'), $this->option('host') ?: null);
         } catch (\Throwable $e) {
             $this->error($e->getMessage());
 

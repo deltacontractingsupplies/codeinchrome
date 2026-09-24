@@ -341,23 +341,34 @@ func (m *Manager) writeLocked(id, rel, content, expect string) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
+	root, relAbs, err := m.checkWrite(id, rel, content, expect)
+	if err != nil {
+		return "", err
+	}
+	return writePrepared(root, relAbs, content)
+}
+
+// checkWrite does everything a write needs to know before it touches the
+// disk: the size, the path, and the caller's expectation of what is there.
+// The caller holds m.mu until the write itself is done.
+func (m *Manager) checkWrite(id, rel, content, expect string) (root, relAbs string, err error) {
 	if len(content) > MaxFileSize {
-		return "", fmt.Errorf("content is %d bytes; the limit is %d", len(content), MaxFileSize)
+		return "", "", fmt.Errorf("content is %d bytes; the limit is %d", len(content), MaxFileSize)
 	}
 
 	abs, err := m.resolve(id, rel)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
-	root, err := m.realRoot(id)
+	root, err = m.realRoot(id)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	// Everything below goes through the *Beneath helpers, which re-check in
 	// the kernel what resolve() checked in user space: the site's own code
 	// can replace a folder with a symlink between the two, and the agent is
 	// root.
-	relAbs := strings.TrimPrefix(abs, root)
+	relAbs = strings.TrimPrefix(abs, root)
 
 	var current []byte
 	exists := false
@@ -365,7 +376,7 @@ func (m *Manager) writeLocked(id, rel, content, expect string) (string, error) {
 		info, serr := f.Stat()
 		if serr == nil && info.IsDir() {
 			f.Close()
-			return "", fmt.Errorf("that is a directory")
+			return "", "", fmt.Errorf("that is a directory")
 		}
 		if expect != "" {
 			current, oerr = io.ReadAll(io.LimitReader(f, MaxFileSize+1))
@@ -373,20 +384,24 @@ func (m *Manager) writeLocked(id, rel, content, expect string) (string, error) {
 		}
 		f.Close()
 	} else if !errors.Is(oerr, os.ErrNotExist) {
-		return "", fmt.Errorf("cannot write there")
+		return "", "", fmt.Errorf("cannot write there")
 	}
 
 	if expect != "" {
 		switch {
 		case expect == "absent" && exists:
-			return "", ErrConflict
+			return "", "", ErrConflict
 		case expect != "absent" && !exists:
-			return "", ErrConflict
+			return "", "", ErrConflict
 		case expect != "absent" && Revision(current) != expect:
-			return "", ErrConflict
+			return "", "", ErrConflict
 		}
 	}
 
+	return root, relAbs, nil
+}
+
+func writePrepared(root, relAbs, content string) (string, error) {
 	// Owned by www-data, or the site's own PHP cannot read what the panel just
 	// wrote - and 0640 so it is not world-readable on the host.
 	if err := replaceBeneath(root, relAbs, 0o640, func(f *os.File) error {

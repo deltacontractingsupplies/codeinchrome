@@ -7,7 +7,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 class Order extends Model
 {
-    protected $fillable = ['reference', 'email', 'total_cents', 'status', 'stripe_session_id', 'paid_at'];
+    protected $fillable = ['reference', 'email', 'name', 'phone', 'address', 'payment_method', 'total_cents', 'status', 'paid_at'];
 
     protected function casts(): array
     {
@@ -33,5 +33,17 @@ class Order extends Model
         [$local, $domain] = explode('@', $this->email, 2);
 
         return mb_substr($local, 0, 1).'***@'.$domain;
+    }
+
+    /** A name as the public demo admin may see it: first letter and the rest hidden. */
+    public function maskedName(): string
+    {
+        return $this->name ? mb_substr($this->name, 0, 1).'***' : '-';
+    }
+
+    /** A phone number with all but its last two digits hidden. */
+    public function maskedPhone(): string
+    {
+        return $this->phone ? '*** '.mb_substr(preg_replace('/\D/', '', $this->phone), -2) : '-';
     }
 }

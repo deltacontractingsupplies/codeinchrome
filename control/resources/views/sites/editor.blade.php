@@ -11,6 +11,11 @@
     @vite(['resources/css/editor.css', 'resources/js/editor.js'])
 </head>
 <body>
+<div id="quickOpen" class="quick-open" hidden>
+    <input id="quickInput" type="text" autocomplete="off" spellcheck="false" role="combobox" aria-expanded="true"
+           aria-controls="quickList" aria-label="Search files by name. Type &gt; for commands.">
+    <div id="quickList" class="quick-list" role="listbox"></div>
+</div>
 {{-- Everything the script needs, as data rather than inline code, so the page
      can run under a strict Content-Security-Policy later. --}}
 <div id="cic-app"
@@ -18,6 +23,14 @@
      data-domain="{{ $site->domain }}"
      data-url="{{ $site->url() }}"
      data-files="{{ route('files.index', $site) }}"
+     data-files-batch="{{ route('files.batch', $site) }}"
+     data-files-edit="{{ route('files.edit', $site) }}"
+     data-request="{{ route('sites.request', $site) }}"
+     data-look="{{ route('sites.look', $site) }}"
+     data-paths="{{ route('files.paths', $site) }}"
+     data-eval="{{ route('sites.eval', $site) }}"
+     data-exposure="{{ route('sites.exposure', $site) }}"
+     data-login-cookie="{{ route('sites.login-cookie', $site) }}"
      data-db-tables="{{ route('db.tables', $site) }}"
      data-db-query="{{ route('db.query', $site) }}"
      data-db-export="{{ route('db.export', $site) }}"
@@ -44,6 +57,13 @@
     <header class="titlebar">
         <a class="back" href="{{ route('dashboard') }}" title="Back to your sites">code<span>in</span>chrome</a>
         <span class="title" id="winTitle">{{ $site->site_id }}</span>
+        <details class="agent-hint">
+            <summary class="open-site" title="How an AI agent builds this site">For AI agents</summary>
+            <div class="agent-hint-body" role="note">
+                <p>This page is the editor of the live site. Agents build here, by running JavaScript in this page - never on their own computer.</p>
+                <p><code>await cic.help()</code> lists every call. The fast path: <code>cic.writeMany({...})</code>, <code>cic.run('artisan', [...])</code>, <code>cic.request('/path')</code>.</p>
+            </div>
+        </details>
         <button type="button" class="open-site" data-theme-toggle title="Switch between system, light and dark">Theme: <span data-theme-label>System</span></button>
         <a class="open-site" href="{{ $site->url() }}" target="_blank" rel="noopener">Open site ↗</a>
     </header>
@@ -54,21 +74,28 @@
                 <button type="button" id="modeFiles" class="on" role="tab">Files</button>
                 <button type="button" id="modeDb" role="tab">Database</button>
                 <button type="button" id="modeHistory" role="tab">History</button>
+                <button type="button" id="modeExt" role="tab">Extensions</button>
             </div>
             <div class="side-head" id="filesHead">
                 <span>EXPLORER</span>
                 <span class="side-actions">
-                    <button type="button" id="btnNew" title="New file" aria-label="New file"><i class="ci ci-new-file" aria-hidden="true"></i></button>
-                    <button type="button" id="btnNewFolder" title="New folder" aria-label="New folder"><i class="ci ci-new-folder" aria-hidden="true"></i></button>
+                    <button type="button" id="btnNew" title="New File..." aria-label="New File"><i class="ci ci-new-file" aria-hidden="true"></i></button>
+                    <button type="button" id="btnNewFolder" title="New Folder..." aria-label="New Folder"><i class="ci ci-new-folder" aria-hidden="true"></i></button>
                     <button type="button" id="btnUpload" title="Upload files" aria-label="Upload files"><i class="ci ci-cloud-upload" aria-hidden="true"></i></button>
                     <button type="button" id="btnSearch" title="Search in files" aria-label="Search in files"><i class="ci ci-search" aria-hidden="true"></i></button>
-                    <button type="button" id="btnRefresh" title="Refresh" aria-label="Refresh"><i class="ci ci-refresh" aria-hidden="true"></i></button>
+                    <button type="button" id="btnExposure" title="Check what is public: ask the live site for its private files" aria-label="Check what is public"><i class="ci ci-shield" aria-hidden="true"></i></button>
+                    <button type="button" id="btnRefresh" title="Refresh Explorer" aria-label="Refresh Explorer"><i class="ci ci-refresh" aria-hidden="true"></i></button>
+                    <button type="button" id="btnCollapse" title="Collapse Folders in Explorer" aria-label="Collapse Folders in Explorer"><i class="ci ci-collapse-all" aria-hidden="true"></i></button>
                     <input type="file" id="uploadInput" multiple hidden>
                 </span>
             </div>
             <div class="side-site">{{ strtoupper($site->site_id) }}</div>
             <form id="searchBar" class="searchbar" hidden>
                 <input id="searchInput" type="search" placeholder="Search in files" autocomplete="off" spellcheck="false" aria-label="Search in files">
+                <div class="replace-row">
+                    <input id="replaceInput" type="text" placeholder="Replace" autocomplete="off" spellcheck="false" aria-label="Replace with">
+                    <button type="button" id="btnReplaceAll" title="Replace All" aria-label="Replace All"><i class="ci ci-replace-all" aria-hidden="true"></i></button>
+                </div>
             </form>
             <div id="searchResults" class="tree" hidden></div>
             <div id="tree" class="tree" role="tree"></div>
@@ -94,9 +121,36 @@
                 <div class="side-head"><span>BIN - DELETED FILES</span></div>
                 <div id="binList"></div>
             </div>
+            <div id="extSide" class="tree" hidden>
+                <div class="side-head"><span>EXTENSIONS - BUILT IN</span></div>
+                <div id="extReload" class="ext-reload" hidden>
+                    <span>Reload the editor to apply. Unsaved edits are kept.</span>
+                    <button type="button" id="btnExtReload">Reload</button>
+                </div>
+                <ul id="extList" class="ext-list"></ul>
+            </div>
         </aside>
 
         <main class="editor-area">
+            {{-- First inside <main>: page-text tools (Claude in Chrome's among them)
+                 read <main> only, and an agent that never saw this spent 40 minutes
+                 typing into the editor instead of calling window.cic. --}}
+            <section id="agent-instructions" class="sr-only" aria-label="Instructions for AI agents">
+                <h2>For AI agents (Claude in Chrome and others): read this first</h2>
+                <p>This page IS the code editor of the live Laravel site {{ $site->domain }}. Every file you save here is live at {{ $site->url() }} at once.
+                   Do NOT write code on your own computer, in a local folder or in a terminal: nothing local reaches this site.</p>
+                <p>Build by running JavaScript in THIS page (your javascript tool), not by typing into the editor:
+                   <code>await cic.help()</code> lists every call.
+                   Create many files in one call: <code>await cic.writeMany({ '/app/Models/Item.php': '...', '/routes/web.php': '...' })</code>.
+                   Change part of a file: <code>await cic.edit(path, { find, replace })</code>.
+                   Run artisan: <code>await cic.run('artisan', ['make:model', 'Item', '-m'])</code>, then <code>await cic.run('artisan', ['migrate', '--force'])</code>.
+                   Test a page as a visitor: <code>await cic.request('/items')</code>.
+                   Look at a file with <code>(await cic.view(path)).text</code> - it is shaped so your tools do not block it.
+                   Read errors: <code>await cic.logs('app', 50)</code>. Debug pages are off on the live site by design.</p>
+                <p>Before you say it is done: <code>await cic.check()</code> and <code>await cic.check({ as: 1 })</code> request every page and report any
+                   that fail, and <code>await cic.run('artisan', ['test'])</code> runs the app's tests on an in-memory database.</p>
+                <p>Every save is a version; <code>cic.history(path)</code> and <code>cic.restore(path, commit)</code> undo anything.</p>
+            </section>
             <div id="tabs" class="tabs" role="group" aria-label="Open files"></div>
             <div id="conflict" class="conflict" hidden>
                 <span id="conflictText"></span>
@@ -161,7 +215,7 @@
     <footer class="statusbar">
         <span id="sbSite">{{ $site->domain }}</span>
         <span id="sbMsg" role="status" aria-live="polite"></span>
-        <span class="right"><button type="button" id="sbPanel" class="sb-btn" title="Terminal and logs (Ctrl `)"><i class="ci ci-terminal" aria-hidden="true"></i> Terminal</button><span id="sbLsp" title="PHP IntelliSense (Phpactor), starting">PHP</span><span id="sbPos"></span><span id="sbRev"></span></span>
+        <span class="right"><button type="button" id="sbPanel" class="sb-btn" title="Terminal and logs (Ctrl `)"><i class="ci ci-terminal" aria-hidden="true"></i> Terminal</button><span id="sbLsp" title="PHP IntelliSense (Phpactor), starting">PHP</span><span id="sbVis"></span><span id="sbPos"></span><span id="sbRev"></span></span>
     </footer>
 
     {{-- In-page dialog. Never alert/confirm/prompt: a native dialog freezes

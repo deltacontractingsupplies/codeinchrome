@@ -77,21 +77,28 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
           shellcheck -S warning infra/*.sh
-      - name: no code may target the production box
-        # 192.0.2.1 runs live sites of another business and is not part of this
-        # fleet. Code that learns its address is code that can break it.
+      - name: no code may target a server outside the fleet
+        # The addresses are not in this repository (they are in the operator's
+        # infra/hosts.local.env); CI gets them from the CIC_FORBIDDEN_HOSTS
+        # secret and skips the check where it is not set (forks).
         #
         # A mention is allowed ONLY on a line carrying the literal marker
         # [fleet-guard-ok], which a person has to add deliberately. Matching on
         # nearby words like "forbidden" instead would let any comment through,
         # which is how the first version of this check passed on a line that
         # simply described the host.
+        env:
+          FORBIDDEN: ${{ secrets.CIC_FORBIDDEN_HOSTS }}
         run: |
-          if grep -rn "157\.180\.115\.197" \
-               --include='*.sh' --include='*.php' --include='*.go' --include='*.js' . \
-             | grep -v '\[fleet-guard-ok\]'; then
+          if [ -z "$FORBIDDEN" ]; then echo "no CIC_FORBIDDEN_HOSTS secret: skipped"; exit 0; fi
+          found=0
+          for ip in $FORBIDDEN; do
+            if grep -rnF "$ip" --include='*.sh' --include='*.php' --include='*.go' --include='*.js' . \
+               | grep -v '\[fleet-guard-ok\]'; then found=1; fi
+          done
+          if [ "$found" = 1 ]; then
             echo
-            echo "The production host is referenced without a [fleet-guard-ok] marker."
+            echo "A server outside the fleet is referenced without a [fleet-guard-ok] marker."
             exit 1
           fi
           echo "clean"

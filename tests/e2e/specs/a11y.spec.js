@@ -92,7 +92,8 @@ test('every page meets WCAG 2.1 AA (no serious or critical violations), in both 
 
     await page.keyboard.press('End');
     const last = await page.locator('#tree .node:focus').getAttribute('data-path');
-    await page.keyboard.press('Enter');
+    // Space opens, as in VS Code (on macOS, Enter renames).
+    await page.keyboard.press('Space');
     await expect(page.locator('.tab-name[aria-current="true"]')).toHaveText(last.split('/').pop());
   });
 

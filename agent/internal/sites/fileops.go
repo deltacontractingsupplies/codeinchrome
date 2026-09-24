@@ -89,6 +89,9 @@ func (m *Manager) Rename(ctx context.Context, id, from, to string) error {
 	if strings.HasPrefix(dst, src+string(os.PathSeparator)) {
 		return fmt.Errorf("a folder cannot be moved into itself")
 	}
+	if err := refuseSecretIntoPublic(root, src, dst); err != nil {
+		return err
+	}
 	if err := renameBeneath(root, strings.TrimPrefix(src, root), strings.TrimPrefix(dst, root)); err != nil {
 		if errors.Is(err, errExists) || errors.Is(err, errOutside) {
 			return err
@@ -130,6 +133,9 @@ func (m *Manager) Copy(ctx context.Context, id, from, to string) error {
 		return fmt.Errorf("a folder cannot be copied into itself")
 	}
 	root, _ := m.realRoot(id)
+	if err := refuseSecretIntoPublic(root, src, dst); err != nil {
+		return err
+	}
 	dstRel := strings.TrimPrefix(dst, root)
 	budget := treeBudget{}
 	created := false
@@ -538,4 +544,79 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 	}
 	m.record(ctx, id, fmt.Sprintf("unzip %s into %s", m.relativeTo(id, src), m.relativeTo(id, dstRoot)))
 	return nil
+}
+
+// refuseSecretIntoPublic stops a .env file - the site's keys and database
+// password - from being moved or copied into public/, the only directory the
+// web serves. The edge refuses any path that LOOKS like a secret (caddy.go's
+// secretPath), but a move can give it any name at all: public/config.txt
+// would be served. A folder being moved or copied in is refused if it holds one.
+func refuseSecretIntoPublic(root, src, dst string) error {
+	pub := filepath.Join(root, "public")
+	if dst != pub && !strings.HasPrefix(dst, pub+string(os.PathSeparator)) {
+		return nil
+	}
+	found := false
+	_ = walkBeneath(root, src, func(p string, d fs.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && isEnvFile(d.Name()) {
+			found = true
+			return fs.SkipAll
+		}
+		return nil
+	})
+	if found {
+		return fmt.Errorf("a .env file cannot go into public/: everything there is served to the world")
+	}
+	return nil
+}
+
+// isEnvFile: .env, .env.backup, .env.production, production.env, ...
+func isEnvFile(name string) bool {
+	n := strings.ToLower(name)
+	return n == ".env" || strings.HasPrefix(n, ".env.") || strings.HasSuffix(n, ".env")
+}
+
+// quickOpenSkip are folders Quick Open does not list: dependencies, caches
+// and generated files, which VS Code's files.exclude and search.exclude hide
+// by default too.
+var quickOpenSkip = map[string]bool{
+	"vendor": true, "node_modules": true, ".git": true, "storage/framework": true, "bootstrap/cache": true, "public/build": true,
+}
+
+const maxQuickOpen = 20000
+
+// Paths lists every file in the site for Quick Open (⌘P), site-relative and
+// sorted, skipping dependencies and caches. Truncated at maxQuickOpen.
+func (m *Manager) Paths(_ context.Context, id string) ([]string, bool, error) {
+	root, err := m.realRoot(id)
+	if err != nil {
+		return nil, false, err
+	}
+	var out []string
+	truncated := false
+	err = walkBeneath(root, root, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil || d == nil {
+			return nil
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(p, root), "/")
+		if d.IsDir() {
+			if quickOpenSkip[rel] {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		if len(out) >= maxQuickOpen {
+			truncated = true
+			return fs.SkipAll
+		}
+		out = append(out, "/"+rel)
+		return nil
+	})
+	if errors.Is(err, fs.SkipAll) {
+		err = nil
+	}
+	return out, truncated, err
 }

@@ -121,6 +121,22 @@ HOSTSITE
 else
   warn "CIC_HOST_NAME not set: no permanent host site (run through deploy-host.sh)"
 fi
+# A name under the platform domain that this host does not serve - a deleted
+# site, a typo, a scanner - gets a plain 404. With the origin wildcard
+# certificate loaded, TLS completes for ANY such name, and Caddy then answered
+# an empty 200 (found by the e2e suite: a deleted site looked alive). Exact
+# site names always win over this wildcard; custom domains never reach it.
+if [[ -s /etc/caddy/origin/cert.pem && -s /etc/caddy/origin/key.pem ]]; then
+  cat > "$CIC/caddy/sites/_zz_unknown.caddy" <<UNKNOWN
+# Any platform name this host does not serve. Managed.
+*.${CIC_PLATFORM_DOMAIN:-codeinchrome.com} {
+	tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem
+	header -Server
+	respond "Not found" 404
+}
+UNKNOWN
+  ok "unknown platform names answer 404"
+fi
 caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || die "Caddyfile invalid"
 systemctl reload caddy 2>/dev/null || systemctl restart caddy
 ok "caddy reloaded"

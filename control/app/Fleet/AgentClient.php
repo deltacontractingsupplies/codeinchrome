@@ -124,9 +124,10 @@ class AgentClient
         return $this->sendRaw('post', "/v1/sites/$id/command", ['tool' => $tool, 'args' => array_values($args), 'confirm' => $confirm]);
     }
 
-    public function logs(string $id, string $source, int $lines = 200): array
+    /** @param  array{since?: int, file?: string}  $mark  only what the app log gained after this */
+    public function logs(string $id, string $source, int $lines = 200, array $mark = []): array
     {
-        return $this->send('get', "/v1/sites/$id/logs", query: ['source' => $source, 'lines' => $lines])['log'] ?? [];
+        return $this->send('get', "/v1/sites/$id/logs", query: ['source' => $source, 'lines' => $lines] + $mark)['log'] ?? [];
     }
 
     /** Replace the site's verified custom domains; the agent rewrites the vhost. */
@@ -184,6 +185,42 @@ class AgentClient
         return $this->send('put', "/v1/sites/$id/files", ['path' => $path, 'content' => $content, 'expect' => $expect]);
     }
 
+    /**
+     * Many files, checked together and written together as one version.
+     *
+     * @param  list<array{path: string, content: string, expect?: string}>  $files
+     */
+    public function writeMany(string $id, array $files, string $message = ''): array
+    {
+        return $this->send('put', "/v1/sites/$id/files/batch", ['files' => $files, 'message' => $message]);
+    }
+
+    /** Find-and-replace edits applied to one file as one version. */
+    public function editFile(string $id, string $path, array $edits, string $expect = ''): array
+    {
+        return $this->send('post', "/v1/sites/$id/files/edit", ['path' => $path, 'edits' => $edits, 'expect' => $expect]);
+    }
+
+    /** PHP run inside the site's booted application: {output, exitCode, truncated, timedOut, elapsedMs}. */
+    public function evalPhp(string $id, string $code): array
+    {
+        return $this->send('post', "/v1/sites/$id/eval", ['code' => $code])['result'] ?? [];
+    }
+
+    /** A session cookie for one of the site's OWN users, from the site's own session store: {name, value}. */
+    public function loginCookie(string $id, int $userId, string $guard = 'web'): array
+    {
+        $r = $this->send('post', "/v1/sites/$id/login-cookie", ['userId' => $userId, 'guard' => $guard]);
+
+        return ['name' => $r['name'] ?? '', 'value' => $r['value'] ?? ''];
+    }
+
+    /** A request to the site itself, made on its host: {status, headers, body, truncated, ms}. */
+    public function siteRequest(string $id, array $request): array
+    {
+        return $this->send('post', "/v1/sites/$id/request", $request)['response'] ?? [];
+    }
+
     public function deleteFile(string $id, string $path): bool
     {
         return (bool) ($this->send('delete', "/v1/sites/$id/files", query: ['path' => $path])['deleted'] ?? false);
@@ -219,6 +256,12 @@ class AgentClient
         return $this->send('put', "/v1/sites/$id/php", [
             'memoryMB' => $memoryMB, 'maxExecutionSeconds' => $maxExecutionSeconds, 'uploadMB' => $uploadMB,
         ])['applied'] ?? [];
+    }
+
+    /** Pause (container stopped, a 503 page served) or resume a site. */
+    public function setSuspended(string $id, bool $suspended): array
+    {
+        return $this->send('put', "/v1/sites/$id/suspended", ['suspended' => $suspended])['applied'] ?? [];
     }
 
     /** Switch the site's queue worker, scheduler and Reverb. Replaces the container. */
@@ -333,6 +376,14 @@ class AgentClient
         return $this->send('delete', "/v1/sites/$id/tree", query: ['path' => $path, 'confirm' => $confirm ? 1 : 0]);
     }
 
+    /** Every file path in the site for Quick Open: ['paths' => [...], 'truncated' => bool]. */
+    public function paths(string $id): array
+    {
+        $r = $this->send('get', "/v1/sites/$id/paths");
+
+        return ['paths' => $r['paths'] ?? [], 'truncated' => (bool) ($r['truncated'] ?? false)];
+    }
+
     public function search(string $id, string $q, int $limit = 200): array
     {
         return $this->send('get', "/v1/sites/$id/search", query: ['q' => $q, 'limit' => $limit])['hits'] ?? [];
@@ -405,6 +456,51 @@ class AgentClient
     }
 
     /** Loads a .sql or .sql.gz dump; the agent saves the current database first. */
+    /**
+     * A site's files or version history as a gzipped tar stream, for moving
+     * the site to another host (SiteMover). $kind: files | history.
+     */
+    public function transferExport(string $id, string $kind): \Psr\Http\Message\StreamInterface
+    {
+        try {
+            $response = Http::timeout(7200)->withToken($this->token)->withOptions(['stream' => true])
+                ->get($this->baseUrl."/v1/sites/$id/transfer/$kind");
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}].", previous: $e);
+        }
+        if (! $response->successful() || str_contains((string) $response->header('Content-Type'), 'json')) {
+            $json = json_decode((string) $response->body(), true) ?? [];
+            throw new AgentRefused(sprintf('Agent on [%s] refused the %s export: %s (%s)', $this->host, $kind,
+                $json['error'] ?? 'unknown_error', $json['hint'] ?? 'no hint given'), detail: $json);
+        }
+
+        return $response->toPsrResponse()->getBody();
+    }
+
+    public function transferImport(string $id, string $kind, $stream): array
+    {
+        try {
+            $response = Http::timeout(7200)->acceptJson()->withToken($this->token)
+                ->withBody(Utils::streamFor($stream), 'application/gzip')
+                ->put($this->baseUrl."/v1/sites/$id/transfer/$kind");
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}]. Whether the import took effect is UNKNOWN.", previous: $e);
+        }
+        $json = $response->json() ?? [];
+        if (($json['ok'] ?? false) !== true) {
+            throw new AgentRefused(sprintf('Agent on [%s] refused the %s import: %s (%s)', $this->host, $kind,
+                $json['error'] ?? 'unknown_error', $json['hint'] ?? 'no hint given'), detail: $json);
+        }
+
+        return $json;
+    }
+
+    /** Laravel's maintenance mode on the site, for the minutes a move takes. */
+    public function setMaintenance(string $id, bool $down): void
+    {
+        $this->send('put', "/v1/sites/$id/maintenance", ['down' => $down]);
+    }
+
     public function dbImport(string $id, $stream): array
     {
         try {

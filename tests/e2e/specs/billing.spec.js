@@ -3,8 +3,8 @@ import { confirmSignup, billingOf, lsSubscription, lsCancel, lsResume, lsCancelA
 
 /**
  * A new customer buys a plan, end to end, against the REAL Lemon Squeezy
- * checkout in TEST MODE: sign up, choose Pro, pay with Lemon Squeezy's
- * published test card, and watch the signed webhook move the account to Pro.
+ * checkout in TEST MODE: sign up, choose Starter, pay with Lemon Squeezy's
+ * published test card, and watch the signed webhook move the account to Starter.
  * Then cancel and resume through the Lemon Squeezy API and check the webhook
  * keeps the account in step each time.
  *
@@ -34,13 +34,13 @@ async function waitForBilling(page, predicate, what) {
   throw new Error(`the webhook never delivered: ${what} (last state ${JSON.stringify(billingOf(email))})`);
 }
 
-test('a new customer pays for Pro, and cancel/resume stay in step', async ({ page }) => {
+test('a new customer pays for Starter, and cancel/resume stay in step', async ({ page }) => {
   test.setTimeout(300_000);
   page.on('dialog', (d) => { throw new Error(`native dialog: ${d.message()}`); });
   let subscriptionId;
 
   try {
-  await test.step('sign up; the account starts on Free', async () => {
+  await test.step('sign up; the account starts on the free trial', async () => {
     await page.goto('/register');
     await page.getByLabel('Name').fill('Billing Runner');
     await page.getByLabel('Email').fill(email);
@@ -50,15 +50,18 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
     await confirmSignup(page, email);
 
     await page.goto('/billing');
-    await expect(page.getByText('You are on the Free plan')).toBeVisible();
+    await expect(page.getByText('You are on the Free trial plan')).toBeVisible();
   });
 
-  await test.step('choose Pro: the checkout is ours, in test mode, at the advertised price', async () => {
-    await page.getByRole('button', { name: 'Choose Pro' }).click();
+  await test.step('choose Starter: the checkout is ours, in test mode, at the advertised price', async () => {
+    await page.getByRole('button', { name: 'Choose Starter' }).click();
     await page.waitForURL(/codeinchrome\.lemonsqueezy\.com\/checkout/);
     await expect(page.getByText('Test mode is currently enabled')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Pro' })).toBeVisible();
-    await expect(page.getByText('$29.00 billed every month')).toBeVisible();
+    await expect(page.getByRole('heading', { name: 'Starter' })).toBeVisible();
+    await expect(page.getByText('$12.00 billed every month')).toBeVisible();
+    // Described from our plan config (Checkout::description): sites and storage, never CPU or memory.
+    await expect(page.getByText(/Laravel hosting with an AI agent in the editor: 3 sites, 5 GB of storage each \(15 GB in all\)/)).toBeVisible();
+    await expect(page.getByText(/\bCPU\b|MB RAM/)).toHaveCount(0);
   });
 
   await test.step('pay with the test card', async () => {
@@ -78,17 +81,17 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
       await page.keyboard.press('Enter');
     }
 
-    await page.getByRole('button', { name: /^Pay \$29\.00/ }).click();
+    await page.getByRole('button', { name: /^Pay \$12\.00/ }).click();
   });
 
-  await test.step('back on our billing page; the signed webhook moves the account to Pro', async () => {
+  await test.step('back on our billing page; the signed webhook moves the account to Starter', async () => {
     // Lemon Squeezy confirms on its own page; Continue follows redirect_url.
     await expect(page.getByRole('heading', { name: 'Thanks for your order!' })).toBeVisible({ timeout: 90_000 });
     await page.getByRole('button', { name: 'Continue' }).click();
     await page.waitForURL(/app\.codeinchrome\.com\/billing/, { timeout: 60_000 });
     await expect(page.getByText('Your payment is being confirmed')).toBeVisible();
 
-    const state = await waitForBilling(page, (s) => s.plan === 'pro' && s.status === 'active', 'plan pro, status active');
+    const state = await waitForBilling(page, (s) => s.plan === 'starter' && s.status === 'active', 'plan starter, status active');
     subscriptionId = state.id;
     expect(subscriptionId).toBeTruthy();
 
@@ -97,7 +100,7 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
     expect(sub.status).toBe('active');
 
     await page.goto('/billing');
-    await expect(page.getByText('You are on the Pro plan')).toBeVisible();
+    await expect(page.getByText('You are on the Starter plan')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Manage billing, card and cancellation' })).toBeVisible();
   });
 
@@ -110,10 +113,10 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
     await expect(page.getByText('Cancel your subscription in the billing portal first')).toBeVisible();
   });
 
-  await test.step('cancel: still Pro until the paid period ends, and the page says when', async () => {
+  await test.step('cancel: still Starter until the paid period ends, and the page says when', async () => {
     await lsCancel(subscriptionId);
     const state = await waitForBilling(page, (s) => s.status === 'cancelled', 'status cancelled');
-    expect(state.plan).toBe('pro');
+    expect(state.plan).toBe('starter');
     expect(state.ends_at).toBeTruthy();
     await page.goto('/billing');
     await expect(page.getByText(/Subscription cancelled.*ends/)).toBeVisible();
@@ -122,7 +125,7 @@ test('a new customer pays for Pro, and cancel/resume stay in step', async ({ pag
   await test.step('resume: active again', async () => {
     await lsResume(subscriptionId);
     const state = await waitForBilling(page, (s) => s.status === 'active', 'status active again');
-    expect(state.plan).toBe('pro');
+    expect(state.plan).toBe('starter');
   });
 
   await test.step('cancel for good, so the test leaves no renewing subscription behind', async () => {

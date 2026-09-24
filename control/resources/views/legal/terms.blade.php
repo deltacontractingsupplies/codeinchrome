@@ -22,6 +22,9 @@
     <li>You must give a working email address and confirm it before creating sites.</li>
     <li>You are responsible for everything done through your account, including by any AI
         agent you let act for you. Keep your password private; we recommend two-factor sign-in.</li>
+    <li>An AI agent - Claude in Chrome, for example - is not part of our service. It comes from its own
+        provider (Anthropic, for Claude in Chrome), under that provider's terms, and is paid for
+        separately; our plans cover the hosting and the editor it works in.</li>
     <li>One person or organisation per account. You must be old enough to enter a contract where you live.</li>
 </ul>
 
@@ -52,12 +55,20 @@
     Paid plans are monthly subscriptions. Payments are handled by our reseller, Lemon Squeezy,
     which is the merchant of record for your order and handles the charge, invoices and sales
     tax. You can cancel at any time from the Billing page; your plan stays active until the end
-    of the period you have paid for, then the account returns to the Free plan. Refunds follow
-    our <a href="{{ route('refunds') }}">refund policy</a>.
+    of the period you have paid for. Refunds follow our <a href="{{ route('refunds') }}">refund policy</a>.
 </p>
 <p>
-    If your plan ends while you have more sites than the Free plan allows, your existing sites
-    keep running on the Free plan's resources; you cannot create more until you are within the limit.
+    New accounts get a free trial of {{ config('billing.trial.days') }} days, with no card. When a
+    trial ends without a paid plan, the account's sites are paused: they are not served and cannot be
+    edited, but their files and databases are kept, and you can download each database. They are
+    deleted {{ config('billing.trial.grace_days') }} days later unless you subscribe before then, in
+    which case they come back as they were. If a paid plan ends, the same happens with
+    {{ config('billing.trial.lapsed_grace_days') }} days before deletion. We email you before a trial
+    ends, when sites are paused (with the date they will be deleted), and when they are deleted.
+</p>
+<p>
+    A plan's storage covers its sites' files and databases together. While an account is over it,
+    new sites and uploads are refused; its sites keep running.
 </p>
 
 <h2>Availability and backups</h2>

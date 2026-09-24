@@ -88,6 +88,14 @@ class FileManagerController extends FileController
         return $this->attempt(fn () => ['hits' => AgentClient::for($site->host)->search($site->site_id, $d['q'])]);
     }
 
+    /** Every file path, for Quick Open (⌘P). */
+    public function paths(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->paths($site->site_id));
+    }
+
     public function upload(Request $request, Site $site): JsonResponse
     {
         $this->authorizeSite($request, $site);

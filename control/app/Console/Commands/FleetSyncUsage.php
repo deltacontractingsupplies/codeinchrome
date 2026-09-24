@@ -4,6 +4,8 @@ namespace App\Console\Commands;
 
 use App\Fleet\AgentClient;
 use App\Models\Site;
+use App\Models\User;
+use App\Notifications\PlanNotice;
 use Illuminate\Console\Command;
 
 /**
@@ -40,12 +42,43 @@ class FleetSyncUsage extends Command
                     'disk_used_bytes' => $u['diskMounted'] ? $u['diskUsedBytes'] : null,
                     'disk_size_bytes' => $u['diskMounted'] ? $u['diskSizeBytes'] : null,
                     'database_bytes' => $u['databaseBytes'],
+                    'inodes_used' => $u['diskMounted'] ? ($u['inodesUsed'] ?? null) : null,
+                    'inodes_total' => $u['diskMounted'] ? ($u['inodesTotal'] ?? null) : null,
                     'usage_at' => now(),
                 ]);
             }
             $this->line("$host: " . count($usage) . ' site(s) measured');
         }
 
+        $this->checkStorage();
+
         return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    /**
+     * A plan's storage is its total across every site's files and database.
+     * Each site's disk has its own kernel ceiling; the total is enforced here,
+     * from the measurements just taken: over it, an account cannot add a site
+     * or upload in bulk (see StorageLimit) until it is back under, and is told
+     * once. Sites keep running either way - nothing a customer's visitors see
+     * changes because of it.
+     */
+    private function checkStorage(): void
+    {
+        $totals = Site::whereNotIn('status', ['deleting', 'failed'])
+            ->selectRaw('user_id, SUM(COALESCE(disk_used_bytes, 0) + COALESCE(database_bytes, 0)) AS used')
+            ->groupBy('user_id')->pluck('used', 'user_id');
+
+        User::whereIn('id', $totals->keys())->orWhereNotNull('storage_over_at')->each(function (User $user) use ($totals) {
+            $limit = (int) ($user->planConfig()['storage_gb'] ?? 0) * 1024 ** 3;
+            $over = $limit > 0 && (int) ($totals[$user->id] ?? 0) > $limit;
+            if ($over && ! $user->storage_over_at) {
+                $user->forceFill(['storage_over_at' => now()])->save();
+                $user->notify(new PlanNotice('storage'));
+                $this->warn("{$user->email}: over the plan's storage");
+            } elseif (! $over && $user->storage_over_at) {
+                $user->forceFill(['storage_over_at' => null])->save();
+            }
+        });
     }
 }

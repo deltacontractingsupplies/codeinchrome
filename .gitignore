@@ -6,6 +6,8 @@
 *.key
 secrets/
 infra/state/
+# addresses no script may touch - never published (infra/hosts.env sources it)
+infra/hosts.local.env
 
 # build artefacts
 agent/bin/
@@ -36,3 +38,9 @@ playwright-report/
 # infra/publish-repo.sh builds the cleaned public copy here.
 /.publish/
 /.tmp-*
+infra/publish-scrub.local.pl
+infra/publish-deny.local
+
+# local run logs and caches
+/.tmp/
+__pycache__/

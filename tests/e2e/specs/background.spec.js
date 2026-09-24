@@ -104,7 +104,7 @@ Route::get('/php-probe', fn () => ini_get('memory_limit').' '.ini_get('upload_ma
     // A plan-busting value is refused with the reason, and nothing changes.
     await page.getByLabel('Memory limit').fill('1000');
     await page.getByRole('button', { name: 'Save PHP settings' }).click();
-    await expect(page.getByText(/memory limit must be 64 to 448 MB/)).toBeVisible({ timeout: 30_000 });
+    await expect(page.getByText(/memory limit must be 64 to 320 MB/)).toBeVisible({ timeout: 30_000 }); // Starter: 384 MB, less 64 for the rest
     const r = await httpsGet(`${siteName}.codeinchrome.com`, '/php-probe', address);
     expect(r.body).toBe('200M 48M 49M');
   });

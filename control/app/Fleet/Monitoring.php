@@ -25,7 +25,9 @@ class Monitoring
 {
     public const FAIL_THRESHOLD = 2;
 
-    public const DISK_FREE_MIN = 0.10;
+    // 25%, not 10%: disk is overcommitted (config/fleet.php), so the alert has
+    // to leave time to move sites off a filling host (fleet:move-site).
+    public const DISK_FREE_MIN = 0.25;
 
     public function run(): array
     {
@@ -36,6 +38,9 @@ class Monitoring
         }
 
         $results += $this->checkSites();
+        $results += $this->checkStock();
+        $results += $this->checkFiles();
+        $results += $this->checkBackups();
 
         foreach ($results as $key => [$label, $up, $detail, $latency]) {
             $this->record($key, $label, $up, $detail, $latency);
@@ -44,6 +49,71 @@ class Monitoring
         $this->retireGone(array_keys($results));
 
         return $results;
+    }
+
+    /**
+     * Stock running low is an incident like any other: alerted once when it
+     * drops below the threshold, and again when capacity is added - before
+     * it sells out, while there is still time to add a host (infra/add-host.sh).
+     *
+     * @return array<string, array{0: string, 1: bool, 2: string, 3: ?int}>
+     */
+    private function checkStock(): array
+    {
+        $stock = app(Stock::class);
+        $min = (int) config('fleet.stock.alert_below', 3);
+        $out = [];
+        foreach (config('billing.plans') as $key => $plan) {
+            if ($plan['price'] <= 0) {
+                continue;
+            }
+            $left = $stock->available($key);
+            $out["stock:$key"] = ["{$plan['name']} stock", $left >= $min,
+                $left >= $min ? "$left available" : "only $left left - add a host with infra/add-host.sh", null];
+        }
+
+        return $out;
+    }
+
+    /**
+     * A site's disk also fills up with FILES: past its inodes it cannot save
+     * anything, with bytes to spare (found on a live 1 GB disk). From the
+     * figures fleet:sync-usage keeps, alerted at 90%.
+     *
+     * @return array<string, array{0: string, 1: bool, 2: string, 3: ?int}>
+     */
+    /**
+     * Every live site has a complete backup (files and database) younger than
+     * BACKUP_MAX_AGE_HOURS: nightly, with room for a slow night. Watched from
+     * its first backup, or once it is that old without one.
+     */
+    public const BACKUP_MAX_AGE_HOURS = 30;
+
+    private function checkBackups(): array
+    {
+        $out = [];
+        $limit = now()->subHours(self::BACKUP_MAX_AGE_HOURS);
+        $sites = \App\Models\Site::where('status', 'live')
+            ->where(fn ($q) => $q->where('created_at', '<', $limit)->orWhereNotNull('last_backup_at'))->get();
+        foreach ($sites as $site) {
+            $last = $site->last_backup_at;
+            $out["site:{$site->site_id}:backup"] = ["{$site->domain} backups", $last !== null && $last->greaterThan($limit),
+                $last ? 'newest complete backup '.$last->diffForHumans() : 'no complete backup yet', null];
+        }
+
+        return $out;
+    }
+
+    private function checkFiles(): array
+    {
+        $out = [];
+        foreach (\App\Models\Site::where('status', 'live')->where('inodes_total', '>', 0)->get() as $site) {
+            $pct = (int) round(100 * $site->inodes_used / $site->inodes_total);
+            $out["site:{$site->site_id}:files"] = ["{$site->domain} files", $pct < 90,
+                "$pct% of its file slots used ({$site->inodes_used} of {$site->inodes_total})", null];
+        }
+
+        return $out;
     }
 
     /** @return array<string, array{0: string, 1: bool, 2: string, 3: ?int}> */
@@ -126,8 +196,11 @@ class Monitoring
      */
     private function retireGone(array $checkedKeys): void
     {
-        $live = Site::pluck('site_id')->map(fn ($id) => "site:$id")->all();
-        $gone = Monitor::where('key', 'like', 'site:%')->whereNotIn('key', $live)->pluck('key');
+        // A site's checks are "site:{id}" and "site:{id}:<what>" (its files, ...):
+        // retired when the site itself is gone, whatever the suffix.
+        $live = array_flip(Site::pluck('site_id')->all());
+        $gone = Monitor::where('key', 'like', 'site:%')->pluck('key')
+            ->filter(fn ($key) => ! isset($live[explode(':', $key)[1] ?? '']));
 
         foreach ($gone as $key) {
             Incident::where('monitor_key', $key)->whereNull('resolved_at')->get()->each(function ($i) {
@@ -162,7 +235,7 @@ class Monitoring
     }
 
     /** Returns whether the alert was delivered. Logged either way. */
-    private function alert(string $text): bool
+    public function alert(string $text): bool
     {
         Log::warning('monitoring alert', ['text' => $text]);
 

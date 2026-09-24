@@ -103,7 +103,19 @@ set -Eeuo pipefail
 CIC=/opt/codeinchrome
 chmod 0750 $CIC/bin/cic-backup
 set -a; . $CIC/etc/backup.env; set +a
-restic cat config >/dev/null 2>&1 || restic init >/dev/null
+# Initialise ONLY a repository restic says does not exist (exit 10). One it
+# cannot read just now - a stale lock (exit 11), a network blip - is not
+# missing, and `init` on it fails the whole run ("config file already exists").
+rc=0; restic cat config >/dev/null 2>&1 || rc=$?
+if (( rc == 11 )); then
+  restic unlock >/dev/null 2>&1 || true
+  rc=0; restic cat config >/dev/null 2>&1 || rc=$?
+fi
+case $rc in
+  0) ;;
+  10) restic init >/dev/null ;;
+  *) echo "cannot read the backup repository (restic exit $rc)" >&2; exit 1 ;;
+esac
 
 cat > /etc/systemd/system/cic-backup.service <<'UNIT'
 [Unit]
@@ -159,6 +171,9 @@ ids=$(restic snapshots --tag append-probe --json | python3 -c 'import json,sys; 
 [ -n "$ids" ] || { echo "no probe snapshots to try deleting"; exit 1; }
 # shellcheck disable=SC2086
 restic forget $ids >/dev/null 2>&1 || true
+# forget takes an EXCLUSIVE lock; if it is not released, the host's next
+# backup is refused. Removes stale locks only.
+restic unlock >/dev/null 2>&1 || true
 for i in $ids; do
   restic snapshots --json "$i" | grep -q "$i" || { echo "snapshot $i was DELETED"; exit 1; }
 done

@@ -32,8 +32,14 @@ test('a visitor can sign up, provision a site, and see it live', async ({ page }
   await test.step('the landing page is there', async () => {
     await page.goto('/');
     await expect(page.getByRole('heading', { level: 1 })).toContainText('Laravel app');
-    // The product itself is on the page: the editor and the agent at work.
-    await expect(page.getByRole('figure', { name: /The editor in the browser/ })).toBeVisible();
+    // The product itself is on the page: the real editor, showing a demo's live code.
+    const editor = page.getByRole('figure', { name: /The editor, showing/ });
+    await expect(editor).toBeVisible();
+    await expect(editor.getByRole('navigation', { name: 'Files' })).toBeVisible();
+    // How to start with Claude in Chrome, and who is paid for what.
+    await expect(page.getByRole('heading', { name: 'Get started with Claude in Chrome' })).toBeVisible();
+    await expect(page.getByRole('link', { name: /Add Claude in Chrome/ })).toHaveAttribute('href', /chromewebstore\.google\.com\/detail\/claude\//);
+    await expect(page.getByText('It does not include an AI agent.')).toBeVisible();
     await expect(page.getByText('Starter', { exact: true }).first()).toBeVisible();
   });
 

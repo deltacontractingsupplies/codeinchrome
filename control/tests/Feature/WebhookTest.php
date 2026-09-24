@@ -51,7 +51,7 @@ class WebhookTest extends TestCase
     public function test_it_rejects_a_forged_signature(): void
     {
         $user = User::factory()->create(['plan' => 'free']);
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
 
         $this->send($this->payload($user, '777'), signature: 'not-the-signature')
             ->assertStatus(401);
@@ -63,7 +63,7 @@ class WebhookTest extends TestCase
     public function test_it_rejects_a_signature_for_different_bytes(): void
     {
         $user = User::factory()->create(['plan' => 'free']);
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
 
         // A valid signature, but for a cheaper plan than the body now claims.
         $cheap = json_encode($this->payload($user, '111'));
@@ -85,50 +85,79 @@ class WebhookTest extends TestCase
     public function test_it_upgrades_the_plan_on_a_valid_subscription(): void
     {
         $user = User::factory()->create(['plan' => 'free']);
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
 
-        $this->send($this->payload($user, '777'))->assertOk()->assertSee('upgraded_to_pro');
+        $this->send($this->payload($user, '777'))->assertOk()->assertSee('upgraded_to_starter');
 
-        $this->assertSame('pro', $user->fresh()->plan);
+        $this->assertSame('starter', $user->fresh()->plan);
         $this->assertSame('active', Subscription::where('ls_subscription_id', 'sub_1')->first()->status);
     }
 
     public function test_a_replayed_delivery_is_processed_once(): void
     {
         $user = User::factory()->create(['plan' => 'free']);
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
         $payload = $this->payload($user, '777');
 
-        $this->send($payload)->assertOk()->assertSee('upgraded_to_pro');
+        $this->send($payload)->assertOk()->assertSee('upgraded_to_starter');
         $this->send($payload)->assertOk()->assertSee('already_processed');
 
         $this->assertSame(1, WebhookEvent::count());
         $this->assertSame(1, Subscription::count());
     }
 
-    public function test_past_due_keeps_service_but_expired_does_not(): void
+    public function test_a_failed_payment_keeps_service_for_the_grace_period_only(): void
     {
+        \Illuminate\Support\Facades\Notification::fake();
         $user = User::factory()->create(['plan' => 'free']);
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
+        $this->send($this->payload($user, '777', 'active', 'sub_pd'))->assertOk();
 
         // A failed card is a billing problem, not grounds to take sites down
         // while Lemon Squeezy is still retrying the charge.
         $this->send($this->payload($user, '777', 'past_due', 'sub_pd'), 'subscription_updated')->assertOk();
-        $this->assertSame('pro', $user->fresh()->plan);
+        $this->assertSame('starter', $user->fresh()->plan);
+        $failedAt = Subscription::first()->payment_failed_at;
+        $this->assertNotNull($failedAt);
+        \Illuminate\Support\Facades\Notification::assertSentTo($user, \App\Notifications\PlanNotice::class, fn ($n) => $n->kind === 'payment_failed');
 
+        // A repeat of the failure does not restart the clock; expiry inside the
+        // grace period does not end it early.
+        $this->travel(3)->days();
+        $this->send($this->payload($user, '777', 'unpaid', 'sub_pd'), 'subscription_updated')->assertOk();
         $this->send($this->payload($user, '777', 'expired', 'sub_pd'), 'subscription_expired')->assertOk();
+        $this->assertTrue(Subscription::first()->payment_failed_at->equalTo($failedAt));
+        $this->assertSame('starter', $user->fresh()->plan, 'Still inside the 7 days.');
+
+        // The grace period ends on the clock, with nothing arriving from Lemon Squeezy.
+        $this->travel(4)->days();
+        $this->travel(1)->minutes();
+        \Illuminate\Support\Facades\Artisan::call('trials:expire');
         $this->assertSame('free', $user->fresh()->plan);
+    }
+
+    public function test_a_payment_that_goes_through_clears_the_grace_clock(): void
+    {
+        $user = User::factory()->create(['plan' => 'free']);
+        config(['billing.plans.starter.variant_id' => '777']);
+        $this->send($this->payload($user, '777', 'past_due', 'sub_r'), 'subscription_updated')->assertOk();
+        $this->send($this->payload($user, '777', 'active', 'sub_r'), 'subscription_updated')->assertOk();
+        $this->assertNull(Subscription::first()->payment_failed_at);
+
+        $this->travel(30)->days();
+        \Illuminate\Support\Facades\Artisan::call('trials:expire');
+        $this->assertSame('starter', $user->fresh()->plan);
     }
 
     public function test_a_cancelled_subscription_keeps_service_until_it_ends(): void
     {
         $user = User::factory()->create(['plan' => 'free']);
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
 
         $payload = $this->payload($user, '777', 'cancelled', 'sub_c');
         $payload['data']['attributes']['ends_at'] = now()->addDays(20)->toIso8601String();
         $this->send($payload, 'subscription_cancelled')->assertOk();
-        $this->assertSame('pro', $user->fresh()->plan, 'Cancelled runs to the end of the paid period.');
+        $this->assertSame('starter', $user->fresh()->plan, 'Cancelled runs to the end of the paid period.');
 
         $payload['data']['attributes']['ends_at'] = now()->subDay()->toIso8601String();
         $this->send($payload, 'subscription_cancelled')->assertOk();
@@ -138,7 +167,7 @@ class WebhookTest extends TestCase
     public function test_an_unknown_variant_records_but_does_not_guess_a_plan(): void
     {
         $user = User::factory()->create(['plan' => 'free']);
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
 
         $this->send($this->payload($user, 'a-variant-nobody-wired-up'))->assertOk()->assertSee('unknown_variant');
 
@@ -148,7 +177,7 @@ class WebhookTest extends TestCase
 
     public function test_an_unmatchable_subscription_is_kept_for_replay_not_discarded(): void
     {
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
         $orphan = new User(['email' => 'nobody@example.com', 'id' => 99999]);
         $orphan->id = 99999;
 
@@ -162,7 +191,7 @@ class WebhookTest extends TestCase
 
     public function test_an_ended_subscription_for_a_deleted_account_is_done_not_retried_forever(): void
     {
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
         $gone = new User(['email' => 'deleted@example.com']);
         $gone->id = 99998;
 
@@ -175,7 +204,7 @@ class WebhookTest extends TestCase
 
     public function test_a_renewing_subscription_with_no_account_still_fails_loudly(): void
     {
-        config(['billing.plans.pro.variant_id' => '777']);
+        config(['billing.plans.starter.variant_id' => '777']);
         $gone = new User(['email' => 'deleted@example.com']);
         $gone->id = 99997;
 

@@ -50,7 +50,8 @@ class WebTest extends TestCase
 
     public function test_the_landing_page_lists_the_plans(): void
     {
-        $this->get('/')->assertOk()->assertSee('Starter')->assertSee('Studio');
+        $this->get('/')->assertOk()->assertSee('Free trial')->assertSee('Starter')->assertSee('$'.config('billing.plans.starter.price'), false)
+            ->assertDontSee('Studio')->assertDontSee('>Pro<', false);
     }
 
     public function test_a_visitor_can_register_and_lands_on_the_dashboard(): void

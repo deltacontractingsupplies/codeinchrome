@@ -1,0 +1,12 @@
+{"plan":"starter","rate":2,"requests":61,"achieved_rps":2.0325970925865207,"failed_ratio":0,"p50_ms":9.781305,"p95_ms":12.779283,"p99_ms":13.190985999999999,"dropped":0}
+{"plan":"starter","rate":4,"requests":121,"achieved_rps":4.03195651735281,"failed_ratio":0,"p50_ms":9.542875,"p95_ms":12.412069,"p99_ms":13.086805,"dropped":0}
+{"plan":"starter","rate":6,"requests":181,"achieved_rps":6.031190590034078,"failed_ratio":0,"p50_ms":9.49305,"p95_ms":12.169494,"p99_ms":13.696411199999995,"dropped":0}
+{"plan":"starter","rate":8,"requests":241,"achieved_rps":8.030482258635962,"failed_ratio":0,"p50_ms":9.452479,"p95_ms":11.398191,"p99_ms":14.733692999999988,"dropped":0}
+{"plan":"starter","rate":10,"requests":300,"achieved_rps":9.99986879138826,"failed_ratio":0,"p50_ms":9.398061,"p95_ms":11.3799116,"p99_ms":12.882168049999999,"dropped":0}
+{"plan":"starter","rate":15,"requests":450,"achieved_rps":14.999752356088567,"failed_ratio":0,"p50_ms":9.359186999999999,"p95_ms":10.955471549999999,"p99_ms":12.57853124,"dropped":0}
+{"plan":"starter","rate":20,"requests":600,"achieved_rps":19.99953201628403,"failed_ratio":0,"p50_ms":9.4785525,"p95_ms":10.579014349999996,"p99_ms":12.966273039999999,"dropped":0}
+{"plan":"starter","rate":30,"requests":901,"achieved_rps":30.02240084119022,"failed_ratio":0,"p50_ms":9.342613,"p95_ms":10.088028,"p99_ms":12.622207,"dropped":0}
+{"plan":"starter","rate":40,"requests":1201,"achieved_rps":40.019768508736014,"failed_ratio":0,"p50_ms":9.353519,"p95_ms":10.217493,"p99_ms":12.442996,"dropped":0}
+{"plan":"starter","rate":50,"requests":1500,"achieved_rps":49.99781384059004,"failed_ratio":0,"p50_ms":9.1469875,"p95_ms":10.0158533,"p99_ms":12.350701729999999,"dropped":0}
+{"plan":"starter","rate":60,"requests":1800,"achieved_rps":59.99765330978617,"failed_ratio":0,"p50_ms":9.0762615,"p95_ms":10.12774355,"p99_ms":16.78896629999991,"dropped":0}
+{"plan":"starter","rate":80,"requests":2401,"achieved_rps":60.19167316420173,"failed_ratio":0.059975010412328195,"p50_ms":95.800586,"p95_ms":10000.130817,"p99_ms":10000.926039,"dropped":0}

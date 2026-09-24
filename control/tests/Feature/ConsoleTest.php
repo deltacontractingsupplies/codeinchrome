@@ -68,4 +68,20 @@ class ConsoleTest extends TestCase
 
         Http::assertNothingSent();
     }
+
+    public function test_a_log_mark_asks_the_agent_for_only_what_came_after_it(): void
+    {
+        $this->actingAs($this->owner)
+            ->getJson(route('console.logs', ['site' => $this->site, 'source' => 'app', 'since' => 1234, 'file' => 'laravel-2026-09-24.log']))
+            ->assertOk();
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/logs')
+            && str_contains($r->url(), 'since=1234') && str_contains($r->url(), 'file=laravel-2026-09-24.log'));
+
+        // The name is only ever a log's own: nothing that climbs or points elsewhere.
+        foreach (['../../.env', '/etc/passwd', 'laravel.log/../x', '.env'] as $file) {
+            $this->actingAs($this->owner)
+                ->getJson(route('console.logs', ['site' => $this->site, 'source' => 'app', 'since' => 0, 'file' => $file]))
+                ->assertUnprocessable();
+        }
+    }
 }

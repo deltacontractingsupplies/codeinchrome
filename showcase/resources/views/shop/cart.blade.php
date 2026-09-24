@@ -27,10 +27,16 @@
         <div><span>Subtotal</span><span>${{ number_format($subtotal / 100, 2) }}</span></div>
         <div><span>Shipping</span><span>{{ $shipping ? '$'.number_format($shipping / 100, 2) : 'Free' }}</span></div>
         <div class="grand"><span>Total</span><span>${{ number_format($total / 100, 2) }}</span></div>
-        <form method="POST" action="{{ route('checkout') }}" style="margin-top: 16px">@csrf
-            <button class="btn" style="width: 100%">Pay with card</button>
+        <form method="POST" action="{{ route('checkout') }}" class="checkout">@csrf
+            <h2>Delivery</h2>
+            <label>Name <input name="name" value="{{ old('name') }}" required maxlength="120" autocomplete="name"></label>
+            <label>Email <input type="email" name="email" value="{{ old('email') }}" required maxlength="190" autocomplete="email"></label>
+            <label>Phone <input type="tel" name="phone" value="{{ old('phone') }}" required maxlength="40" autocomplete="tel"></label>
+            <label>Address <textarea name="address" required maxlength="500" rows="3" autocomplete="street-address">{{ old('address') }}</textarea></label>
+            @if ($errors->any())<p class="error" role="alert">{{ $errors->first() }}</p>@endif
+            <button class="btn" style="width: 100%">Place order: pay {{ '$'.number_format($total / 100, 2) }} cash on delivery</button>
         </form>
-        <p class="testcard">Test mode: pay with card number 4242 4242 4242 4242, any future expiry date and any CVC.</p>
+        <p class="testcard">This is a demo store: please do not enter your real address. Nothing is charged, and no coffee is sent.</p>
     </div>
 @endif
 @endsection

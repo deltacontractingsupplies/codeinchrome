@@ -21,7 +21,7 @@ const CONFIG_CALL = /(?:\bconfig|Config::(?:get|string|integer|boolean|array))\(
 const COMPONENT_TAG = /<x-([\w.\-:]*)$/;
 const VIEW_AT = /(?:\bview|View::make|->view|@include(?:If|When|First)?|@extends|@each|@component)\(\s*['"]([\w.\-:/]+)['"]/g;
 
-export function installLaravelProviders({ monaco, listDir, readFile, runArtisan, fileUri }) {
+export function installLaravelProviders({ monaco, listDir, readFile, runArtisan, fileUri, providers = true }) {
   let routes = { at: 0, names: [] };
   let views = { at: 0, names: [] };
   let configs = { at: 0, names: [] };
@@ -136,8 +136,10 @@ export function installLaravelProviders({ monaco, listDir, readFile, runArtisan,
     return null;
   };
 
+  // Switched off in Extensions: no completion or ⌘-click in the editor, but
+  // the names still answer cic.laravel and cic.overview for agents.
   const disposables = [];
-  for (const language of ['php', 'blade']) {
+  for (const language of providers ? ['php', 'blade'] : []) {
     disposables.push(monaco.languages.registerCompletionItemProvider(language, { triggerCharacters: ["'", '"', '.', '-'], provideCompletionItems: complete }));
     disposables.push(monaco.languages.registerDefinitionProvider(language, { provideDefinition: definition }));
   }

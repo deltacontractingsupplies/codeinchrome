@@ -26,18 +26,27 @@ class CapacityTest extends TestCase
         $this->app->singleton(Capacity::class, fn () => new Capacity($file));
     }
 
-    public function test_a_measured_plan_shows_visitors_and_no_cpu_or_memory(): void
+    public function test_a_measured_plan_shows_what_it_serves_and_never_cpu_or_memory(): void
     {
         $page = $this->get('/pricing')->assertOk();
-        $page->assertSee('~300 visitors at once')->assertSee('30 page views/s, measured');
-        $page->assertDontSee(' CPU')->assertDontSee(' RAM');
+        $page->assertSee('~300 visitors at once')->assertSee('30 page views a second');
+        $starter = config('billing.plans.starter');
+        // Exact about what is per site and what is in all (owner's request).
+        $page->assertSee("{$starter['disk_gb']} GB of storage for each site - {$starter['storage_gb']} GB in all (files and databases)");
+        $page->assertSee('Each site: up to ~', false)->assertSee('Claude in Chrome</a>: the extension builds your site', false)
+            ->assertSee('href="https://claude.com/claude-in-chrome"', false);
+        foreach (['CPU', ' MB of memory', 'RAM'] as $hidden) {
+            $page->assertDontSee($hidden);
+        }
     }
 
     public function test_an_unmeasured_plan_makes_no_capacity_claim(): void
     {
         $html = $this->get('/pricing')->getContent();
-        // Only Starter was measured: exactly one visitors claim in the cards.
-        $this->assertSame(1, substr_count($html, 'page views/s, measured'));
+        // Only Starter was measured: exactly one visitors claim in the cards,
+        // and the trial says what it is instead of borrowing Starter's figure.
+        $this->assertSame(1, substr_count($html, 'page views a second, <a'));
+        $this->assertStringContainsString('The same speed as Starter', $html);
     }
 
     public function test_the_method_and_every_step_are_published(): void
@@ -72,8 +81,8 @@ class CapacityTest extends TestCase
     {
         $file = tempnam(storage_path('framework/testing'), 'cap');
         file_put_contents($file, json_encode(['measured_at' => '20260923T1200Z', 'bar' => ['p95_ms' => 500, 'errors' => 0.01], 'workload' => 'w',
-            'plans' => ['pro' => ['page_views_per_second' => 80, 'p95_ms' => 20, 'steps' => [], 'websocket_connections' => 10000, 'websocket_at_least' => true],
-                'starter' => ['page_views_per_second' => 40, 'p95_ms' => 20, 'steps' => [], 'websocket_connections' => 4000]]]));
+            'plans' => ['starter' => ['page_views_per_second' => 80, 'p95_ms' => 20, 'steps' => [], 'websocket_connections' => 10000, 'websocket_at_least' => true],
+                'free' => ['page_views_per_second' => 40, 'p95_ms' => 20, 'steps' => [], 'websocket_connections' => 4000]]]));
         try {
             $this->app->instance(Capacity::class, new Capacity($file));
             $this->get('/pricing')->assertOk()->assertSee('~10,000+ live WebSocket connections')->assertSee('~4,000 live WebSocket connections')

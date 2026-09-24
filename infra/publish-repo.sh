@@ -24,6 +24,17 @@
 #     the few settings that are public by design (PUBLIC_KEYS below)
 #   - a private key block
 #   - a binary artifact (zip, webm, har, sqlite) anywhere in history
+#   - anything matching infra/publish-deny.local (NOT committed): addresses
+#     and names of other businesses, personal details - checked in the code,
+#     the commit messages, the notes AND the author lines of every commit
+#
+# Before the scan, infra/publish-scrub.local.pl (NOT committed: its rules name
+# what they remove) rewrites every text file of every commit, every commit
+# message and every note. Both local files are REQUIRED for --public.
+#
+#   --author "Name <email>"   publish every commit under this author and
+#                             committer (e.g. a GitHub no-reply address), so
+#                             a personal address is not published
 #
 # Rotate the Lemon Squeezy key before publishing anyway: it has lived on a
 # laptop, and a published repository is forever.
@@ -35,6 +46,8 @@ work=$root/.publish
 target=""
 visibility=""
 
+author=""
+if [[ ${1:-} == --author ]]; then author=${2:?usage: --author "Name <email>"}; shift 2; fi
 case "${1:-}" in
   "") ;;
   --private|--public) visibility=${1#--}; target=${2:?usage: $1 OWNER/NAME} ;;
@@ -49,6 +62,15 @@ REMOVE_PATHS=(tests/e2e/report)
 PUBLIC_KEYS='^(APP_NAME|APP_ENV|APP_URL|APP_DEBUG|CLOUDFLARE_ZONE_NAME|MAIL_(MAILER|HOST|PORT|SCHEME|FROM_ADDRESS|FROM_NAME)|LOG_.*|DB_CONNECTION|SESSION_.*|CACHE_STORE|QUEUE_CONNECTION)$'
 
 [[ -z $(git status --porcelain) ]] || die "commit or stash first: the copy is made from committed history only"
+scrub=$root/infra/publish-scrub.local.pl
+deny=$root/infra/publish-deny.local
+if [[ $visibility == public ]]; then
+  [[ -f $scrub && -f $deny ]] || die "--public needs infra/publish-scrub.local.pl and infra/publish-deny.local (not committed)"
+fi
+if [[ -n $author ]]; then
+  [[ $author =~ ^(.+)\ \<([^<>@]+@[^<>]+)\>$ ]] || die "--author must look like: Name <email>"
+  author_name=${BASH_REMATCH[1]}; author_email=${BASH_REMATCH[2]}
+fi
 
 # ── the clean copy ───────────────────────────────────────────────────────────
 rm -rf "$work"
@@ -70,6 +92,28 @@ done < <(git -C "$root" notes list)
 rm_cmd="git rm -r -q --cached --ignore-unmatch ${REMOVE_PATHS[*]}"
 FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --index-filter "$rm_cmd" --prune-empty -- --all >/dev/null
 rm -rf .git/refs/original
+
+# The scrub: every TEXT file of every commit (lock files excluded - their
+# hashes must stay byte-exact), every message, every note.
+if [[ -f $scrub ]]; then
+  cat > "$work/scrub-tree.sh" <<SCRUB
+git ls-files -z | grep -zvE '(^|/)(composer\.lock|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$' \\
+  | xargs -0 grep -IlZ '' 2>/dev/null | xargs -0 perl -pi "$scrub" 2>/dev/null || true
+SCRUB
+  env_filter=":"
+  [[ -n $author ]] && env_filter="export GIT_AUTHOR_NAME='${author_name//\'/}' GIT_AUTHOR_EMAIL='$author_email' GIT_COMMITTER_NAME='${author_name//\'/}' GIT_COMMITTER_EMAIL='$author_email'"
+  FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --tree-filter "bash '$work/scrub-tree.sh'" \
+    --msg-filter "perl -p '$scrub'" --env-filter "$env_filter" -- --all >/dev/null
+  rm -rf .git/refs/original
+  git checkout -q -f HEAD
+  for f in "${note_files[@]}"; do perl -pi "$scrub" "$f"; done
+  # Notes are re-attached by subject: scrub the subjects they are found by too.
+  for i in "${!note_keys[@]}"; do note_keys[i]=$(printf '%s' "${note_keys[i]}" | perl -p "$scrub"); done
+  ok "scrubbed every file, message and note${author:+; every commit now by $author}"
+elif [[ -n $author ]]; then
+  FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --env-filter "export GIT_AUTHOR_NAME='${author_name//\'/}' GIT_AUTHOR_EMAIL='$author_email' GIT_COMMITTER_NAME='${author_name//\'/}' GIT_COMMITTER_EMAIL='$author_email'" -- --all >/dev/null
+  rm -rf .git/refs/original
+fi
 git reflog expire --expire=now --all
 git gc -q --prune=now --aggressive
 
@@ -103,6 +147,22 @@ ok "no .env secret in any commit or note"
 
 grep -qE -- '-----BEGIN [A-Z ]*PRIVATE KEY-----' "$hist" && die "a private key block is in history"
 ok "no private key in history"
+
+if [[ -f $deny ]]; then
+  # Text only (a binary patch's base64 can spell anything), plus every
+  # author and committer line.
+  text=$work/history-text.txt
+  { git log -p --all --no-color --format='commit %H%nauthor %an <%ae>%ncommitter %cn <%ce>%n%B'
+    git notes list | while read -r n _; do git cat-file -p "$n"; done; } > "$text"
+  hits=0
+  while IFS= read -r re; do
+    [[ -z $re || $re == \#* ]] && continue
+    if grep -qE -- "$re" "$text"; then echo "  still in history: /$re/ ($(grep -cE -- "$re" "$text") line(s))" >&2; hits=$((hits+1)); fi
+  done < "$deny"
+  rm -f "$text"
+  (( hits == 0 )) || die "$hits denied pattern(s) remain (infra/publish-deny.local); nothing published"
+  ok "nothing from infra/publish-deny.local in the code, messages, notes or authors of any commit"
+fi
 
 artifacts=$(git log --all --format= --name-only | sort -u | grep -iE '\.(zip|webm|har|sqlite|sqlite3|db|pem|key|p12)$' || true)
 [[ -z $artifacts ]] || die "binary artifacts in history: $artifacts"

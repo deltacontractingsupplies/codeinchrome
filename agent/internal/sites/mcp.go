@@ -75,10 +75,13 @@ func (m *Manager) MCP(ctx context.Context, id, method string, params json.RawMes
 	if err := cmd.Start(); err != nil {
 		return nil, fmt.Errorf("the MCP server could not start")
 	}
+	waited := false
 	defer func() {
 		_ = stdin.Close()
 		cancel()
-		_ = cmd.Wait()
+		if !waited {
+			_ = cmd.Wait()
+		}
 	}()
 
 	req, _ := json.Marshal(map[string]any{"jsonrpc": "2.0", "id": 2, "method": method, "params": params})
@@ -110,6 +113,10 @@ func (m *Manager) MCP(ctx context.Context, id, method string, params json.RawMes
 			}
 		}
 		if err != nil {
+			// stderr is filled by exec's own copier; only Wait says it is done.
+			_ = stdin.Close()
+			_ = cmd.Wait()
+			waited = true
 			out := other.String() + stderr.buf.String()
 			if strings.Contains(out, `"boost" namespace`) || (strings.Contains(out, "boost:mcp") && strings.Contains(out, "not defined")) {
 				return nil, ErrMCPNotInstalled

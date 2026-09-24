@@ -145,6 +145,12 @@ RUN set -eux; \
 # port 443 for every generated URL, with no change to the customer's app.
 RUN printf '%s\n' 'SetEnv HTTPS on' > /etc/apache2/conf-available/cic-https.conf && a2enconf cic-https
 
+# APP_DEBUG is forced off by the agent (docker run --env APP_DEBUG=false): a
+# debug page on a public site shows visitors the values around a failure. A
+# real environment variable beats .env in Laravel, but mod_php only puts it in
+# $_SERVER - where Laravel reads first - when Apache is told to pass it on.
+RUN printf '%s\n' 'PassEnv APP_DEBUG' > /etc/apache2/conf-available/cic-env.conf && a2enconf cic-env
+
 # Belt and braces: even if a vhost were misconfigured to serve the project
 # root, these never leave the container.
 RUN printf '%s\n' \
@@ -152,6 +158,9 @@ RUN printf '%s\n' \
     '  Require all denied' \
     '</FilesMatch>' \
     '<FilesMatch "(composer\\.(json|lock)|package-lock\\.json|artisan)$">' \
+    '  Require all denied' \
+    '</FilesMatch>' \
+    '<FilesMatch "(^\\.|\\.(sql|sqlite|sqlite3|db|log|bak|old|orig|swp|save|pem|key)$|^(auth\\.json|phpunit\\.xml)$)">' \
     '  Require all denied' \
     '</FilesMatch>' \
     > /etc/apache2/conf-available/deny-secrets.conf && a2enconf deny-secrets
@@ -202,7 +211,9 @@ RUN set -eux; \
 VOLUME ["/var/www/html"]
 EXPOSE 8080
 
+# Healthy is any answer below 500, a redirect included - not followed: an app
+# that sends / to its https login page was marked unhealthy for following it.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-  CMD php -r 'exit(@file_get_contents("http://127.0.0.1:8080/") === false ? 1 : 0);'
+  CMD php -r '$c = stream_context_create(["http" => ["follow_location" => 0, "ignore_errors" => true, "timeout" => 4]]); @file_get_contents("http://127.0.0.1:8080/", false, $c); preg_match("#^HTTP/\\S+ (\\d+)#", $http_response_header[0] ?? "", $m); exit(($m[1] ?? 999) < 500 ? 0 : 1);'
 
 CMD ["cic-start"]

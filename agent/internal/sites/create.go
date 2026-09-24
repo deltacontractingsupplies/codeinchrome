@@ -244,6 +244,10 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 				changed = append(changed, s.ID+": DISK NOT MOUNTED - container stopped")
 				continue
 			}
+			if s.Suspended {
+				changed = append(changed, s.ID+": disk mounted (suspended; left stopped)")
+				continue
+			}
 			// Mounted now, but the running container still holds the empty
 			// directory from before. Restart it onto the real disk.
 			_, _ = run(ctx, 60*time.Second, "docker", "restart", m.container(s.ID))
@@ -364,6 +368,14 @@ func (m *Manager) runArgs(s Site) []string {
 		"--env", "CIC_QUEUE=" + boolEnv(s.Queue),
 		"--env", "CIC_SCHEDULER=" + boolEnv(s.Scheduler),
 		"--env", "CIC_REVERB=" + boolEnv(s.Reverb && s.WSPort != 0),
+		// Laravel's debug page shows a visitor the request, the stack and the
+		// values around the failure - on a public site that is how secrets
+		// leak. A real environment variable wins over .env (Laravel's dotenv
+		// is immutable), so APP_DEBUG=true written into .env - by the owner,
+		// or by an agent chasing an error - cannot switch it on. Errors are
+		// read in the editor instead (cic.logs, Boost's last-error). Apache
+		// passes it to PHP with PassEnv (the image's cic-env.conf).
+		"--env", "APP_DEBUG=false",
 	}
 	if s.PHP != (PHPSettings{}) {
 		// The owner's PHP settings: mounted read-only over the image's, so
@@ -508,6 +520,10 @@ func (m *Manager) caddyFile(id string) string {
 // from the port we recorded. The two agree now that ports are fixed, but
 // Docker is the one serving traffic, so Docker is the one that decides.
 func (m *Manager) renderCaddy(ctx context.Context, s Site) (string, error) {
+	if s.Suspended {
+		// A stopped container publishes no port, and none is needed.
+		return caddyConfig(m.cfg, s, ""), nil
+	}
 	port, err := m.Port(ctx, s.ID)
 	if err != nil {
 		return "", err
@@ -550,7 +566,10 @@ func caddyConfig(cfg Config, s Site, port string) string {
 	if s.Reverb && s.WSPort != 0 {
 		route = fmt.Sprintf("	handle /app/* {\n		reverse_proxy 127.0.0.1:%d\n	}\n	handle {\n		reverse_proxy 127.0.0.1:%s\n	}\n", s.WSPort, port)
 	}
-	body := route + fmt.Sprintf(`	encode gzip zstd
+	if s.Suspended {
+		route = suspendedBody
+	}
+	body := guardSecrets(route) + fmt.Sprintf(`	encode gzip zstd
 	header {
 		-Server
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -935,4 +954,41 @@ func containsFold(list []string, s string) bool {
 		}
 	}
 	return false
+}
+
+// secretPath is what the edge never serves, whatever the site does: dotfiles
+// and dot-directories (.env, .git, .htaccess), secrets and dumps by extension,
+// and the project files a misplaced document root would expose.
+//
+// It is enforced HERE, in Caddy, and not only in the container's Apache,
+// because the container's rules are the tenant's to undo: Apache honours the
+// site's own .htaccess (AllowOverride All, which Laravel's routing needs), and
+// one line in it - written by the owner, or by an AI agent asked to "fix a
+// 403" - would grant /.env again. Nothing inside the site can change this
+// file. The path is matched after Caddy has decoded it (%2e is a dot) and
+// case-insensitively; .well-known stays reachable for domain verification.
+//
+// Two matchers, not one: Caddy ANDs everything inside a matcher block, so a
+// single block with "not path /.well-known/*" exempted .well-known from the
+// WHOLE list - a dump.sql or a key under /.well-known/ was served (found in
+// review). Only the dotfile rule needs the exemption; the names never do.
+const secretDot = `(?i)/\.`
+
+const secretPath = `(?i)(\.(env|sql|sqlite|sqlite3|db|log|bak|old|orig|swp|save|pem|key)$|/(composer\.(json|lock)|package(-lock)?\.json|artisan|phpunit\.xml|auth\.json)$|/\.env)`
+
+// guardSecrets wraps a site's routes so the secret check runs first. A route
+// block keeps directives in the order written: at the top level Caddy sorts
+// them, and a handle block (the WebSocket routing) would run before respond.
+func guardSecrets(route string) string {
+	var b strings.Builder
+	b.WriteString("\troute {\n")
+	b.WriteString("\t\t@cic_secret_name path_regexp cic_secret_name `" + secretPath + "`\n")
+	b.WriteString("\t\trespond @cic_secret_name 404\n")
+	b.WriteString("\t\t@cic_secret_dot {\n\t\t\tpath_regexp cic_secret_dot `" + secretDot + "`\n\t\t\tnot path /.well-known/*\n\t\t}\n")
+	b.WriteString("\t\trespond @cic_secret_dot 404\n")
+	for _, line := range strings.Split(strings.TrimRight(route, "\n"), "\n") {
+		b.WriteString("\t" + line + "\n")
+	}
+	b.WriteString("\t}\n")
+	return b.String()
 }

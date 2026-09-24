@@ -35,7 +35,10 @@ class Provisioner
     /**
      * @throws RuntimeException with a message fit to show the customer
      */
-    public function provision(User $user, string $siteId): Site
+    /**
+     * @param  string|null  $onHost  pin the site to one host (an operator's probe of a new host)
+     */
+    public function provision(User $user, string $siteId, ?string $onHost = null): Site
     {
         if ($error = Site::validId($siteId)) {
             throw new RuntimeException($error);
@@ -43,7 +46,17 @@ class Provisioner
 
         $plan = $this->planFor($user);
 
-        $owned = $user->sites()->whereIn('status', ['provisioning', 'live'])->count();
+        if ($user->trialExpired()) {
+            throw new RuntimeException('Your free trial has ended. Upgrade to Starter to keep building.');
+        }
+        if ($user->storage_over_at) {
+            throw new RuntimeException(
+                "Your sites use more than the plan's {$plan['storage_gb']} GB of storage. ".
+                'Free some space (or move uploads to Cloudflare R2 or S3) before adding a site.'
+            );
+        }
+
+        $owned = $user->sites()->whereIn('status', ['provisioning', 'live', 'suspended'])->count();
         if ($owned >= $plan['sites']) {
             throw new RuntimeException(
                 "The {$plan['name']} plan includes {$plan['sites']} ".
@@ -52,7 +65,7 @@ class Provisioner
         }
 
         // Paid plans reserved their whole allowance when bought (Stock); a
-        // free site takes its room now, if there is any.
+        // trial site takes room now, if paying customers have left any.
         if ((int) $plan['price'] === 0 && ! app(Stock::class)->siteFits($user->plan ?: 'free')) {
             throw new RuntimeException('New sites are out of stock right now. We are adding capacity; please check back soon.');
         }
@@ -73,7 +86,7 @@ class Provisioner
         }
         $existing?->delete();
 
-        $host = $this->pickHost($plan['memory']);
+        $host = $onHost !== null ? $this->requireHost($onHost) : $this->pickHost($plan['memory']);
         $domain = $siteId.'.'.config('fleet.zone');
 
         $site = Site::create([
@@ -204,16 +217,37 @@ class Provisioner
      * whose report is stale takes no new sites. The declared site count still
      * caps it.
      */
-    private function pickHost(string $memoryLimit = '0m'): string
+    private function requireHost(string $host): string
+    {
+        if (! config("fleet.hosts.$host")) {
+            throw new RuntimeException("No host named $host in the fleet.");
+        }
+
+        return $host;
+    }
+
+    /** The host a new site of this size would go to, for moves as well as creation. */
+    public function chooseHost(string $memoryLimit, ?string $except = null): string
+    {
+        return $this->pickHost($memoryLimit, $except);
+    }
+
+    private function pickHost(string $memoryLimit = '0m', ?string $except = null): string
     {
         $stock = app(Stock::class);
         $need = Stock::megabytes($memoryLimit);
-        $sites = Site::whereIn('status', ['provisioning', 'live'])->get(['host', 'memory_limit']);
+        // Paused sites count: they keep their place on the host, and a resume
+        // brings their memory back without asking where.
+        $sites = Site::whereIn('status', ['provisioning', 'live', 'suspended'])->get(['host', 'memory_limit']);
 
         $best = null;
         $bestSpare = -1;
 
         foreach (config('fleet.hosts') as $name => $cfg) {
+            // A draining host keeps its sites and takes no new ones.
+            if (($cfg['state'] ?? 'active') !== 'active' || $name === $except) {
+                continue;
+            }
             $here = $sites->where('host', $name);
             if ($here->count() >= $cfg['capacity']) {
                 continue;
@@ -244,7 +278,7 @@ class Provisioner
      * Checked at provision time rather than trusted from a deployment record,
      * because the only thing that proves what a host is running is asking it.
      */
-    private function requireCapableAgent(string $host): void
+    public function requireCapableAgent(string $host): void
     {
         $version = AgentClient::for($host)->hostInfo()['version'] ?? '0.0.0';
         $minimum = config('fleet.min_agent_version');

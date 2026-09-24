@@ -40,7 +40,8 @@ class AdminController extends Controller
 
     public function dashboard(): View
     {
-        $paid = Order::where('status', 'paid');
+        // Cash on delivery: a placed order counts as a sale.
+        $paid = Order::whereIn('status', ['placed', 'paid']);
 
         return view('admin.dashboard', [
             'orders' => (clone $paid)->count(),
@@ -48,7 +49,7 @@ class AdminController extends Controller
             'lowStock' => Product::where('stock', '<', 15)->orderBy('stock')->get(),
             'recent' => Order::with('items')->latest()->limit(8)->get(),
             'top' => OrderItem::query()->join('orders', 'orders.id', '=', 'order_items.order_id')
-                ->where('orders.status', 'paid')
+                ->whereIn('orders.status', ['placed', 'paid'])
                 ->select('order_items.name', DB::raw('SUM(order_items.quantity) as sold'))
                 ->groupBy('order_items.name')->orderByDesc('sold')->limit(5)->get(),
         ]);

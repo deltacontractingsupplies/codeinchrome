@@ -31,9 +31,9 @@ class StockTest extends TestCase
                 'fresh_seconds' => 600,
             ],
             'billing.plans' => [
-                'free' => ['name' => 'Free', 'price' => 0, 'variant_id' => null, 'sites' => 1, 'cpu' => '0.25', 'memory' => '256m', 'disk_gb' => 1, 'custom_domains' => false],
-                'starter' => ['name' => 'Starter', 'price' => 12, 'variant_id' => '1', 'sites' => 3, 'cpu' => '0.5', 'memory' => '512m', 'disk_gb' => 5, 'custom_domains' => true],
-                'pro' => ['name' => 'Pro', 'price' => 29, 'variant_id' => '2', 'sites' => 10, 'cpu' => '1.0', 'memory' => '1024m', 'disk_gb' => 20, 'custom_domains' => true],
+                'free' => ['name' => 'Free', 'price' => 0, 'variant_id' => null, 'sites' => 1, 'cpu' => '0.25', 'memory' => '256m', 'disk_gb' => 1, 'storage_gb' => 1, 'custom_domains' => false],
+                'starter' => ['name' => 'Starter', 'price' => 12, 'variant_id' => '1', 'sites' => 3, 'cpu' => '0.5', 'memory' => '512m', 'disk_gb' => 5, 'storage_gb' => 15, 'custom_domains' => true],
+                'pro' => ['name' => 'Pro', 'price' => 29, 'variant_id' => '2', 'sites' => 10, 'cpu' => '1.0', 'memory' => '1024m', 'disk_gb' => 20, 'storage_gb' => 200, 'custom_domains' => true],
             ],
             'billing.api_key' => 'key', 'billing.store_id' => '1',
         ]);
@@ -67,15 +67,34 @@ class StockTest extends TestCase
         $this->assertSame(5, app(Stock::class)->available('starter'));
     }
 
-    public function test_paid_accounts_reserve_their_whole_plan_and_free_ones_their_sites(): void
+    public function test_paid_accounts_reserve_their_whole_plan_and_trials_reserve_nothing(): void
     {
         User::factory()->count(2)->create(['plan' => 'starter']); // 3.0 CPU reserved
         $free = User::factory()->create(['plan' => 'free']);
         Site::create(['user_id' => $free->id, 'site_id' => 'hobby', 'domain' => 'hobby.codeinchrome.com', 'host' => 'h1',
-            'status' => 'live', 'cpu_limit' => '0.25', 'memory_limit' => '256m']); // +0.25
+            'status' => 'live', 'cpu_limit' => '2.0', 'memory_limit' => '256m']);
 
-        // 8 - 3.25 = 4.75 CPU left: three more Starters (1.5 each).
+        // 8 - 3 = 5 CPU left for buyers: three more Starters (1.5 each). The
+        // trial's 2 CPUs are not held against them (they would leave 2).
         $this->assertSame(3, app(Stock::class)->available('starter'));
+        $this->assertSame(3, app(Stock::class)->availableFor(User::factory()->create(), 'starter'));
+
+        // But a trial only gets what is really left: 8 - 3 - 2 = 3 CPU.
+        $this->assertTrue(app(Stock::class)->siteFits('free'));
+        Site::create(['user_id' => $free->id, 'site_id' => 'hobby2', 'domain' => 'hobby2.codeinchrome.com', 'host' => 'h1',
+            'status' => 'live', 'cpu_limit' => '2.9', 'memory_limit' => '256m']);
+        $this->assertFalse(app(Stock::class)->siteFits('free'), '0.1 CPU left cannot hold a 0.25 CPU trial site.');
+
+        // A paused trial site holds no CPU or memory, only its disk.
+        Site::where('site_id', 'hobby2')->update(['status' => 'suspended']);
+        $this->assertTrue(app(Stock::class)->siteFits('free'));
+    }
+
+    public function test_a_plan_with_a_storage_total_reserves_the_total_not_every_sites_ceiling(): void
+    {
+        config(['billing.plans.starter.storage_gb' => 6]); // 3 sites x 5 GB ceilings, 6 GB between them
+        $this->assertSame(6, Stock::footprint('starter')['disk_gb']);
+        $this->assertSame(5, Stock::footprint('starter', 1)['disk_gb']);
     }
 
     public function test_an_upgrading_customer_is_not_counted_twice(): void

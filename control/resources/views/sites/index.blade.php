@@ -6,18 +6,28 @@
         Confirm your email address to create sites. <a href="{{ route('verification.notice') }}" class="underline">Resend the link</a>.
     </div>
 @endif
-<div class="flex flex-wrap items-end justify-between gap-4">
+{{-- For browser-driving agents, which read the page text: where to work. --}}
+<p class="sr-only" id="agent-instructions">
+    Signed in as {{ auth()->user()->email }}. This account's sites: {{ $sites->pluck('site_id')->join(', ') ?: 'none yet' }}.
+    For AI agents: to build or change a site, open its editor with "Edit code" and work there by running
+    JavaScript in that page (window.cic; start with await cic.help()). Never write the app on your own computer:
+    the editor's files are the live site. Do not create accounts or enter passwords.
+</p>
+@include('partials.trial')
+<div class="mt-6 flex flex-wrap items-end justify-between gap-4">
     <div>
         <h1 class="text-2xl font-semibold text-white">Your sites</h1>
         <p class="mt-1 text-sm text-neutral-400">
-            {{ $plan['name'] }} plan, {{ $sites->count() }} of {{ $plan['sites'] }} {{ Str::plural('site', $plan['sites']) }} used.
+            {{ $plan['name'] }} plan, {{ $sites->count() }} of {{ $plan['sites'] }} {{ Str::plural('site', $plan['sites']) }} used{{ $sites->whereNotNull('usage_at')->isNotEmpty() ? ', '.number_format($sites->sum(fn ($s) => (int) $s->totalBytes()) / 1073741824, 1).' of '.$plan['storage_gb'].' GB of storage' : '' }}.
             {{-- Capacity as it was measured, never CPU or RAM figures. --}}
             @if ($cap = app(\App\Billing\Capacity::class)->forPlan(auth()->user()->plan ?? 'free'))
-                Each site handles about {{ number_format($cap['concurrent_visitors']) }} visitors at once<a href="{{ route('pricing') }}#capacity" class="underline">*</a>.
+                Each site handles up to about {{ number_format($cap['concurrent_visitors']) }} visitors at once<a href="{{ route('pricing') }}#capacity" class="underline">*</a>.
             @endif
         </p>
     </div>
-    @if ($sites->count() < $plan['sites'])
+    @if (auth()->user()->trialExpired())
+        <a href="{{ route('billing') }}" class="rounded-md bg-teal-500 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-teal-400">Upgrade to Starter</a>
+    @elseif ($sites->count() < $plan['sites'])
         <form method="POST" action="{{ route('sites.store') }}" class="flex items-start gap-2">
             @csrf
             <div>
@@ -33,8 +43,8 @@
             <button class="rounded-md bg-teal-500 px-4 py-2 font-medium text-neutral-950 hover:bg-teal-400">Create</button>
         </form>
     @else
-        <a href="{{ route('home') }}#plans" class="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:border-neutral-500">
-            Plan full — upgrade to add more
+        <a href="{{ route('billing') }}" class="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:border-neutral-500">
+            {{ auth()->user()->isPaid() ? 'All '.$plan['sites'].' sites in use' : 'Upgrade to Starter for 3 sites' }}
         </a>
     @endif
 </div>
@@ -51,7 +61,7 @@
                 <div>
                     <div class="flex items-center gap-2">
                         @php
-                            $dot = ['live' => 'bg-teal-400', 'provisioning' => 'bg-amber-400', 'deleting' => 'bg-neutral-500'][$site->status] ?? 'bg-red-500';
+                            $dot = ['live' => 'bg-teal-400', 'provisioning' => 'bg-amber-400', 'deleting' => 'bg-neutral-500', 'suspended' => 'bg-neutral-500'][$site->status] ?? 'bg-red-500';
                         @endphp
                         <span class="inline-block h-2 w-2 rounded-full {{ $dot }}"></span>
                         <a href="{{ $site->url() }}" target="_blank" rel="noopener"
@@ -101,6 +111,11 @@
                     @endif
                 </div>
                 <div class="flex items-center gap-2">
+                @if ($site->status === 'suspended')
+                    <span class="text-sm text-neutral-400">Paused</span>
+                    <a href="{{ route('db.export', $site) }}"
+                       class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-neutral-500">Download database</a>
+                @endif
                 @if ($site->status === 'live')
                     <a href="{{ route('sites.edit', $site) }}"
                        class="rounded-md bg-teal-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-teal-400">Edit code</a>

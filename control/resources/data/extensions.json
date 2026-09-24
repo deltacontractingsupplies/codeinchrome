@@ -1,0 +1,85 @@
+[
+  {
+    "id": "monaco",
+    "core": true,
+    "name": "Code editor",
+    "by": "Monaco Editor (Microsoft)",
+    "licence": "MIT",
+    "url": "https://github.com/microsoft/monaco-editor",
+    "what": "VS Code's editor: syntax colours, multi-cursor, find and replace, minimap, folding."
+  },
+  {
+    "id": "php",
+    "name": "PHP IntelliSense",
+    "by": "Phpactor",
+    "licence": "MIT",
+    "url": "https://github.com/phpactor/phpactor",
+    "what": "Completion, hover, go to definition and diagnostics for PHP - running inside your site, on your own code."
+  },
+  {
+    "id": "laravel",
+    "name": "Laravel names",
+    "by": "codeinchrome",
+    "licence": "part of the editor",
+    "url": null,
+    "what": "Completes route(), view(), config() and <x-component> names from your app, and ⌘-click from a view name to its Blade file."
+  },
+  {
+    "id": "emmet",
+    "name": "Emmet",
+    "by": "emmet-monaco-es",
+    "licence": "MIT",
+    "url": "https://github.com/troy351/emmet-monaco-es",
+    "what": "Abbreviations that expand to HTML and CSS: div.card>h2+p then Tab."
+  },
+  {
+    "id": "prettier",
+    "name": "Prettier",
+    "by": "Prettier, with @prettier/plugin-php",
+    "licence": "MIT",
+    "url": "https://github.com/prettier/prettier",
+    "what": "Format Document (⇧⌥F) for PHP and Markdown."
+  },
+  {
+    "id": "tailwind",
+    "name": "Tailwind CSS classes",
+    "by": "codeinchrome, from the Tailwind CSS docs",
+    "licence": "part of the editor",
+    "url": "https://tailwindcss.com/docs",
+    "what": "Class name completion inside class=\"...\" on sites that use Tailwind, with variants (md:hover:...)."
+  },
+  {
+    "id": "markdown",
+    "name": "Markdown preview",
+    "by": "marked, sanitised by DOMPurify",
+    "licence": "MIT; DOMPurify MPL-2.0 or Apache-2.0",
+    "url": "https://github.com/markedjs/marked",
+    "what": "A Preview button on .md files, rendered safely: no script in a README can run."
+  },
+  {
+    "id": "icons",
+    "name": "Material Icon Theme",
+    "by": "Material Extensions (PKief)",
+    "licence": "MIT",
+    "url": "https://github.com/material-extensions/vscode-material-icon-theme",
+    "what": "File and folder icons by name and type, the same set as the VS Code extension."
+  },
+  {
+    "id": "pdf",
+    "core": true,
+    "name": "PDF and image preview",
+    "by": "pdf.js (Mozilla)",
+    "licence": "Apache-2.0",
+    "url": "https://github.com/mozilla/pdf.js",
+    "what": "Opens PDFs page by page and images at their size, instead of as unreadable text."
+  },
+  {
+    "id": "boost",
+    "core": true,
+    "name": "Laravel Boost MCP",
+    "by": "Laravel",
+    "licence": "MIT",
+    "url": "https://github.com/laravel/boost",
+    "what": "Your site's own Laravel docs, schema and routes for AI agents, read-only (cic.mcp)."
+  }
+]

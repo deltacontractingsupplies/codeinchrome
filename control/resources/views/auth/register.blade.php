@@ -3,7 +3,7 @@
 @section('content')
 <div class="mx-auto max-w-sm py-10">
     <h1 class="text-2xl font-semibold text-white">Create your account</h1>
-    <p class="mt-2 text-sm text-neutral-400">The free plan includes one site on a codeinchrome.com subdomain.</p>
+    <p class="mt-2 text-sm text-neutral-400">Free for {{ config('billing.trial.days') }} days, no card: one site on a codeinchrome.com address, at full Starter speed.</p>
 
     @include('auth.social')
     <form method="POST" action="{{ route('register') }}" class="mt-8 space-y-4">

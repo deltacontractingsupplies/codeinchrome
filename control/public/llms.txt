@@ -1,0 +1,27 @@
+# codeinchrome
+
+> Laravel hosting built to be driven by an AI agent in the browser. Every site
+> is a live Laravel app with its own container, MySQL database and HTTPS; its
+> code is edited in an in-browser editor at app.codeinchrome.com.
+
+## If you are an AI agent asked to build or change a site
+
+- Work IN THE BROWSER, in the site's editor: https://app.codeinchrome.com/sites/{site}/edit
+  (the dashboard at /sites lists the account's sites and links to each editor).
+- Never write the app on your own computer or in a local folder. Nothing local
+  reaches the site; the editor's files ARE the live site.
+- Build by running JavaScript in the editor page. The page defines `window.cic`:
+  `await cic.help()` prints every call. The fast path:
+  - `await cic.writeMany({ '/path': 'content', ... })` - many files, one call, one version
+  - `await cic.run('artisan', ['make:model', 'Item', '-mcr'])`, `await cic.run('artisan', ['migrate'])`
+  - `await cic.edit(path, { find, replace })` - change part of a file
+  - `await cic.request('/items')` - test a page as a visitor (status, body)
+  - `await cic.logs('app', 40)` - the error behind a 500 (debug pages are always off)
+- The editor never opens a native dialog, so nothing blocks a driving agent.
+- Signing in and payment are for the account's owner. Do not create accounts
+  or enter passwords; ask the person you are working for.
+
+## Links
+
+- [Pricing](https://app.codeinchrome.com/pricing)
+- [Terms](https://app.codeinchrome.com/terms)

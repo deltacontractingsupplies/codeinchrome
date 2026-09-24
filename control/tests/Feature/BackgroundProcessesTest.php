@@ -58,8 +58,8 @@ class BackgroundProcessesTest extends TestCase
 
     public function test_someone_elses_site_is_404(): void
     {
-        $site = $this->site(User::factory()->create(['plan' => 'pro']));
-        $stranger = User::factory()->create(['plan' => 'pro']);
+        $site = $this->site(User::factory()->create(['plan' => 'starter']));
+        $stranger = User::factory()->create(['plan' => 'starter']);
         $this->actingAs($stranger)->get(route('sites.settings', $site))->assertNotFound();
         $this->actingAs($stranger)->put(route('sites.background', $site), ['queue' => '1'])->assertNotFound();
         Http::assertNothingSent();

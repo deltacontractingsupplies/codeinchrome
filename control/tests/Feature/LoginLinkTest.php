@@ -56,4 +56,15 @@ class LoginLinkTest extends TestCase
             $this->assertStringNotContainsString('LoginLink@issue', (string) $route->getActionName());
         }
     }
+
+    public function test_a_link_opened_while_signed_in_as_someone_else_switches_and_says_so(): void
+    {
+        $other = User::factory()->create();
+        $target = User::factory()->create();
+        $link = \App\Auth\LoginLink::issue($target);
+
+        $this->actingAs($other)->get($link)->assertRedirect(route('dashboard'))
+            ->assertSessionHas('status', "Signed in as {$target->email}.");
+        $this->assertAuthenticatedAs($target);
+    }
 }

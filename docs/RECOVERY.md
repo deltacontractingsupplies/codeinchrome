@@ -52,7 +52,24 @@ restic restore latest --tag site:<site-id>,kind:files --target /tmp/restore
 restic dump latest /<site-id>.sql --tag site:<site-id>,kind:db > /tmp/<site-id>.sql
 ```
 
-Then provision the site on another host and load both into it.
+That is the manual way. The whole host at once, automated:
+
+```bash
+infra/recover-host.sh hN              # every site the control plane has on hN
+infra/recover-host.sh hN site-a       # just these
+CIC_DRY_RUN=1 infra/recover-host.sh hN   # the snapshots it would use
+```
+
+For each site it restores the latest files snapshot (app and version history)
+and database dump as the repository's owner, packs them, and runs
+`artisan fleet:recover-site`, which creates the site on the host with the most
+room, loads all three (each checked as a complete archive first), asks the
+site for a page, and only then switches its DNS. It restores the last nightly
+backup: anything written after it was on the lost host only.
+
+*Drilled 2026-09-24: a site on h1 with a database row and two file versions,
+backed up, then recovered as if h1 were lost - onto h4 in 21 seconds, serving
+its data, both versions in its history.*
 
 *Drilled 2026-09-22: a site's files and database recovered using only the
 control host.*

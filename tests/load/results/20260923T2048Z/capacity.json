@@ -1,0 +1,128 @@
+{
+  "measured_at": "20260923T2048Z",
+  "bar": {
+    "p95_ms": 500,
+    "errors": 0.01
+  },
+  "workload": "Laravel storefront page: session, 2 MySQL queries over 200 products, Blade render (tests/load/app)",
+  "plans": {
+    "starter": {
+      "page_views_per_second": 160,
+      "p95_ms": 9,
+      "steps": [
+        {
+          "rate": 2,
+          "achieved_rps": 2.0325460432903424,
+          "p95_ms": 12.557776,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 4,
+          "achieved_rps": 3.9998902575442674,
+          "p95_ms": 12.4718395,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 6,
+          "achieved_rps": 6.031178329787688,
+          "p95_ms": 12.158875,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 8,
+          "achieved_rps": 8.030436230865057,
+          "p95_ms": 10.949939,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 10,
+          "achieved_rps": 10.029996427409575,
+          "p95_ms": 11.396072,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 15,
+          "achieved_rps": 15.028008192693738,
+          "p95_ms": 10.3317245,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 20,
+          "achieved_rps": 20.026241156847377,
+          "p95_ms": 10.137632,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 30,
+          "achieved_rps": 29.9989691084258,
+          "p95_ms": 10.1202803,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 40,
+          "achieved_rps": 39.99818608226117,
+          "p95_ms": 10.122474350000001,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 50,
+          "achieved_rps": 50.016965549781546,
+          "p95_ms": 9.893032,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 60,
+          "achieved_rps": 59.997019230090515,
+          "p95_ms": 9.83133805,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 80,
+          "achieved_rps": 80.00522082948736,
+          "p95_ms": 9.332676,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 100,
+          "achieved_rps": 99.99458733965145,
+          "p95_ms": 9.186911549999996,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 130,
+          "achieved_rps": 129.99122328725042,
+          "p95_ms": 9.3114692,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 160,
+          "achieved_rps": 159.9774076811976,
+          "p95_ms": 9.3749531,
+          "failed_ratio": 0,
+          "dropped": 0
+        },
+        {
+          "rate": 200,
+          "achieved_rps": 140.41500544596224,
+          "p95_ms": 10000.797126,
+          "failed_ratio": 0.28556168773366564,
+          "dropped": 384
+        }
+      ]
+    }
+  }
+}

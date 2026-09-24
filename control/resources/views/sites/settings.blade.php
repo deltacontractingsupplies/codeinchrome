@@ -15,7 +15,7 @@
 
     @unless ($allowed)
         <p class="mt-4 rounded-md border border-amber-800 bg-amber-950/40 px-4 py-3 text-sm text-amber-200">
-            Background processes come with the paid plans. <a href="{{ route('billing') }}" class="underline">See plans</a>.
+            Background processes come with Starter. <a href="{{ route('billing') }}" class="underline">Upgrade</a>.
         </p>
     @endunless
 
@@ -81,5 +81,31 @@
             <button class="rounded-md bg-teal-500 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-teal-400">Save PHP settings</button>
         </div>
     </form>
+</section>
+
+<section class="mt-12 max-w-2xl" aria-labelledby="storage-heading">
+    <h2 id="storage-heading" class="text-lg font-medium text-neutral-100">Keep uploads on Cloudflare R2 or S3</h2>
+    <p class="mt-1 text-sm text-neutral-400">
+        Your plan's {{ $site->user->planConfig()['storage_gb'] }} GB covers your sites' files and databases. User uploads grow without end,
+        so keep them in object storage: Laravel supports it out of the box, and nothing stored there counts toward your plan.
+        Cloudflare R2 charges nothing for downloads; Amazon S3 works the same way.
+    </p>
+    <ol class="mt-4 list-decimal space-y-3 pl-5 text-sm text-neutral-300">
+        <li>Create a bucket and an API token with read and write access to it (in Cloudflare: R2, then Manage API tokens).</li>
+        <li>In the editor's console, run <code class="rounded bg-neutral-900 px-1.5 py-0.5 text-neutral-100">composer require league/flysystem-aws-s3-v3 "^3.0"</code></li>
+        <li>Add the keys to <code class="text-neutral-100">.env</code>:
+<pre tabindex="0" aria-label="The .env settings for object storage" class="mt-2 overflow-x-auto rounded-md border border-neutral-800 bg-neutral-900 p-3 text-xs leading-5 text-neutral-200">FILESYSTEM_DISK=s3
+AWS_ACCESS_KEY_ID=your-key-id
+AWS_SECRET_ACCESS_KEY=your-secret
+AWS_BUCKET=your-bucket
+# Cloudflare R2 only:
+AWS_DEFAULT_REGION=auto
+AWS_ENDPOINT=https://&lt;account-id&gt;.r2.cloudflarestorage.com
+AWS_URL=https://&lt;your public bucket address&gt;
+# Amazon S3 instead: AWS_DEFAULT_REGION=eu-central-1 (your bucket's region), and no AWS_ENDPOINT</pre>
+        </li>
+        <li>Store files with <code class="text-neutral-100">Storage::put(...)</code> or <code class="text-neutral-100">$request->file('photo')->store('photos')</code>, and link to them with <code class="text-neutral-100">Storage::url(...)</code>. With <code class="text-neutral-100">FILESYSTEM_DISK=s3</code> these already go to the bucket.</li>
+    </ol>
+    <p class="mt-3 text-sm text-neutral-500">Or ask the agent in the editor: "move uploads to Cloudflare R2". The keys stay in <code>.env</code>, which is never served.</p>
 </section>
 @endsection

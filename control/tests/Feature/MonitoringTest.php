@@ -167,4 +167,68 @@ class MonitoringTest extends TestCase
         // Host monitors are untouched.
         $this->assertNotNull(Monitor::where('key', 'host:h1')->first());
     }
+
+    public function test_low_stock_is_alerted_once_and_its_recovery_too(): void
+    {
+        $monitor = app(\App\Fleet\Monitoring::class);
+        config(['fleet.stock.alert_below' => 0]);
+        $monitor->run(); // records the fake host's figures
+        // However many Starters the fake host holds, set the bar just above it.
+        $left = app(\App\Fleet\Stock::class)->available('starter');
+        config(['fleet.stock.alert_below' => $left + 1]);
+        $monitor->run();
+        $monitor->run(); // opens the incident on the second failure, as for everything else
+        $monitor->run();
+        $low = array_values(array_filter($this->alerts, fn ($a) => str_contains($a, 'Starter stock')));
+        $this->assertCount(1, $low, 'one alert, not one per check');
+        $this->assertStringContainsString("only $left left - add a host with infra/add-host.sh", $low[0]);
+
+        config(['fleet.stock.alert_below' => 3]); // a host was added
+        $monitor->run();
+        $this->assertStringContainsString('RECOVERED: Starter stock', collect($this->alerts)->last());
+    }
+
+    public function test_a_site_running_out_of_file_slots_is_alerted(): void
+    {
+        Site::where('site_id', 'shop')->update(['inodes_used' => 62000, 'inodes_total' => 65536]);
+        $monitor = app(\App\Fleet\Monitoring::class);
+        foreach (range(1, 3) as $check) {
+            $monitor->run(); // an incident opens once the failure repeats, as for everything else
+        }
+        $files = array_values(array_filter($this->alerts, fn ($a) => str_contains($a, 'shop.codeinchrome.com files')));
+        $this->assertCount(1, $files, 'one alert, not one per check');
+        $this->assertStringContainsString('95% of its file slots used', $files[0]);
+
+        // Its checks go with the site, the suffixed ones included.
+        Site::where('site_id', 'shop')->delete();
+        $monitor->run();
+        $this->assertSame(0, \App\Models\Monitor::where('key', 'like', 'site:shop%')->count());
+    }
+
+    public function test_a_site_whose_backups_stopped_is_alerted_once(): void
+    {
+        $monitor = app(\App\Fleet\Monitoring::class);
+        $site = Site::where('site_id', 'shop')->first();
+
+        // A new site is not held to it before its first night...
+        $site->forceFill(['last_backup_at' => null])->save();
+        $this->assertArrayNotHasKey('site:shop:backup', $monitor->run());
+        // ...but is watched from its first backup on, however new.
+        $site->forceFill(['last_backup_at' => now()->subHour()])->save();
+        $this->assertTrue($monitor->run()['site:shop:backup'][1] ?? null);
+
+        $site->forceFill(['created_at' => now()->subDays(3), 'last_backup_at' => now()->subHours(2)])->save();
+        $this->assertTrue($monitor->run()['site:shop:backup'][1] ?? null, 'a backup two hours old is fine');
+
+        $site->forceFill(['last_backup_at' => now()->subHours(40)])->save();
+        foreach (range(1, 3) as $check) {
+            $monitor->run();
+        }
+        $backups = array_values(array_filter($this->alerts, fn ($a) => str_contains($a, 'shop.codeinchrome.com backups')));
+        $this->assertCount(1, $backups, 'one alert, not one per check');
+        $this->assertStringContainsString('newest complete backup 1 day ago', $backups[0]);
+
+        $site->forceFill(['last_backup_at' => null])->save();
+        $this->assertStringContainsString('no complete backup yet', $monitor->run()['site:shop:backup'][2]);
+    }
 }

@@ -28,6 +28,8 @@ return Application::configure(basePath: dirname(__DIR__))
          * WebhookController, which refuses outright when no secret is set.
          */
         $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
+        // After route-model binding (part of the web group), so it sees the Site.
+        $middleware->appendToGroup('web', \App\Http\Middleware\PausedSite::class);
 
         $middleware->validateCsrfTokens(except: [
             'webhooks/*',

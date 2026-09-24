@@ -77,7 +77,12 @@ func (m *Manager) createDisk(ctx context.Context, id string, gb int) error {
 	// -m 0: no blocks reserved for root. There is no root process on this
 	// filesystem, so the usual 5% would just be space the customer paid for
 	// and cannot use.
-	if _, err := run(ctx, 2*time.Minute, "mkfs.ext4", "-q", "-F", "-m", "0", img); err != nil {
+	// -i 8192: an inode per 8 KB rather than ext4's 16 KB. A Laravel app is
+	// tens of thousands of small files (vendor/ alone ~11,000), and a 1 GB
+	// disk ran out of inodes with most of its bytes free - after which the
+	// site could not save a single file. The inode tables cost ~3% of the
+	// disk, and on a sparse image nothing until they are used.
+	if _, err := run(ctx, 2*time.Minute, "mkfs.ext4", "-q", "-F", "-m", "0", "-i", "8192", img); err != nil {
 		return fmt.Errorf("format disk image: %w", err)
 	}
 	if err := m.mountOp(ctx, "mount", id); err != nil {
@@ -104,6 +109,18 @@ func (m *Manager) releaseDisk(ctx context.Context, id string) error {
 	return nil
 }
 
+// InodeUsage is read from the mounted filesystem at call time.
+func (m *Manager) InodeUsage(id string) (used, total int64) {
+	if !isMounted(m.volume(id)) {
+		return 0, 0
+	}
+	var st syscall.Statfs_t
+	if err := syscall.Statfs(m.volume(id), &st); err != nil {
+		return 0, 0
+	}
+	return int64(st.Files) - int64(st.Ffree), int64(st.Files)
+}
+
 // DiskUsage is read from the mounted filesystem at call time.
 func (m *Manager) DiskUsage(id string) (used, size int64, ok bool) {
 	if !isMounted(m.volume(id)) {
@@ -128,6 +145,9 @@ type SiteUsage struct {
 	DiskUsedBytes int64  `json:"diskUsedBytes"`
 	DiskSizeBytes int64  `json:"diskSizeBytes"`
 	DiskMounted   bool   `json:"diskMounted"`
+	// Inodes: a disk can be "full" of small files long before its bytes are.
+	InodesUsed  int64 `json:"inodesUsed"`
+	InodesTotal int64 `json:"inodesTotal"`
 	// The database lives on the host's MySQL, OUTSIDE the site's disk, so the
 	// disk ceiling does not bound it. It is measured and reported here so the
 	// control plane can count it against the plan.
@@ -162,9 +182,10 @@ func (m *Manager) Usage(ctx context.Context) ([]SiteUsage, error) {
 	out := make([]SiteUsage, 0, len(list))
 	for _, s := range list {
 		used, size, mounted := m.DiskUsage(s.ID)
+		iUsed, iTotal := m.InodeUsage(s.ID)
 		out = append(out, SiteUsage{
 			ID: s.ID, DiskUsedBytes: used, DiskSizeBytes: size, DiskMounted: mounted,
-			DatabaseBytes: dbBytes[DBName(s.ID)],
+			DatabaseBytes: dbBytes[DBName(s.ID)], InodesUsed: iUsed, InodesTotal: iTotal,
 		})
 	}
 	return out, nil

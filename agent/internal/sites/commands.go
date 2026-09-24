@@ -44,6 +44,8 @@ var (
 		"optimize:clear": false, "storage:link": false, "queue:restart": false,
 		"schedule:list": false, "key:generate": true, "package:discover": false,
 		"list": false, "help": false,
+		// The app's own test suite, never against its live data: see commandEnv.
+		"test": false,
 	}
 	composerAllowed = map[string]bool{
 		"install": true, "update": true, "require": true, "remove": true,
@@ -54,6 +56,7 @@ var (
 	// could be read as a path outside the app or as another command.
 	safeArg     = regexp.MustCompile(`^[A-Za-z0-9_@:./=^~*<>,|+-]{1,200}$`)
 	makeCommand = regexp.MustCompile(`^make:[a-z-]{2,30}$`)
+	appCommand  = regexp.MustCompile(`^app:[a-z0-9][a-z0-9:-]{0,40}$`)
 
 	commandLocks sync.Map // site id -> *sync.Mutex
 )
@@ -132,11 +135,20 @@ func validateCommand(tool string, args []string) ([]string, time.Duration, error
 	case "artisan":
 		name := args[0]
 		force, ok := artisanAllowed[name]
-		if !ok && !makeCommand.MatchString(name) {
+		// The app's own commands (app:*) run the site's own code, as cic.eval
+		// does: nothing the owner could not already do. The skill has every app
+		// carry an app:check that requests all its pages.
+		if !ok && !makeCommand.MatchString(name) && !appCommand.MatchString(name) {
 			return nil, 0, fmt.Errorf("artisan %s is not available here", name)
 		}
 		out := append([]string{"php", "/var/www/html/artisan"}, args...)
-		out = append(out, "--no-interaction", "--ansi")
+		// `artisan test` hands options it does not know to PHPUnit, which
+		// refuses --no-interaction ("Unknown option"), so a test run never
+		// started. A test prompts for nothing, and there is no TTY anyway.
+		if name != "test" {
+			out = append(out, "--no-interaction")
+		}
+		out = append(out, "--ansi")
 		if force && !contains(args, "--force") {
 			out = append(out, "--force")
 		}
@@ -192,9 +204,12 @@ func (m *Manager) RunCommand(ctx context.Context, id, tool string, args []string
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 
-	full := append([]string{"exec", "-u", "33:33",
-		"-e", "HOME=/tmp", "-e", "COMPOSER_HOME=/tmp/composer", "-e", "TERM=xterm-256color",
-		m.container(id)}, argv...)
+	full := []string{"exec", "-u", "33:33",
+		"-e", "HOME=/tmp", "-e", "COMPOSER_HOME=/tmp/composer", "-e", "TERM=xterm-256color"}
+	for _, e := range commandEnv(tool, args) {
+		full = append(full, "-e", e)
+	}
+	full = append(append(full, m.container(id)), argv...)
 	cmd := exec.CommandContext(ctx, "docker", full...)
 	out := &cappedBuffer{limit: maxCommandOutput}
 	cmd.Stdout, cmd.Stderr = out, out
@@ -279,6 +294,10 @@ type LogResult struct {
 	Source    string `json:"source"`
 	Lines     string `json:"lines"`
 	Truncated bool   `json:"truncated"`
+	// For the app log: which file was read and how long it was, so a caller
+	// can later ask for exactly what was written after this (LogsSince).
+	File string `json:"file,omitempty"`
+	Size int64  `json:"size,omitempty"`
 }
 
 // Logs returns the tail of one of the site's logs:
@@ -301,12 +320,15 @@ func (m *Manager) Logs(ctx context.Context, id, source string, n int) (LogResult
 		// (sites log daily since 0.18: one file used to grow without end).
 		// Listed and opened through kernel-checked handles, so a symlink
 		// planted at storage/logs cannot point this read at the host.
-		f, err := m.newestAppLog(id)
+		f, name, err := m.newestAppLog(id)
 		if os.IsNotExist(err) {
 			return res, nil // no log yet is an empty log, not an error
 		}
 		if err != nil {
 			return res, fmt.Errorf("cannot read the application log")
+		}
+		if info, err := f.Stat(); err == nil {
+			res.File, res.Size = name, info.Size()
 		}
 		lines, clipped, err := tailOpen(f, n)
 		if err != nil {
@@ -366,19 +388,19 @@ func compactAccessLog(raw string) string {
 var appLogName = regexp.MustCompile(`^laravel(-\d{4}-\d{2}-\d{2})?\.log$`)
 
 // newestAppLog opens the most recently written Laravel log of the site.
-func (m *Manager) newestAppLog(id string) (*os.File, error) {
+func (m *Manager) newestAppLog(id string) (*os.File, string, error) {
 	root, err := m.realRoot(id)
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	dir, err := openBeneath(root, "/storage/logs")
 	if err != nil {
-		return nil, err
+		return nil, "", err
 	}
 	entries, err := dir.ReadDir(-1)
 	if err != nil {
 		dir.Close()
-		return nil, err
+		return nil, "", err
 	}
 	best, bestTime := "", time.Time{}
 	for _, e := range entries {
@@ -391,7 +413,65 @@ func (m *Manager) newestAppLog(id string) (*os.File, error) {
 	}
 	dir.Close()
 	if best == "" {
-		return nil, os.ErrNotExist
+		return nil, "", os.ErrNotExist
 	}
-	return openBeneath(root, "/storage/logs/"+best)
+	f, err := openBeneath(root, "/storage/logs/"+best)
+	return f, best, err
+}
+
+// LogsSince returns what the app log gained after a mark taken by Logs (its
+// file and size): exactly the new entries, so a check reports the errors it
+// caused and never an older one that happens to read the same. A different
+// newest file (the day turned) or a shorter one (it was cleared) is new
+// from its start. At most maxLogBytes, the newest kept.
+func (m *Manager) LogsSince(id, file string, since int64) (LogResult, error) {
+	res := LogResult{Source: "app"}
+	if err := ValidID(id); err != nil {
+		return res, err
+	}
+	f, name, err := m.newestAppLog(id)
+	if os.IsNotExist(err) {
+		return res, nil
+	}
+	if err != nil {
+		return res, fmt.Errorf("cannot read the application log")
+	}
+	defer f.Close()
+	info, err := f.Stat()
+	if err != nil {
+		return res, fmt.Errorf("cannot read the application log")
+	}
+	res.File, res.Size = name, info.Size()
+	start := since
+	if name != file || since < 0 || since > info.Size() {
+		start = 0
+	}
+	if info.Size()-start > maxLogBytes {
+		start, res.Truncated = info.Size()-maxLogBytes, true
+	}
+	if _, err := f.Seek(start, io.SeekStart); err != nil {
+		return res, fmt.Errorf("cannot read the application log")
+	}
+	b, err := io.ReadAll(io.LimitReader(f, info.Size()-start))
+	if err != nil {
+		return res, fmt.Errorf("cannot read the application log")
+	}
+	res.Lines = strings.TrimRight(string(b), "\n")
+	return res, nil
+}
+
+// commandEnv is the extra environment one command runs with. `artisan test`
+// runs the site's test suite, which may well refresh or truncate its database:
+// real environment variables beat .env (Laravel's dotenv is immutable), so the
+// run is pointed at an in-memory SQLite, and MySQL at a host that does not
+// resolve - a test that insists on MySQL fails rather than finding live data.
+func commandEnv(tool string, args []string) []string {
+	if tool == "artisan" && len(args) > 0 && args[0] == "test" {
+		// DB_URL too: every connection in Laravel's config reads it, and a URL
+		// overrides driver, host and database - one in .env or .env.testing
+		// would point the run at the live MySQL. Empty is ignored by Laravel.
+		return []string{"APP_ENV=testing", "DB_CONNECTION=sqlite", "DB_DATABASE=:memory:", "DB_HOST=db.invalid", "DB_URL=",
+			"CACHE_STORE=array", "SESSION_DRIVER=array", "QUEUE_CONNECTION=sync", "MAIL_MAILER=array"}
+	}
+	return nil
 }

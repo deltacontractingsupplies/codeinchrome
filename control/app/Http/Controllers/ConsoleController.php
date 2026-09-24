@@ -48,11 +48,15 @@ class ConsoleController extends Controller
         $data = $request->validate([
             'source' => ['required', 'in:app,access,container'],
             'lines' => ['sometimes', 'integer', 'min:1', 'max:1000'],
+            // A mark from an earlier read (its file and size): only what was written after it.
+            'since' => ['sometimes', 'integer', 'min:0'],
+            'file' => ['required_with:since', 'string', 'max:64', 'regex:/^laravel(-\d{4}-\d{2}-\d{2})?\.log$/'],
         ]);
 
         try {
             return response()->json(['ok' => true, 'log' => AgentClient::for($site->host)
-                ->logs($site->site_id, $data['source'], (int) ($data['lines'] ?? 200))]);
+                ->logs($site->site_id, $data['source'], (int) ($data['lines'] ?? 200),
+                    isset($data['since']) ? ['since' => (int) $data['since'], 'file' => $data['file']] : [])]);
         } catch (AgentRefused $e) {
             return response()->json(['ok' => false, 'error' => 'logs_unavailable', 'hint' => $e->detail['hint'] ?? $e->getMessage()], 422);
         } catch (AgentUnreachable $e) {

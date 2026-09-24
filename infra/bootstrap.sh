@@ -143,13 +143,21 @@ ok "$(cat "$CIC_ROOT/etc/host.id") at $CIC_ROOT"
 log "firewall"
 # Nothing inbound but SSH and the proxy. Everything a customer serves goes
 # through Caddy; opening a port would bypass the edge.
-ufw --force reset >/dev/null 2>&1
-ufw default deny incoming  >/dev/null
-ufw default allow outgoing >/dev/null
-ufw allow 22/tcp  >/dev/null
-ufw allow 80/tcp  >/dev/null
-ufw allow 443/tcp >/dev/null
-ufw --force enable >/dev/null
+#
+# Converged, NEVER reset: this runs on every deploy, and `ufw --force reset`
+# dropped every rule - the sites' route to MySQL (mysql.sh adds it) included -
+# and switched filtering off until the later steps put them back. Found
+# 2026-09-24: live sites were refused their database mid-deploy. Each call
+# below changes nothing when the rule is already there.
+if ! ufw status verbose | grep -q 'Default: deny (incoming), allow (outgoing)'; then
+  ufw default deny incoming  >/dev/null
+  ufw default allow outgoing >/dev/null
+fi
+for port in 22/tcp 80/tcp 443/tcp; do ufw allow "$port" >/dev/null; done
+ufw status | grep -q '^Status: active' || ufw --force enable >/dev/null
+# Anything else open inbound is drift: said, not silently removed.
+extra=$(ufw status | awk '/ALLOW/ && $1 !~ /^(22|80|443)\/tcp/ && $0 !~ /3306/' || true)
+[[ -z $extra ]] || warn "unexpected inbound rules (not removed): $extra"
 ok "inbound: 22, 80, 443 only"
 
 # ─────────────────────────────────────────────────────────────────────────────

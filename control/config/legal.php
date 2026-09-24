@@ -17,5 +17,5 @@ return [
     // Money back on the first payment of a plan, within this many days.
     'refund_days' => (int) env('CIC_REFUND_DAYS', 14),
     // Shown on every legal page.
-    'updated' => '2026-09-23',
+    'updated' => '2026-09-24',
 ];

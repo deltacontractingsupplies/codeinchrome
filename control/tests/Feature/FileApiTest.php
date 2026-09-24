@@ -58,7 +58,7 @@ class FileApiTest extends TestCase
             },
         ]);
 
-        $this->owner = User::factory()->create(['plan' => 'pro']);
+        $this->owner = User::factory()->create(['plan' => 'starter']);
         $this->site = Site::create([
             'user_id' => $this->owner->id, 'site_id' => 'mine', 'domain' => 'mine.codeinchrome.com',
             'host' => 'h1', 'status' => 'live', 'cpu_limit' => '1.0', 'memory_limit' => '1024m',
@@ -160,7 +160,7 @@ class FileApiTest extends TestCase
 
     public function test_a_stranger_gets_404_not_403(): void
     {
-        $stranger = User::factory()->create(['plan' => 'pro']);
+        $stranger = User::factory()->create(['plan' => 'starter']);
 
         // 403 would confirm the site exists and belongs to someone else, which
         // lets anyone enumerate which names are taken.
@@ -240,5 +240,12 @@ class FileApiTest extends TestCase
             ->assertStatus(422)
             ->assertJsonPath('error', 'cannot_read')
             ->assertJsonPath('hint', 'path is outside the site');
+    }
+
+    public function test_editor_answers_are_never_stored_by_a_browser_or_proxy(): void
+    {
+        $r = $this->actingAs($this->owner)->getJson(route('files.index', ['site' => $this->site, 'read' => 1, 'path' => '/routes/web.php']));
+        $this->assertStringContainsString('no-store', (string) $r->headers->get('Cache-Control'));
+        $this->assertStringContainsString('private', (string) $r->headers->get('Cache-Control'));
     }
 }
