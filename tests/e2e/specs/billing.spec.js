@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { paidPlansOpen } from '../helpers/sales.js';
 import { confirmSignup, billingOf, lsSubscription, lsCancel, lsResume, lsCancelAllFor } from '../helpers/fixtures.js';
 
 /**
@@ -34,7 +35,9 @@ async function waitForBilling(page, predicate, what) {
   throw new Error(`the webhook never delivered: ${what} (last state ${JSON.stringify(billingOf(email))})`);
 }
 
-test('a new customer pays for Starter, and cancel/resume stay in step', async ({ page }) => {
+test('a new customer pays for Starter, and cancel/resume stay in step', async ({ page, request }) => {
+  // Paid plans switched off (App\\Billing\\Sales): there is nothing to buy, and no trial runs out.
+  test.skip(!(await paidPlansOpen(request)), 'paid plans are switched off (CIC_PAID_PLANS_OPEN); SalesTest covers that state');
   test.setTimeout(300_000);
   page.on('dialog', (d) => { throw new Error(`native dialog: ${d.message()}`); });
   let subscriptionId;

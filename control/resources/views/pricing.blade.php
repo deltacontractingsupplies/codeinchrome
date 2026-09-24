@@ -2,10 +2,15 @@
 @section('title', 'Pricing — codeinchrome')
 @section('content')
 <h1 class="text-3xl font-semibold tracking-tight text-white">Pricing</h1>
-<p class="mt-3 max-w-2xl text-neutral-400">
-    One plan, monthly, in US dollars. Try it free for {{ config('billing.trial.days') }} days with no card; cancel any time from
-    the Billing page. Sales tax is added at checkout where it applies. We sell only as many plans as our
-    servers can hold at full speed, so the count below goes down as they sell.
+<p class="mt-3 max-w-2xl text-neutral-400" data-pricing-intro>
+    @if (\App\Billing\Sales::open())
+        One plan, monthly, in US dollars. Try it free for {{ config('billing.trial.days') }} days with no card; cancel any time from
+        the Billing page. Sales tax is added at checkout where it applies. We sell only as many plans as our
+        servers can hold at full speed, so the count below goes down as they sell.
+    @else
+        Free for now, with no card: paid plans open soon. Your site keeps running until then, and before any
+        trial clock starts you get an email and a full {{ config('billing.trial.days') }} days to decide.
+    @endif
 </p>
 @include('partials.plans')
 <section class="mt-10 max-w-3xl text-sm text-neutral-400" aria-labelledby="storage-heading">
@@ -60,9 +65,9 @@
         <table class="w-full text-left text-sm">
             <thead class="text-neutral-500"><tr><th class="py-2 pr-6">Plan</th><th class="py-2 pr-6">Page views/s</th><th class="py-2 pr-6">p95 at that load</th><th class="py-2 pr-6">Visitors at once</th><th class="py-2">WebSocket connections</th></tr></thead>
             <tbody class="text-neutral-300">
-            @foreach (config('billing.plans') as $key => $plan)
+            @foreach (\App\Billing\Sales::plans() as $key => $plan)
                 @if ($cap = app(\App\Billing\Capacity::class)->forPlan($key))
-                    <tr class="border-t border-neutral-800"><td class="py-2 pr-6">{{ $plan['name'] }}</td><td class="py-2 pr-6">{{ $cap['page_views_per_second'] }}</td><td class="py-2 pr-6">{{ $cap['p95_ms'] }} ms</td><td class="py-2 pr-6">~{{ number_format($cap['concurrent_visitors']) }}</td><td class="py-2">{{ $cap['websocket_connections'] ? '~'.$cap['websocket_label'] : 'not measured yet' }}</td></tr>
+                    <tr class="border-t border-neutral-800"><td class="py-2 pr-6">{{ $plan['name'] }}</td><td class="py-2 pr-6">{{ $cap['page_views_per_second'] }}</td><td class="py-2 pr-6">{{ $cap['p95_ms'] }} ms</td><td class="py-2 pr-6">~{{ number_format($cap['concurrent_visitors']) }}</td><td class="py-2">{{ ! ($plan['background'] ?? false) ? 'not on this plan' : ($cap['websocket_connections'] ? '~'.$cap['websocket_label'] : 'not measured yet') }}</td></tr>
                 @endif
             @endforeach
             </tbody>
@@ -70,9 +75,11 @@
     </div>
     <details class="mt-4 text-sm text-neutral-400">
         <summary class="cursor-pointer text-neutral-200">View every step of the test</summary>
-        @foreach ($measured['plans'] as $key => $p)
-            @continue(! config("billing.plans.$key"))
-            <h3 class="mt-4 font-medium text-neutral-200">{{ config("billing.plans.$key.name", $key) }}</h3>
+        @foreach (\App\Billing\Sales::plans() as $planKey => $plan)
+            @php($key = app(\App\Billing\Capacity::class)->measuredAs($planKey))
+            @continue(! $key || empty($measured['plans'][$key]))
+            @php($p = $measured['plans'][$key])
+            <h3 class="mt-4 font-medium text-neutral-200">{{ $plan['name'] }}@if ($key !== $planKey) <span class="font-normal text-neutral-500">(measured at the same limits)</span>@endif</h3>
             <table class="mt-1 w-full text-left">
                 <thead class="text-neutral-500"><tr><th class="pr-4">Asked</th><th class="pr-4">Served</th><th class="pr-4">p95</th><th class="pr-4">Errors</th><th>Dropped</th></tr></thead>
                 <tbody>
@@ -96,6 +103,6 @@
 </section>
 @endif
 <div class="mt-10">
-    <a href="{{ route('register') }}" class="rounded-md bg-teal-500 px-5 py-2.5 font-medium text-neutral-950 hover:bg-teal-400">Try it free for {{ config('billing.trial.days') }} days</a>
+    <a href="{{ route('register') }}" class="rounded-md bg-teal-500 px-5 py-2.5 font-medium text-neutral-950 hover:bg-teal-400">{{ \App\Billing\Sales::open() ? 'Try it free for '.config('billing.trial.days').' days' : 'Start free' }}</a>
 </div>
 @endsection

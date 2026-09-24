@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { paidPlansOpen } from '../helpers/sales.js';
 import { confirmSignup, setPlan, runTrialClock } from '../helpers/fixtures.js';
 import { waitForDns } from '../helpers/dns.js';
 import { httpsGet } from '../helpers/https.js';
@@ -23,7 +24,9 @@ test.describe.configure({ mode: 'serial' });
 test.afterAll(() => destroySite(siteName));
 test.setTimeout(600_000);
 
-test('a trial site is paused when the trial ends, resumed by paying, and deleted after the grace period', async ({ page }) => {
+test('a trial site is paused when the trial ends, resumed by paying, and deleted after the grace period', async ({ page, request }) => {
+  // Paid plans switched off (App\\Billing\\Sales): there is nothing to buy, and no trial runs out.
+  test.skip(!(await paidPlansOpen(request)), 'paid plans are switched off (CIC_PAID_PLANS_OPEN); SalesTest covers that state');
   let address;
 
   await test.step('sign up: the trial clock starts and the dashboard counts it down', async () => {

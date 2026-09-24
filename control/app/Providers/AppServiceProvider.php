@@ -41,7 +41,7 @@ class AppServiceProvider extends ServiceProvider
         View::composer(['partials.plans', 'billing'], function ($view) {
             $stock = app(Stock::class);
             $user = auth()->user();
-            $view->with('stock', collect(config('billing.plans'))
+            $view->with('stock', collect(\App\Billing\Sales::plans())
                 ->map(fn ($p, $key) => $p['price'] > 0
                     ? ($user ? $stock->availableFor($user, $key) : $stock->available($key))
                     : null)

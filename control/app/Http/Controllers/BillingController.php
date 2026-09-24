@@ -15,13 +15,17 @@ class BillingController extends Controller
 
         return view('billing', [
             'current' => $user->plan,
-            'plans' => config('billing.plans'),
+            'plans' => \App\Billing\Sales::plans(),
             'subscription' => $user->subscriptions()->latest()->first(),
         ]);
     }
 
     public function checkout(Request $request, Checkout $checkout): RedirectResponse
     {
+        // Not for sale yet: no checkout is started, whatever is posted.
+        if (! \App\Billing\Sales::open()) {
+            return back()->with('error', 'Paid plans are not available yet. Your free site keeps running meanwhile.');
+        }
         $request->validate(['plan' => ['required', 'string']]);
 
         try {

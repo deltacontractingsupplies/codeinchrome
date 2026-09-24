@@ -71,10 +71,13 @@ class User extends Authenticatable implements MustVerifyEmail
         return (int) $this->planConfig()['price'] > 0;
     }
 
-    /** A free account whose trial clock is still running. */
+    /**
+     * A free account whose trial clock is still running. While paid plans are
+     * not for sale (Sales) no clock runs: there is nothing to upgrade to.
+     */
     public function onTrial(): bool
     {
-        return ! $this->isPaid() && $this->trial_ends_at?->isFuture() === true;
+        return \App\Billing\Sales::open() && ! $this->isPaid() && $this->trial_ends_at?->isFuture() === true;
     }
 
     /**
@@ -84,7 +87,7 @@ class User extends Authenticatable implements MustVerifyEmail
      */
     public function trialExpired(): bool
     {
-        return ! $this->isPaid() && ! $this->isOperator() && $this->trial_ends_at?->isPast() === true;
+        return \App\Billing\Sales::open() && ! $this->isPaid() && ! $this->isOperator() && $this->trial_ends_at?->isPast() === true;
     }
 
     /** When a paused account's sites are deleted, or null if none are paused. */

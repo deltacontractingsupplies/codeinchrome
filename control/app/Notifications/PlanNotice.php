@@ -17,7 +17,7 @@ class PlanNotice extends Notification
     use Queueable;
 
     public function __construct(
-        public readonly string $kind,        // ending | paused | deleted | storage | payment_failed | payment_final | downgraded
+        public readonly string $kind,        // trial_started | ending | paused | deleted | storage | payment_failed | payment_final | downgraded
         public readonly ?Carbon $when = null,
     ) {}
 
@@ -32,6 +32,11 @@ class PlanNotice extends Notification
         $upgrade = route('billing');
 
         return match ($this->kind) {
+            'trial_started' => (new MailMessage)
+                ->subject('Paid plans are open - your free trial starts now')
+                ->line('Paid plans on codeinchrome are now available, and your free trial has started: your site keeps running until '.$date.'.')
+                ->line('Choose Starter before then to keep it; if you do not, it is paused when the trial ends and deleted a few days later. We email you again the day before.')
+                ->action('See plans', $upgrade),
             'ending' => (new MailMessage)
                 ->subject('Your codeinchrome trial ends tomorrow')
                 ->line("Your free trial ends on $date.")

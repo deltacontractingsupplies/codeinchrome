@@ -21,6 +21,10 @@ return [
      * are paused, then deleted after the grace period (App\Console\Commands\TrialsExpire).
      * A paying customer who lapses to free gets the longer grace.
      */
+    // Paid plans for sale? Off until the payment provider approves the store
+    // (App\Billing\Sales says what off means, and how to turn it on).
+    'paid_open' => (bool) env('CIC_PAID_PLANS_OPEN', false),
+
     'trial' => [
         'days' => (int) env('CIC_TRIAL_DAYS', 3),
         'grace_days' => (int) env('CIC_TRIAL_GRACE_DAYS', 2),

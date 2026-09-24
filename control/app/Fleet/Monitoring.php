@@ -63,7 +63,8 @@ class Monitoring
         $stock = app(Stock::class);
         $min = (int) config('fleet.stock.alert_below', 3);
         $out = [];
-        foreach (config('billing.plans') as $key => $plan) {
+        // Only what is for sale can run out (App\Billing\Sales).
+        foreach (\App\Billing\Sales::plans() as $key => $plan) {
             if ($plan['price'] <= 0) {
                 continue;
             }

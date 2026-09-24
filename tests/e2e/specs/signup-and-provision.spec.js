@@ -40,7 +40,8 @@ test('a visitor can sign up, provision a site, and see it live', async ({ page }
     await expect(page.getByRole('heading', { name: 'Get started with Claude in Chrome' })).toBeVisible();
     await expect(page.getByRole('link', { name: /Add Claude in Chrome/ })).toHaveAttribute('href', /chromewebstore\.google\.com\/detail\/claude\//);
     await expect(page.getByText('It does not include an AI agent.')).toBeVisible();
-    await expect(page.getByText('Starter', { exact: true }).first()).toBeVisible();
+    // A plan card is always there: Starter when paid plans are for sale, the free plan either way.
+    await expect(page.locator('[data-plan="free"]')).toBeVisible();
   });
 
   await test.step('sign up', async () => {

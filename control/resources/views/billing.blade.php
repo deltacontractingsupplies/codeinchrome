@@ -30,7 +30,7 @@
                 @if ($plan['price'] > 0)
                     ${{ $plan['price'] }}<span class="text-sm font-normal text-neutral-500">/month</span>
                 @else
-                    $0<span class="text-sm font-normal text-neutral-500"> for {{ config('billing.trial.days') }} days</span>
+                    $0<span class="text-sm font-normal text-neutral-500">{{ \App\Billing\Sales::open() ? ' for '.config('billing.trial.days').' days' : ' - free for now; paid plans open soon' }}</span>
                 @endif
             </div>
             <ul class="mt-3 space-y-1 text-sm text-neutral-400">

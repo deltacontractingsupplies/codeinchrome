@@ -66,6 +66,13 @@
     {{ config('billing.trial.lapsed_grace_days') }} days before deletion. We email you before a trial
     ends, when sites are paused (with the date they will be deleted), and when they are deleted.
 </p>
+@unless (\App\Billing\Sales::open())
+<p>
+    Paid plans are not on sale yet. Until they are, trials do not run out and free sites keep running.
+    When paid plans open we email every free account, and its {{ config('billing.trial.days') }}-day trial
+    starts only then.
+</p>
+@endunless
 <p>
     A plan's storage covers its sites' files and databases together. While an account is over it,
     new sites and uploads are refused; its sites keep running.

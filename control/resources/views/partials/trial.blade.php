@@ -18,6 +18,11 @@
         Your free trial has ended. Upgrade to Starter to keep building.
         @unless (request()->routeIs('billing'))<a href="{{ route('billing') }}" class="ml-1 font-medium underline">Upgrade</a>@endunless
     </div>
+@elseif ($u && ! $u->isPaid() && ! \App\Billing\Sales::open())
+    <div class="mt-6 rounded-md border border-teal-800 bg-teal-950/30 px-4 py-3 text-sm text-teal-200" role="status" data-trial="free-for-now">
+        Free for now: paid plans open soon. Your site keeps running until then, and you will get an email and a
+        full {{ config('billing.trial.days') }} days to decide before anything changes.
+    </div>
 @elseif ($u?->onTrial())
     <div class="mt-6 rounded-md border border-teal-800 bg-teal-950/30 px-4 py-3 text-sm text-teal-200" role="status" data-trial="running">
         Free trial: <strong>{{ $u->trial_ends_at->diffForHumans(['parts' => 2, 'syntax' => \Carbon\CarbonInterface::DIFF_ABSOLUTE]) }}</strong> left

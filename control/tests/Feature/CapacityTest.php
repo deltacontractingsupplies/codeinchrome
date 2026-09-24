@@ -85,8 +85,9 @@ class CapacityTest extends TestCase
                 'free' => ['page_views_per_second' => 40, 'p95_ms' => 20, 'steps' => [], 'websocket_connections' => 4000]]]));
         try {
             $this->app->instance(Capacity::class, new Capacity($file));
-            $this->get('/pricing')->assertOk()->assertSee('~10,000+ live WebSocket connections')->assertSee('~4,000 live WebSocket connections')
-                ->assertDontSee('~4,000+');
+            $this->get('/pricing')->assertOk()->assertSee('~10,000+ live WebSocket connections')
+                // The free plan has no background processes, so no Reverb: no WebSocket claim at all.
+                ->assertDontSee('~4,000 live WebSocket connections')->assertDontSee('~4,000+');
         } finally {
             @unlink($file);
         }

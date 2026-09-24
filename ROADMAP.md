@@ -319,6 +319,21 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
 - [x] **security.txt (RFC 9116)** at /.well-known/security.txt: contact, an
       Expires kept a year ahead, canonical address, policy. LegalTest
 
+- [ ] **Paid plans switched OFF until Lemon Squeezy approves the store** (owner's
+      request, 2026-09-24): free only - no paid option shown or sold anywhere
+      (home, pricing, billing, checkout, emails) - behind ONE switch that turns
+      Starter back on with nothing else to change
+- [ ] **Public repository** (owner's decisions, 2026-09-24): PUBLIC, under a new
+      codeinchrome GitHub organization; FSL-1.1-ALv2 (no competing use, each
+      version Apache-2.0 after 2 years), Copyright 2026 Ahmed Omar; contributor
+      agreement (CLA.md); commits keep the owner's own identity. Done and
+      verified: no server address, no other business, no secret in any commit
+      (publish-repo.sh: scrub, .env values, keys, deny list, gitleaks);
+      CONTRIBUTING, SECURITY, CODEOWNERS, PR template; infra/github-setup.sh
+      (reviewed pull requests only, CI required, secret scanning). LEFT, in
+      order: owner creates the codeinchrome organization; `gh auth login`;
+      publish; github-setup.sh; CLA check app
+
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):
       the privacy policy said Cloudflare did DNS only - every site and the app

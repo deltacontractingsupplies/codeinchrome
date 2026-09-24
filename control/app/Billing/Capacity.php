@@ -36,7 +36,13 @@ class Capacity
     {
         $p = $this->all()['plans'][$plan] ?? null;
         if (! $p || empty($p['page_views_per_second'])) {
-            return null;
+            // Not measured itself, but its limits are identical to a plan that was
+            // (the free trial runs at Starter's): the measurement is its own.
+            $twin = $this->measuredTwin($plan);
+            if ($twin === null) {
+                return null;
+            }
+            $p = $this->all()['plans'][$twin];
         }
 
         return [
@@ -50,5 +56,30 @@ class Capacity
                 ? number_format((int) $p['websocket_connections']).(! empty($p['websocket_at_least']) ? '+' : '')
                 : null,
         ];
+    }
+
+    /** Which plan's measurement a plan's figures are: its own, or an identical twin's. */
+    public function measuredAs(string $plan): ?string
+    {
+        return ! empty($this->all()['plans'][$plan]['page_views_per_second']) ? $plan : $this->measuredTwin($plan);
+    }
+
+    /**
+     * A measured plan with exactly the same CPU and memory limits - and NOT for
+     * sale right now: beside it, a card says "the same speed as" that plan
+     * instead of repeating its figure (App\Billing\Sales).
+     */
+    private function measuredTwin(string $plan): ?string
+    {
+        $forSale = \App\Billing\Sales::plans();
+        $limits = fn (?array $p) => $p ? [(string) $p['cpu'], (string) $p['memory']] : null;
+        $mine = $limits(config("billing.plans.$plan"));
+        foreach ($this->all()['plans'] ?? [] as $key => $measured) {
+            if ($key !== $plan && ! isset($forSale[$key]) && ! empty($measured['page_views_per_second']) && $mine !== null && $limits(config("billing.plans.$key")) === $mine) {
+                return $key;
+            }
+        }
+
+        return null;
     }
 }

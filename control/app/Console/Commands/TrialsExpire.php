@@ -50,6 +50,13 @@ class TrialsExpire extends Command
 
         $this->paymentGrace($paid, $dry);
 
+        // No paid plan for sale: trials do not run out (App\Billing\Sales).
+        if (! \App\Billing\Sales::open()) {
+            $this->line('paid plans are not for sale: no trial is warned, paused or deleted');
+
+            return self::SUCCESS;
+        }
+
         $free = User::whereNotIn('plan', $paid)->whereNotNull('trial_ends_at');
 
         // A day to go: say so, once.

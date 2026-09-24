@@ -21,6 +21,8 @@
         <env name="LEMONSQUEEZY_WEBHOOK_SECRET" value="test-webhook-secret"/>
         <env name="LEMONSQUEEZY_RETRY_SLEEP_MS" value="0"/>
         <env name="APP_ENV" value="testing"/>
+        <!-- The paid flow is what most tests prove; SalesTest proves the switch off. -->
+        <env name="CIC_PAID_PLANS_OPEN" value="true"/>
         <env name="APP_MAINTENANCE_DRIVER" value="file"/>
         <env name="BCRYPT_ROUNDS" value="4"/>
         <env name="BROADCAST_CONNECTION" value="null"/>

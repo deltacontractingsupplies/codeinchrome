@@ -18,7 +18,7 @@
         Nothing to set up on your computer: no PHP, no database, no terminal. Every change is saved as a version, so nothing it does is permanent until you say so.
     </p>
     <div class="mt-8 flex flex-wrap gap-3">
-        <a href="{{ route('register') }}" class="rounded-md bg-teal-500 px-5 py-2.5 font-medium text-neutral-950 hover:bg-teal-400">Try it free for {{ config('billing.trial.days') }} days</a>
+        <a href="{{ route('register') }}" class="rounded-md bg-teal-500 px-5 py-2.5 font-medium text-neutral-950 hover:bg-teal-400">{{ \App\Billing\Sales::open() ? 'Try it free for '.config('billing.trial.days').' days' : 'Start free' }}</a>
         <a href="#get-started" class="rounded-md border border-neutral-700 px-5 py-2.5 text-neutral-200 hover:border-neutral-500">How to start</a>
         <a href="#plans" class="rounded-md border border-neutral-700 px-5 py-2.5 text-neutral-200 hover:border-neutral-500">See plans</a>
     </div>
@@ -78,10 +78,10 @@
             <p class="text-sm text-teal-300">Step 4</p>
             <h3 class="mt-1 font-medium text-neutral-100">Create your site here</h3>
             <p class="mt-2 text-sm leading-relaxed text-neutral-400">
-                Start the {{ config('billing.trial.days') }}-day free trial, no card, and create a site: a real Laravel app, live on HTTPS in seconds.
+                {{ \App\Billing\Sales::open() ? 'Start the '.config('billing.trial.days').'-day free trial' : 'Sign up free' }}, no card, and create a site: a real Laravel app, live on HTTPS in seconds.
                 Then open it in the editor.
             </p>
-            <a href="{{ route('register') }}" class="mt-3 inline-block text-sm text-teal-300 underline">Start the free trial</a>
+            <a href="{{ route('register') }}" class="mt-3 inline-block text-sm text-teal-300 underline">{{ \App\Billing\Sales::open() ? 'Start the free trial' : 'Sign up free' }}</a>
         </li>
         <li class="rounded-lg border border-neutral-800 p-5 md:col-span-2 lg:col-span-2">
             <p class="text-sm text-teal-300">Step 5</p>
@@ -99,7 +99,11 @@
             <h3 class="font-medium text-neutral-100">What you pay us</h3>
             <p class="mt-2 text-sm leading-relaxed text-neutral-400">
                 The hosting and the editor: your sites, their databases, backups and HTTPS.
-                Starter is ${{ config('billing.plans.starter.price') }} a month, after a {{ config('billing.trial.days') }}-day free trial.
+                @if (\App\Billing\Sales::open())
+                    Starter is ${{ config('billing.plans.starter.price') }} a month, after a {{ config('billing.trial.days') }}-day free trial.
+                @else
+                    Free for now - paid plans open soon, and you get an email before anything changes.
+                @endif
                 It does not include an AI agent.
             </p>
         </div>
@@ -199,7 +203,8 @@
 </section>
 @endif
 
-@php($measured = collect(config('billing.plans'))->map(fn ($p, $k) => ['plan' => $p, 'cap' => $capacity->forPlan($k)])->filter(fn ($r) => $r['cap']))
+{{-- What is for sale (App\Billing\Sales); WebSockets only where Reverb runs (a paid plan's background processes). --}}
+@php($measured = collect(\App\Billing\Sales::plans())->map(fn ($p, $k) => ['plan' => $p, 'cap' => ($c = $capacity->forPlan($k)) && ! ($p['background'] ?? false) ? ['websocket_connections' => null, 'websocket_label' => null] + $c : $c])->filter(fn ($r) => $r['cap']))
 @if ($measured->isNotEmpty())
 <section class="mt-24" aria-labelledby="capacity-heading">
     <h2 id="capacity-heading" class="text-2xl font-semibold text-white">How much traffic each plan handles</h2>
