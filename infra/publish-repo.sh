@@ -120,7 +120,14 @@ for i in "${!note_keys[@]}"; do
   # No early exit in awk: it would SIGPIPE git log, and pipefail would end the script.
   new=$(git log --format='%H%x09%ad%x09%s' --date=raw | awk -F'\t' -v k="${note_keys[$i]}" '$2"\t"$3==k && !found++ {print $1}')
   [[ -n $new ]] || die "could not re-attach a git note (commit: ${note_keys[$i]})"
-  git notes add -f -F "${note_files[$i]}" "$new"
+  # The notes ref gets commits of its own: made under --author too, or they
+  # would carry this machine's identity.
+  if [[ -n $author ]]; then
+    GIT_AUTHOR_NAME=$author_name GIT_AUTHOR_EMAIL=$author_email GIT_COMMITTER_NAME=$author_name GIT_COMMITTER_EMAIL=$author_email \
+      git notes add -f -F "${note_files[$i]}" "$new"
+  else
+    git notes add -f -F "${note_files[$i]}" "$new"
+  fi
 done
 ok "clean copy at .publish/repo ($(git rev-list --count HEAD) commits, ${#note_keys[@]} note(s) carried over)"
 
