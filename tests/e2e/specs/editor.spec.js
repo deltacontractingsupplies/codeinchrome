@@ -630,8 +630,9 @@ Route::get('/', function () {
     };
     expect((await page.evaluate(([f]) => cic.writeMany(f), [bad])).ok).toBe(true);
     const r = await page.evaluate(() => cic.check());
-    expect(r.ok).toBe(false);
+    expect(r.ok, JSON.stringify(r).slice(0, 1500)).toBe(false);
     const said = r.review.join('\n');
+    expect(said, 'a review that could not finish is not a verdict').not.toContain('could not finish');
     expect(said).toMatch(/HTML inside PHP at routes\/web\.php:\d+/);
     expect(said).toContain('POST form without @csrf in resources/views/e2e-form.blade.php');
     expect(said).toMatch(/env\(\) outside config\/ at app\/Support\/E2eEnv\.php:\d+/);
