@@ -37,6 +37,7 @@ class AbuseScan extends Command
             }
             if ($findings === []) {
                 $clean++;
+                $site->forceFill(['scanned_clean_at' => now()])->save();
 
                 continue;
             }

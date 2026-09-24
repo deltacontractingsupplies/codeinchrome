@@ -14,6 +14,7 @@ Schedule::command('fleet:sync-backups')->hourlyAt(20)->withoutOverlapping();
 Schedule::command('explore:refresh')->hourlyAt(35)->withoutOverlapping();
 Schedule::command('abuse:scan')->everySixHours(10)->withoutOverlapping();
 Schedule::command('abuse:cpu')->everyFiveMinutes()->withoutOverlapping();
+Schedule::command('abuse:links')->hourlyAt(50)->withoutOverlapping();
 Schedule::command('audit:prune')->dailyAt('04:00');
 // Hosts rebuild the base image on Sundays at 03:30 (infra/install-agent.sh); sites move onto it here.
 Schedule::command('fleet:roll-image')->dailyAt('04:45')->withoutOverlapping();

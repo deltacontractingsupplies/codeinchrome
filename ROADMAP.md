@@ -531,6 +531,18 @@ be hard to abuse. Every item is verified live, never assumed.
       open redirectors and obfuscated code, and say how enforcement works.
       LEFT (owner): an abuse@ mailbox (Cloudflare Email Routing).
 
+- [x] **Links to malware on a page** (2026-09-25): abuse:links reads every
+      site's pages hourly from outside (following its own redirects, up to 15
+      pages): a link to a program download on any site bans the account;
+      archives, URL shorteners, bare IPs, forms posting elsewhere, meta
+      refreshes elsewhere and a password form naming a bank or big brand are
+      emailed to the owner for review. Explore lists only sites that passed
+      the malware scan AND the link check in the last week. Dry-run on all 6
+      live sites before it went on: all clean.
+- [x] **Found by the link scanner, fixed**: the edge guard sent every header of
+      an allowed redirect twice (Location, Set-Cookie) - copy_response_headers
+      on top of copy_response. Agent 0.26.9; checked on production.
+
 **Outbound abuse (Hetzner suspends servers for these)**
       DONE: App\Abuse\Enforcer - banned, signed out, cannot sign in by password or Google/Apple, every site taken down (nothing deleted), a payment never lifts it; abuse:ban (with a reason) and abuse:unban; the owner is emailed each ban with the evidence.
 - [x] **Container egress policy** (verified live on h1 2026-09-25): private,

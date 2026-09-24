@@ -1079,7 +1079,9 @@ func appProxy(port, indent string) string {
 	w(1, "@cic_redirect header Location *")
 	w(1, "handle_response @cic_redirect {")
 	w(2, "handle @cic_redirect_ok {")
-	w(3, "copy_response_headers")
+	// copy_response alone: the headers are already on the response here, and
+	// copy_response_headers sent every one of them twice - Location and
+	// Set-Cookie included (found on production by the link scanner).
 	w(3, "copy_response")
 	w(2, "}")
 	w(2, "handle {")

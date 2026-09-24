@@ -29,6 +29,10 @@ class Explore
 
         return Site::query()
             ->where('status', 'live')
+            // Listed publicly only once it has passed the malware scan and the
+            // link check (abuse:scan, abuse:links), in the last week.
+            ->where('scanned_clean_at', '>=', now()->subDays(7))
+            ->where('links_clean_at', '>=', now()->subDays(7))
             ->whereNotIn('site_id', $demoSites)
             ->whereHas('user', function (Builder $q) {
                 $q->where('plan', 'free');
