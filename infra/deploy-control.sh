@@ -139,6 +139,11 @@ DB_SYNCHRONOUS=normal
 # when it grows old (infra/setup-control-backup.sh).
 CIC_CONTROL_BACKUP_STAMP=/var/lib/codeinchrome/control-backup.ok
 CIC_SKILL_PATH=/srv/control/skills/codeinchrome/SKILL.md
+# Email sign-up: trusted providers only (config/signup.php); Google and Apple
+# sign-in are always open. The e2e suite's reserved addresses are accepted -
+# they can never receive mail, so they stay unverified and can do nothing.
+CIC_SIGNUP_EMAIL_DOMAINS=gmail.com,googlemail.com
+CIC_SIGNUP_TEST_DOMAIN=codeinchrome.test
 
 SESSION_DRIVER=file
 # __Host-: the browser refuses this cookie if it carries a Domain attribute,

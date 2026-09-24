@@ -45,5 +45,8 @@
         <env name="CLOUDFLARE_API_TOKEN" value="test-cloudflare-token" force="true"/>
         <env name="CLOUDFLARE_ZONE_ID" value="test-zone-id" force="true"/>
         <env name="CLOUDFLARE_ZONE_NAME" value="codeinchrome.com" force="true"/>
+        <!-- Sign-up from the tests' example addresses; SignupTest proves the
+             production rule (config/signup.php) with its own config. -->
+        <env name="CIC_SIGNUP_EMAIL_DOMAINS" value="gmail.com,googlemail.com,example.com,example.org" force="true"/>
     </php>
 </phpunit>

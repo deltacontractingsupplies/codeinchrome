@@ -6,7 +6,12 @@
     <p class="mt-2 text-sm text-neutral-400">@if (\App\Billing\Sales::open())Free for {{ config('billing.trial.days') }} days, no card: one site on a codeinchrome.com address, at full Starter speed.@else Free, no card: one site on a codeinchrome.com address. Paid plans open soon.@endif</p>
 
     @include('auth.social')
-    <form method="POST" action="{{ route('register') }}" class="mt-8 space-y-4">
+    {{-- Said before they type: email sign-up is for trusted providers only (config/signup.php). --}}
+    <p class="mt-6 text-xs text-neutral-500" data-signup-domains>
+        Or with an email address from {{ collect(config('signup.email_domains'))->reject(fn ($d) => $d === 'googlemail.com')->implode(', ') }}.
+        Other addresses: use Google or Apple above.
+    </p>
+    <form method="POST" action="{{ route('register') }}" class="mt-4 space-y-4">
         @csrf
         @foreach ([['name','Name','text'],['email','Email','email'],['password','Password','password'],['password_confirmation','Confirm password','password']] as [$field,$label,$type])
             <div>
