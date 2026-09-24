@@ -87,19 +87,31 @@ if [[ -n $topics ]]; then
   gh api -X PUT "repos/$repo/topics" --silent "${args[@]}"
 fi
 bash infra/github-setup.sh "$repo"
-gh api -X PATCH "repos/$repo/code-scanning/default-setup" --silent -f state=configured -f query_suite=extended \
-  -f 'languages[]=go' -f 'languages[]=javascript-typescript' -f 'languages[]=actions' || true
+# A new repository's languages are detected a little after the push; until
+# then CodeQL refuses ("languages not present"). Retried, never ignored.
+for attempt in $(seq 1 12); do
+  gh api -X PATCH "repos/$repo/code-scanning/default-setup" --silent -f state=configured -f query_suite=extended \
+    -f 'languages[]=go' -f 'languages[]=javascript-typescript' -f 'languages[]=actions' 2>/dev/null && break
+  (( attempt < 12 )) || die "CodeQL could not be switched on"
+  sleep 10
+done
 ok "settings, topics and CodeQL restored"
 
 # ── read it back, from outside ───────────────────────────────────────────────
 [[ $(gh repo view "$repo" --json visibility -q .visibility) == PUBLIC ]] || die "$repo is not public"
 [[ $(gh api "repos/$repo/commits/main" -q .sha) == $(git -C "$src" rev-parse main) ]] || die "GitHub's main is not the rewritten main"
+# Each commit's patch as GitHub serves it (the .patch view), through the API:
+# the web view rate-limits (403) and a fetch that failed must never count as
+# clean. Binary patches are left out: their base85 can spell a short pattern
+# by chance (build.gif does).
 hits=0
 while read -r sha; do
-  if curl -fsSL "https://github.com/$repo/commit/$sha.patch" | grep -qiE -- "$denied"; then hits=$((hits + 1)); fi
+  patch=$(gh api "repos/$repo/commits/$sha" -H 'Accept: application/vnd.github.patch') || die "could not read the patch of $sha"
+  [[ -n $patch ]] || die "GitHub returned an empty patch for $sha"
+  if awk '/^diff --git/ {bin = 0} /^GIT binary patch/ {bin = 1} !bin' <<<"$patch" | grep -qiE -- "$denied"; then hits=$((hits + 1)); fi
 done < <(git -C "$src" rev-list main)
-(( hits == 0 )) || die "$hits commit page(s) on GitHub still show a denied pattern"
-ok "no commit's .patch on GitHub shows a denied pattern"
+(( hits == 0 )) || die "$hits commit patch(es) on GitHub still show a denied pattern"
+ok "no commit's patch on GitHub shows a denied pattern (binary data aside)"
 api=$(gh api --paginate "repos/$repo/commits?per_page=100" -q '.[] | "\(.commit.author.email) \(.commit.committer.email) \(.author.login // "") \(.commit.message)"')
 grep -qiE -- "$denied" <<<"$api" && die "GitHub's API still shows a denied pattern"
 ok "GitHub's API shows no denied pattern in any commit"
