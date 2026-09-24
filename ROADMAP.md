@@ -481,6 +481,56 @@ on GitHub, not assumed.
 - [x] Only our emails in the published history (above): the owner decides
       between a one-time rewrite and a fresh repository.
 
+### Abuse and security hardening (owner, 2026-09-25): free and public means tight
+
+The code is public and free sites are listed on Explore, so the platform must
+be hard to abuse. Every item is verified live, never assumed.
+
+**Notify the owner**
+- [ ] **Email the owner on every new site**: to delta.contracting.supplies@gmail.com,
+      with the site's address (and custom domain, if any) and the account, so
+      each new site can be checked. Sent through the platform's own mail.
+
+**Stop malicious redirects and downloads (free sites)**
+- [ ] **No redirect to an arbitrary site**: a free site may not send visitors to
+      another domain except an allow-list of trusted destinations (payment
+      gateways such as Stripe and PayPal checkout, the platform itself). A
+      redirect to e.g. a malware download site is refused at the platform edge,
+      not trusted to the app.
+- [ ] **No file downloads of executables/archives**: free sites cannot serve
+      .exe .msi .apk .dmg .scr .bat .cmd .ps1 .vbs .jar, or archives meant to
+      carry them, nor a download button pointing at them.
+- [ ] **ClamAV scanning**: uploaded and written files scanned; a detection, or
+      encrypted/obfuscated PHP (eval/base64/gzinflate droppers, ionCube/
+      encoded loaders), suspends the site and bans the account (free plan: no
+      appeal needed). Scan on write and on a schedule.
+- [ ] **Ban an abuser**: suspend a site and ban an account (and its
+      canonical email) from the operator side; a banned account cannot sign
+      back in or sign up again.
+
+**Outbound abuse (Hetzner suspends servers for these)**
+- [x] **Container egress policy** (verified live on h1 2026-09-25): private,
+      reserved and metadata ranges refused; mail, mining and brute-force ports
+      refused; UDP limited to DNS/QUIC; per-container limits on open
+      connections and on new-connection rate; every refusal logged with the
+      container's address. Site, HTTPS, DNS and MySQL still work; SMTP,
+      metadata, private ranges and RDP are refused. LEFT: rolled out to h3/h4
+      and made persistent across reboots.
+- [ ] **Scan detector**: count distinct destinations per container over time;
+      a container that fans out (a scan) is cut off and the operator told.
+- [ ] **CPU/mining detection**: sustained CPU at the ceiling is flagged.
+
+**Inbound / origin**
+- [ ] **Origin reachable only through Cloudflare** (80/443): needs custom domains
+      on Cloudflare for SaaS and the hosts' certificates renewed without direct
+      access first - designed, not yet rolled out.
+
+**Research**
+- [ ] **How Lovable, Replit, Vercel, Netlify, Render handle abuse** on free
+      tiers: what they block, detect and require, adopted where it fits.
+- [ ] **Push to GitHub** so the community can help find abuse and security
+      gaps (SECURITY.md, private reporting already on).
+
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):
       the privacy policy said Cloudflare did DNS only - every site and the app

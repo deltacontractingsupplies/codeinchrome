@@ -42,7 +42,7 @@ if [[ $VERIFY_ONLY -eq 0 ]]; then
 log "packages"
 export DEBIAN_FRONTEND=noninteractive
 NEED=()
-for p in ca-certificates curl gnupg ufw fail2ban jq unattended-upgrades bzip2; do
+for p in ca-certificates curl gnupg ufw fail2ban jq unattended-upgrades bzip2 conntrack; do
   dpkg -s "$p" >/dev/null 2>&1 || NEED+=("$p")
 done
 if ((${#NEED[@]})); then
@@ -176,25 +176,95 @@ log "egress policy"
 mkdir -p /opt/codeinchrome/bin
 cat > /opt/codeinchrome/bin/cic-egress <<'EGRESS'
 #!/usr/bin/env bash
-# Reject outbound mail and common mining-pool ports from containers.
-# Idempotent: each rule is added only if it is not already present.
+# What a customer's container may send out (2026-09-25, after a security
+# audit): Hetzner suspends a server - and can end the account - for spam,
+# port scans, floods and mining, and a customer's PHP can attempt all of them.
+#
+# Everything lives in one chain of our own, CIC-EGRESS, rebuilt whole on every
+# run and entered from DOCKER-USER for packets FROM a container bridge only.
+# (The first version put bare --dport rules in DOCKER-USER, matching both
+# directions: a reply to a container whose ephemeral port happened to be 45700
+# was rejected.)
+#
+#   - replies to connections already allowed pass first
+#   - private, shared, reserved and link-local destinations (the metadata
+#     service, Hetzner's private networks, other tenants' addresses): refused
+#   - mail (25 465 587 2525), mining-pool ports, and ports scanned for brute
+#     force (telnet, SMB, MSSQL, RDP, VNC): refused
+#   - UDP: DNS and QUIC only, rate-limited; everything else refused - a Laravel
+#     app has no other use for it, and UDP is what floods are made of
+#   - ICMP: a few a second
+#   - per container: at most 256 open TCP connections (one site cannot fill
+#     the host's connection table), 30 new ones a second on 80/443 (burst 120)
+#     and 2 a second to any other port (burst 30) - scans are bursts of new
+#     connections; normal apps reuse a handful
+#   - every refusal is logged ("cic-egress: " in the kernel log, rate-limited),
+#     with the container's address, for tracing an abuse report to a site
+#
+# Idempotent; re-applied at boot by cic-egress.service.
 set -Eeuo pipefail
+
+chain() { iptables -N "$1" 2>/dev/null || iptables -F "$1"; }
+chain CIC-EGRESS
+chain CIC-REJECT
 iptables -L DOCKER-USER >/dev/null 2>&1 || iptables -N DOCKER-USER
-for port in 25 465 587 2525 3333 4444 5555 7777 8333 14444 45700; do
-  iptables -C DOCKER-USER -p tcp --dport "$port" -j REJECT 2>/dev/null \
-    || iptables -I DOCKER-USER -p tcp --dport "$port" -j REJECT
+
+# The refusal: logged (at most 6 a minute per container), then rejected, so
+# the app gets a clear "connection refused" instead of a hang.
+iptables -A CIC-REJECT -m hashlimit --hashlimit-upto 6/min --hashlimit-burst 6 --hashlimit-mode srcip \
+  --hashlimit-name cic-log -j LOG --log-prefix "cic-egress: " --log-level warning
+iptables -A CIC-REJECT -p tcp -j REJECT --reject-with tcp-reset
+iptables -A CIC-REJECT -j REJECT --reject-with icmp-admin-prohibited
+
+e() { iptables -A CIC-EGRESS "$@"; }
+e -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+for net in 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 \
+           192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4; do
+  e -d "$net" -j CIC-REJECT
 done
-# Link-local, which includes the cloud provider's metadata service at
-# 169.254.169.254: a customer's PHP could read this host's name, instance id
-# and network layout from it (found by audit, proved reachable, now closed).
-iptables -C DOCKER-USER -d 169.254.0.0/16 -j REJECT 2>/dev/null \
-  || iptables -I DOCKER-USER -d 169.254.0.0/16 -j REJECT
+e -p tcp -m multiport --dports 25,465,587,2525,3333,4444,5555,7777,8333,14444,45700 -j CIC-REJECT
+e -p udp -m multiport --dports 25,465,587,2525,3333,4444,5555,7777,8333,14444,45700 -j CIC-REJECT
+e -p tcp -m multiport --dports 23,445,1433,3389,5900 -j CIC-REJECT
+e -p udp --dport 53  -m hashlimit --hashlimit-upto 50/sec --hashlimit-burst 100 --hashlimit-mode srcip --hashlimit-name cic-dns  -j RETURN
+e -p udp --dport 443 -m hashlimit --hashlimit-upto 20/sec --hashlimit-burst 40  --hashlimit-mode srcip --hashlimit-name cic-quic -j RETURN
+e -p udp -j CIC-REJECT
+e -p icmp -m hashlimit --hashlimit-upto 5/sec --hashlimit-burst 10 --hashlimit-mode srcip --hashlimit-name cic-icmp -j RETURN
+e -p icmp -j CIC-REJECT
+e -p tcp --syn -m connlimit --connlimit-above 256 --connlimit-mask 32 --connlimit-saddr -j CIC-REJECT
+e -p tcp --syn -m multiport --dports 80,443 -m hashlimit --hashlimit-above 30/sec --hashlimit-burst 120 \
+  --hashlimit-mode srcip --hashlimit-name cic-syn-web -j CIC-REJECT
+e -p tcp --syn -m multiport ! --dports 80,443 -m hashlimit --hashlimit-above 2/sec --hashlimit-burst 30 \
+  --hashlimit-mode srcip --hashlimit-name cic-syn-other -j CIC-REJECT
+e -j RETURN
+
+# Entered for traffic FROM a container bridge, first thing in DOCKER-USER.
+for dev in 'br-+' docker0; do
+  iptables -C DOCKER-USER -i "$dev" -j CIC-EGRESS 2>/dev/null || iptables -I DOCKER-USER -i "$dev" -j CIC-EGRESS
+done
+# The rules of the first version, if this host still has them.
+while read -r rule; do
+  # shellcheck disable=SC2086
+  iptables -D DOCKER-USER ${rule#-A DOCKER-USER } 2>/dev/null || true
+done < <(iptables -S DOCKER-USER | grep -E -- '^-A DOCKER-USER (-p tcp -m tcp --dport [0-9]+|-d 169\.254\.0\.0/16) -j REJECT' || true)
+
+# IPv6: the site networks have none today; if one ever gets it, nothing leaves.
+if ip6tables -L DOCKER-USER >/dev/null 2>&1; then
+  for dev in 'br-+' docker0; do
+    ip6tables -C DOCKER-USER -i "$dev" -j REJECT 2>/dev/null || ip6tables -I DOCKER-USER -i "$dev" -j REJECT
+  done
+fi
+
+# The host itself sends no mail (only the control host does): a process that
+# reaches the host's own network - cic-mysql runs with it - cannot either.
+for port in 25 465 587 2525; do
+  iptables -C OUTPUT -p tcp --dport "$port" -j REJECT 2>/dev/null || iptables -A OUTPUT -p tcp --dport "$port" -j REJECT
+done
 EGRESS
 chmod 0750 /opt/codeinchrome/bin/cic-egress
 /opt/codeinchrome/bin/cic-egress
 # The old snapshot must not linger where something might restore it.
 rm -f /etc/iptables/rules.v4
-ok "outbound mail, common pool ports and the metadata service rejected from containers"
+ok "container egress: private ranges, mail and pool ports refused; UDP, new-connection rate and open connections limited"
 
 # Survive reboot: re-applied after docker creates its chains.
 cat > /etc/systemd/system/cic-egress.service <<'UNIT'
@@ -276,10 +346,17 @@ check "caddy installed"          'command -v caddy'
 check "ufw active"               'has "Status: active" ufw status'
 check "only 22/80/443 inbound"   '[[ $(ufw status | grep -c "ALLOW IN") -le 6 ]]'
 check "no iptables snapshot to restore" '[[ ! -e /etc/iptables/rules.v4 ]]'
-check "smtp 25 rejected"         'iptables -C DOCKER-USER -p tcp --dport 25 -j REJECT'
-check "smtp 465 rejected"        'iptables -C DOCKER-USER -p tcp --dport 465 -j REJECT'
-check "smtp 587 rejected"        'iptables -C DOCKER-USER -p tcp --dport 587 -j REJECT'
-check "pool port 3333 rejected"  'iptables -C DOCKER-USER -p tcp --dport 3333 -j REJECT'
+# The egress policy, rule by rule (cic-egress). The old checks looked only for
+# four port rules; these cover what the policy is for.
+E='iptables -C CIC-EGRESS'
+check "containers enter the egress policy" 'iptables -C DOCKER-USER -i br-+ -j CIC-EGRESS'
+check "mail and pool ports refused"  "$E -p tcp -m multiport --dports 25,465,587,2525,3333,4444,5555,7777,8333,14444,45700 -j CIC-REJECT"
+check "private ranges refused"       "$E -d 10.0.0.0/8 -j CIC-REJECT && $E -d 172.16.0.0/12 -j CIC-REJECT && $E -d 192.168.0.0/16 -j CIC-REJECT"
+check "metadata service refused"     "$E -d 169.254.0.0/16 -j CIC-REJECT"
+check "other UDP refused"            "$E -p udp -j CIC-REJECT"
+check "open connections capped"      "$E -p tcp --syn -m connlimit --connlimit-above 256 --connlimit-mask 32 --connlimit-saddr -j CIC-REJECT"
+check "refusals are logged"          'iptables -S CIC-REJECT | grep -q -- "--log-prefix \"cic-egress: \""'
+check "the host sends no mail"       'iptables -C OUTPUT -p tcp --dport 25 -j REJECT'
 check "egress rules persist"     'systemctl is-enabled cic-egress.service'
 check "ssh password auth off"    'has "passwordauthentication no" sshd -T'
 # sshd -T normalises prohibit-password to without-password; accept either, or
