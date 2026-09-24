@@ -169,6 +169,9 @@ return [
     // than a day and a bit. Unset (development): not checked.
     'control_backup_stamp' => env('CIC_CONTROL_BACKUP_STAMP'),
 
+    // Told of every new site and domain (App\Fleet\OwnerNotifier). Unset: no mail.
+    'owner_notify_email' => env('CIC_OWNER_NOTIFY_EMAIL'),
+
     /*
      * The zone every free subdomain is created under, and addresses that are
      * off limits: servers outside this fleet that must never be provisioned

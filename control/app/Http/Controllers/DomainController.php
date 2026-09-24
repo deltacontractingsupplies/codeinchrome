@@ -54,8 +54,9 @@ class DomainController extends Controller
             $existing->delete();
         }
 
-        $site->domains()->create(['domain' => $domain, 'token' => bin2hex(random_bytes(20))]);
+        $added = $site->domains()->create(['domain' => $domain, 'token' => bin2hex(random_bytes(20))]);
         Audit::record('domain.added', site: $site, detail: ['domain' => $domain]);
+        \App\Fleet\OwnerNotifier::newDomain($added);
 
         return redirect()->route('domains.index', $site)->with('status', "Add the two DNS records below for $domain, then press Verify.");
     }
