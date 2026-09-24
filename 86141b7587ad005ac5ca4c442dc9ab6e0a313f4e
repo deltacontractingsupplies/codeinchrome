@@ -1,0 +1,1 @@
+CORRECTION: this message says 'e2e 10/10'. That run actually had 2 failures (signup, domains), later traced to a shared rate-limit bucket (throttle:10,1 keys by IP only) and fixed in da702de. The suite has since passed 10/10 against production.
