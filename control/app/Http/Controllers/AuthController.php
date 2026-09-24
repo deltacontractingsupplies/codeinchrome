@@ -108,6 +108,9 @@ class AuthController extends Controller
         }
 
         $user = \App\Models\User::where('email', $credentials['email'])->first();
+        if ($user?->banned_at) {
+            return back()->withErrors(['email' => \App\Http\Middleware\BannedAccount::MESSAGE]);
+        }
         if ($user->two_factor_confirmed_at) {
             $request->session()->regenerate();
             $request->session()->put(['login.id' => $user->id, 'login.remember' => true, 'login.at' => now()->timestamp]);

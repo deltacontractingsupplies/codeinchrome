@@ -296,6 +296,40 @@ systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || die "co
 ok "keys only"
 
 # ─────────────────────────────────────────────────────────────────────────────
+log "malware scanning (ClamAV)"
+# Customers upload files and run code the platform did not write; the owner
+# decided (2026-09-25) that malware or encrypted PHP on a free site bans the
+# account. clamd keeps the signatures in memory (~1 GB) so the agent can scan
+# an upload the moment it lands. The agent sends the bytes (clamdscan
+# --stream): --fdpass fails from inside the agent's private mount namespace
+# (every file "Not a regular file" - found on the first real scan).
+# freshclam updates the signatures several times a day.
+if ! dpkg -s clamav-daemon >/dev/null 2>&1; then
+  apt-get update -qq
+  apt-get install -y -qq clamav clamav-daemon clamav-freshclam >/dev/null
+fi
+# clamd will not start without a signature database: fetch it once, now.
+if ! ls /var/lib/clamav/main.c[lv]d /var/lib/clamav/main.cvd >/dev/null 2>&1; then
+  systemctl stop clamav-freshclam 2>/dev/null || true
+  freshclam --quiet || warn "freshclam could not fetch signatures yet; the service will retry"
+fi
+# Uploads may be 32 MB (the agent's MaxUploadSize): the defaults stop at 25 MB,
+# and a file clamd will not take is an upload refused as unscanned.
+conf=/etc/clamav/clamd.conf
+restart_clamd=0
+for kv in "StreamMaxLength 100M" "MaxFileSize 100M" "MaxScanSize 400M"; do
+  key=${kv%% *}
+  if ! grep -qx "$kv" "$conf"; then
+    sed -i "/^$key /d" "$conf"; echo "$kv" >> "$conf"; restart_clamd=1
+  fi
+done
+systemctl enable --now clamav-freshclam >/dev/null 2>&1 || true
+systemctl enable --now clamav-daemon >/dev/null 2>&1 || true
+(( restart_clamd )) && systemctl restart clamav-daemon
+for _ in $(seq 1 60); do [[ -S /run/clamav/clamd.ctl ]] && break; sleep 2; done
+ok "clamd and freshclam enabled"
+
+# ─────────────────────────────────────────────────────────────────────────────
 log "unattended security updates"
 cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CONF'
 APT::Periodic::Update-Package-Lists "1";
@@ -358,6 +392,15 @@ check "open connections capped"      "$E -p tcp --syn -m connlimit --connlimit-a
 check "refusals are logged"          'iptables -S CIC-REJECT | grep -q -- "--log-prefix \"cic-egress: \""'
 check "the host sends no mail"       'iptables -C OUTPUT -p tcp --dport 25 -j REJECT'
 check "egress rules persist"     'systemctl is-enabled cic-egress.service'
+# Not only "running": it must FIND something. EICAR is the industry's harmless
+# test file, recognised by every scanner.
+eicar_check() {
+  local f; f=$(mktemp /tmp/cic-eicar.XXXX)
+  printf '%s' 'X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*' > "$f"
+  local out; out=$(clamdscan --stream --no-summary "$f" 2>&1 || true); rm -f "$f"
+  [[ $out == *"Eicar"*"FOUND"* ]]
+}
+check "clamd detects malware (EICAR)" 'eicar_check'
 check "ssh password auth off"    'has "passwordauthentication no" sshd -T'
 # sshd -T normalises prohibit-password to without-password; accept either, or
 # this check fails on a correctly configured host.

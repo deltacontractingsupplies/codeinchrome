@@ -136,6 +136,9 @@ class SocialLoginController extends Controller
         if (! $user) {
             return redirect()->route('login')->withErrors(['email' => ucfirst($provider).' did not confirm that email address, so it cannot be used to sign in here.']);
         }
+        if ($user->banned_at) {
+            return redirect()->route('login')->withErrors(['email' => \App\Http\Middleware\BannedAccount::MESSAGE]);
+        }
 
         $request->session()->regenerate();
         if ($user->two_factor_confirmed_at) {

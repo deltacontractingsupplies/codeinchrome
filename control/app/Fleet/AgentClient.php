@@ -384,6 +384,20 @@ class AgentClient
         return ['paths' => $r['paths'] ?? [], 'truncated' => (bool) ($r['truncated'] ?? false)];
     }
 
+    /**
+     * A whole-site malware scan (agent sites/scan.go): list of findings, each
+     * {path, kind: malware|obfuscated, detail}. Throws if the scan could not
+     * run - never an empty "clean" list in its place.
+     */
+    public function scanSite(string $id): array
+    {
+        // A whole site streamed through ClamAV: about a minute for a Laravel
+        // app with its vendor/, so well past the usual timeout.
+        $long = new self($this->host, $this->baseUrl, $this->token, 900);
+
+        return $long->send('post', "/v1/sites/$id/scan")['findings'] ?? [];
+    }
+
     public function search(string $id, string $q, int $limit = 200): array
     {
         return $this->send('get', "/v1/sites/$id/search", query: ['q' => $q, 'limit' => $limit])['hits'] ?? [];

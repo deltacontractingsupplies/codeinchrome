@@ -183,9 +183,13 @@ class FileController extends Controller
      * 404, not 403. A 403 confirms the site exists and belongs to someone
      * else, which lets anyone enumerate which names are taken and by whom.
      */
+    /** The site this request is about, for acting on a malware refusal in attempt(). */
+    protected ?Site $site = null;
+
     protected function authorizeSite(Request $request, Site $site): void
     {
         abort_unless($site->user_id === $request->user()->id, 404);
+        $this->site = $site;
         // A paused site's owner may still take their work away; PausedSite
         // lets only the reading routes through to here.
         abort_unless(in_array($site->status, ['live', 'suspended'], true), 409, 'This site is not live yet.');
@@ -203,6 +207,14 @@ class FileController extends Controller
             return response()->json(['ok' => true] + $work());
         } catch (AgentRefused $e) {
             $error = $e->detail['error'] ?? 'refused';
+            if ($error === 'malware' && $this->site) {
+                // The agent refused malware or obfuscated PHP and kept none of it
+                // (sites/scan.go). The account is banned (owner's decision).
+                app(\App\Abuse\Enforcer::class)->malware($this->site, $e->detail['findings'] ?? [], 'refused on write');
+
+                return response()->json(['ok' => false, 'error' => 'malware',
+                    'hint' => ($e->detail['hint'] ?? 'Malware refused.').' '.\App\Http\Middleware\BannedAccount::MESSAGE], 403);
+            }
 
             return response()->json([
                 'ok' => false,

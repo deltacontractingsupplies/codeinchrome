@@ -355,6 +355,10 @@ func (m *Manager) checkWrite(id, rel, content, expect string) (root, relAbs stri
 	if len(content) > MaxFileSize {
 		return "", "", fmt.Errorf("content is %d bytes; the limit is %d", len(content), MaxFileSize)
 	}
+	// Encrypted or obfuscated PHP is refused before it is written (scan.go).
+	if bad := scanContent(rel, content); bad != nil {
+		return "", "", bad
+	}
 
 	abs, err := m.resolve(id, rel)
 	if err != nil {
