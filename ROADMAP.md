@@ -439,12 +439,22 @@ on GitHub, not assumed.
       alerts read back as zero.
 
 **Security, double-checked now that the code is public**
-- [ ] Whole-history scan again, on GitHub's copy: gitleaks, the deny list,
+- [x] Whole-history scan again, on GitHub's copy: gitleaks, the deny list,
       every registry address, .env values (a fresh clone, not this one).
-- [ ] Nothing a reader could use against production: no admin URL that
+      DONE 2026-09-24 over every commit of public/main (131): gitleaks clean,
+      no .env secret (both .env files; values unchanged from the committed
+      .env.example no longer count), no private key, no artifact, no server
+      address, no other business. The ONE finding: the owner's personal
+      email in 130 author lines - the "only our emails" item.
+- [x] Nothing a reader could use against production: no admin URL that
       skips authentication, no debug route, no default credential, no token
       in a test that is also real. Read the routes and the configuration
-      with an attacker's eyes.
+      with an attacker's eyes. DONE 2026-09-24, two fixes: an operator's
+      address registered by someone else (unverified) was an operator -
+      /status and trial exemption; now verified only. Laravel's unused
+      GET/PUT storage/{path}: off. PublicSurfaceTest now lists every route
+      reachable signed out. CodeQL's seven Go findings each read against the
+      code (false positives, dismissed with the reason).
 - [ ] Rotate what lived on a laptop (defence in depth - none is in the
       history): the Lemon Squeezy API key and webhook secret, the Cloudflare
       token. Owner, in each dashboard.

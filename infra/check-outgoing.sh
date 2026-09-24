@@ -60,6 +60,9 @@ for envfile in "$root/.env" "$root/control/.env"; do
     [[ -z $line || $line == \#* || $line != *=* ]] && continue
     k=${line%%=*}; v=${line#*=}; v=${v%\"}; v=${v#\"}
     [[ $k =~ $PUBLIC_KEYS || ${#v} -lt 8 ]] && continue
+    # Unchanged from the committed example (Laravel's defaults: REDIS_CLIENT,
+    # AWS_DEFAULT_REGION, ...): public by definition, never a secret.
+    grep -qxF -- "$line" "$envfile.example" 2>/dev/null && continue
     # Loopback is Laravel's default for REDIS_HOST, MEMCACHED_HOST and more:
     # an address every machine has, never a secret (and in the agent's code).
     [[ $v =~ ^(127\.0\.0\.1|localhost|::1)$ ]] && continue
