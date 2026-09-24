@@ -41,7 +41,9 @@ if gh api "orgs/$org" --silent 2>/dev/null; then
   gh api -X PUT "orgs/$org/teams/maintainers/repos/$repo" --silent -f permission=maintain
   ok "team $org/maintainers (with $me) maintains $repo - CODEOWNERS points at it"
 else
-  die "$org is not an organization: .github/CODEOWNERS names @$org/maintainers"
+  # A personal account: its owner is the code owner (.github/CODEOWNERS names them).
+  grep -q "@$org\b" .github/CODEOWNERS || die ".github/CODEOWNERS does not name @$org, the repository's owner"
+  ok "code owner: @$org (a personal account - no team)"
 fi
 
 # ── repository settings ──────────────────────────────────────────────────────

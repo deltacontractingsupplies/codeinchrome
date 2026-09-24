@@ -327,8 +327,9 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
       sees their plan. To open: set it true, deploy, `php artisan
       trials:restart` (every free account: a fresh trial and an email).
       SalesTest (mutation-checked); verified live
-- [ ] **Public repository** (owner's decisions, 2026-09-24): PUBLIC, under a new
-      codeinchrome GitHub organization; FSL-1.1-ALv2 (no competing use, each
+- [ ] **Public repository** (owner's decisions, 2026-09-24): PUBLIC, under the
+      owner's GitHub account (deltacontractingsupplies - the owner chose it over
+      a separate organization); FSL-1.1-ALv2 (no competing use, each
       version Apache-2.0 after 2 years), Copyright 2026 Ahmed Omar; contributor
       agreement (CLA.md); commits keep the owner's own identity. Done and
       verified: no server address, no other business, no secret in any commit
@@ -337,8 +338,7 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
       (reviewed pull requests only, CI required, secret scanning); the
       contributor-agreement check as a pinned in-repository action (no external
       app), signatures on branch cla-signatures. LEFT, in order: owner creates
-      the codeinchrome organization; `gh auth login` + `gh auth refresh -s
-      admin:org`; publish-repo.sh --public; github-setup.sh
+      `gh auth login` (workflow scope); infra/go-public.sh
 
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):

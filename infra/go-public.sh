@@ -7,35 +7,34 @@
 # Owner first (none of these can be done for them):
 #   1. GOOGLE_CLIENT_SECRET=... in .env (Google Cloud console, the codeinchrome
 #      project, client "codeinchrome web sign-in": the newest secret)
-#   2. a free GitHub organization named codeinchrome
-#   3. gh auth login, then gh auth refresh -s admin:org
+#   2. gh auth login as deltacontractingsupplies, with the workflow scope
 #
 # Then this script:
 #   - deploys the control plane and proves Google sign-in answers with the
 #     right client and callback
-#   - publishes the repository PUBLIC as codeinchrome/codeinchrome through
+#   - publishes the repository PUBLIC as deltacontractingsupplies/codeinchrome through
 #     infra/publish-repo.sh, which refuses on any finding (scrub, .env values,
 #     keys, deny list, gitleaks, artifacts)
 #   - applies infra/github-setup.sh (reviewed pull requests only, CI and the
-#     contributor agreement required, secret scanning, maintainers team)
+#     contributor agreement required, secret scanning)
 #   - reads the settings back from GitHub and checks them
 #
 # Stops at the first missing prerequisite and says which.
 
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
-repo=codeinchrome/codeinchrome
+repo=deltacontractingsupplies/codeinchrome
 
 ok()  { printf '\033[32m  ok\033[0m %s\n' "$*"; }
 die() { printf '\033[31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
 
 # ── prerequisites ────────────────────────────────────────────────────────────
 grep -qE '^GOOGLE_CLIENT_SECRET=.+' .env || die "step 1: GOOGLE_CLIENT_SECRET is not in .env"
-gh auth status >/dev/null 2>&1 || die "step 3: run gh auth login"
-gh auth status 2>&1 | grep -q 'admin:org' || die "step 3: run gh auth refresh -s admin:org"
-gh api orgs/codeinchrome --silent 2>/dev/null || die "step 2: the codeinchrome organization does not exist (or you cannot see it)"
+gh auth status >/dev/null 2>&1 || die "step 2: run gh auth login"
+[[ $(gh api user -q .login) == "${repo%%/*}" ]] || die "step 2: gh is signed in as $(gh api user -q .login), not ${repo%%/*}"
+gh auth status 2>&1 | grep -q "'workflow'" || die "step 2: run gh auth refresh -s workflow (pushing .github/workflows needs it)"
 [[ -z $(git status --porcelain) ]] || die "commit or stash first"
-ok "prerequisites: Google secret, GitHub sign-in with admin:org, the organization"
+ok "prerequisites: Google secret, GitHub signed in as ${repo%%/*} with the workflow scope"
 
 # ── Google sign-in, live ─────────────────────────────────────────────────────
 bash infra/deploy-control.sh >/dev/null 2>&1 || die "deploy-control.sh failed - run it on its own to see why"

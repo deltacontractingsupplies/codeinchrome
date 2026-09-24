@@ -34,5 +34,5 @@ jobs:
           path-to-signatures: signatures/cla.json
           path-to-document: https://github.com/${{ github.repository }}/blob/main/CLA.md
           branch: cla-signatures
-          # Bots do not sign. Maintainers sign once like everyone else (no account is named here).
-          allowlist: dependabot[bot],github-actions[bot]
+          # The owner (the Licensor's account) and bots do not sign.
+          allowlist: deltacontractingsupplies,dependabot[bot],github-actions[bot]

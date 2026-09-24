@@ -65,8 +65,8 @@ on any finding - `.env` values, private keys, anything in the uncommitted
 `infra/publish-deny.local` (other businesses, personal details), every server
 address in `infra/hosts.local.env`, gitleaks findings, binary artifacts.
 
-- First publication, after the owner has made the `codeinchrome` organization
-  and run `gh auth login` + `gh auth refresh -s admin:org`: `infra/go-public.sh`
+- First publication (as `deltacontractingsupplies/codeinchrome`), once `gh` is
+  signed in as that account with the `workflow` scope: `infra/go-public.sh`
   (deploys, checks Google sign-in, publishes, applies the GitHub rules, reads
   them back).
 - The GitHub rules are code: `infra/github-setup.sh` (re-run it after changing
