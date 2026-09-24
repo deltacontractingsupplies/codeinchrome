@@ -1,0 +1,31 @@
+# Version updates, as reviewed pull requests like any other change (security
+# updates are switched on separately by infra/github-setup.sh). Weekly and
+# grouped, so a routine week is one pull request per ecosystem, not dozens.
+# The CI workflow's actions are pinned to commits; this is what moves them.
+version: 2
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule: { interval: weekly }
+    groups:
+      actions: { patterns: ["*"] }
+  - package-ecosystem: gomod
+    directory: /agent
+    schedule: { interval: weekly }
+    groups:
+      go: { patterns: ["*"] }
+  - package-ecosystem: composer
+    directory: /control
+    schedule: { interval: weekly }
+    groups:
+      composer: { patterns: ["*"], update-types: [minor, patch] }
+  - package-ecosystem: npm
+    directory: /control
+    schedule: { interval: weekly }
+    groups:
+      npm: { patterns: ["*"], update-types: [minor, patch] }
+  - package-ecosystem: npm
+    directory: /tests/e2e
+    schedule: { interval: weekly }
+    groups:
+      e2e: { patterns: ["*"], update-types: [minor, patch] }

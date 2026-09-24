@@ -116,13 +116,17 @@ type lspSession struct {
 	cmd       *exec.Cmd
 	cancel    context.CancelFunc
 	stdin     io.WriteCloser
-	writeMu   sync.Mutex
-	mu        sync.Mutex
-	queue     []json.RawMessage
-	arrived   chan struct{} // closed and replaced each time a message arrives
-	lastUsed  time.Time
-	done      chan struct{}
-	err       error
+	// How this session is killed, taken from lspKill when it starts: stop
+	// runs on its own goroutine and must not read the package variable,
+	// which tests swap while an earlier session may still be stopping.
+	kill     func(container, session string)
+	writeMu  sync.Mutex
+	mu       sync.Mutex
+	queue    []json.RawMessage
+	arrived  chan struct{} // closed and replaced each time a message arrives
+	lastUsed time.Time
+	done     chan struct{}
+	err      error
 }
 
 var (
@@ -179,7 +183,7 @@ func (m *Manager) lspSession(id, session string) (*lspSession, error) {
 		return nil, fmt.Errorf("the language server could not start")
 	}
 	s := &lspSession{site: id, session: session, container: m.container(id), cmd: cmd, cancel: cancel, stdin: stdin,
-		arrived: make(chan struct{}), lastUsed: time.Now(), done: make(chan struct{})}
+		kill: lspKill, arrived: make(chan struct{}), lastUsed: time.Now(), done: make(chan struct{})}
 	go s.read(bufio.NewReaderSize(stdout, 64<<10))
 	lspSessions[key] = s
 	return s, nil
@@ -319,7 +323,7 @@ func (m *Manager) LSPExchange(ctx context.Context, id, session string, send []js
 // lets go of the docker client.
 func (s *lspSession) stop() {
 	_ = s.stdin.Close()
-	lspKill(s.container, s.session)
+	s.kill(s.container, s.session)
 	s.cancel()
 }
 

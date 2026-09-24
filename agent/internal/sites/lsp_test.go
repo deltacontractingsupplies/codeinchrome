@@ -73,7 +73,11 @@ var (
 func fakeLSPCommand(t *testing.T) *[]string {
 	t.Helper()
 	started := &[]string{}
+	// Under the lock: a session closed by the previous test may still be
+	// stopping on its own goroutine and appending here.
+	killedMu.Lock()
 	*killed = nil
+	killedMu.Unlock()
 	orig := lspCommand
 	t.Cleanup(func() { lspCommand = orig })
 	origKill := lspKill
@@ -176,7 +180,16 @@ func TestClosingASessionKillsItsProcessInsideTheContainer(t *testing.T) {
 	m.LSPCloseSite(id)
 	killedMu.Lock()
 	defer killedMu.Unlock()
-	if len(*killed) != 1 || (*killed)[0] != "cic-"+id+"/tab0123456789abcd" {
-		t.Fatalf("killed inside containers: %v", *killed)
+	// This session, killed exactly once. Counted, not compared as the whole
+	// list: a session an earlier test closed may still be stopping on its own
+	// goroutine and land in the list too.
+	want, n := "cic-"+id+"/tab0123456789abcd", 0
+	for _, k := range *killed {
+		if k == want {
+			n++
+		}
+	}
+	if n != 1 {
+		t.Fatalf("%s killed %d times inside the container (all kills: %v)", want, n, *killed)
 	}
 }

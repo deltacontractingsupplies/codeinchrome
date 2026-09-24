@@ -351,6 +351,18 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
       LEFT for the owner: read the ruleset once in the GitHub settings; sign
       the contributor agreement on a first pull request of their own.
 
+- [ ] **Only our emails** (owner, 2026-09-24): every commit, note and
+      co-author line under delta.contracting.supplies@gmail.com, never a
+      personal address. Done: this clone commits as the delta address; both
+      personal addresses are in the local deny list, so the pre-push check
+      refuses any commit that carries one (author, committer, message or
+      co-author line - tested on the published history, which it refuses).
+      LEFT: the history published on 2026-09-24 carries the personal address
+      (129 commits, one notes commit, and the co-author lines GitHub wrote into
+      pull requests #1 and #2). Removing it needs the history rewritten
+      on GitHub; only with the owner's go-ahead (a force-push, or a fresh
+      repository).
+
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):
       the privacy policy said Cloudflare did DNS only - every site and the app
