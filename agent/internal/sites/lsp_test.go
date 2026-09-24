@@ -23,6 +23,9 @@ func TestMain(m *testing.M) {
 		fakeLSP()
 		return
 	}
+	// No clamd on a developer's machine: a stand-in that reads each file and
+	// names the EICAR test string as ClamAV would (scan_test.go tests the rest).
+	clamdscan = fakeClamdscan
 	os.Exit(m.Run())
 }
 

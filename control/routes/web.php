@@ -171,7 +171,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::post('/sites/{site}/files/unzip', [FileManagerController::class, 'unzip'])->middleware(['throttle:command', \App\Http\Middleware\StorageLimit::class])->name('files.unzip');
     Route::delete('/sites/{site}/tree', [FileManagerController::class, 'destroyTree'])->name('files.tree.destroy');
     Route::get('/sites/{site}/paths', [FileManagerController::class, 'paths'])->middleware('throttle:command')->name('files.paths');
-    Route::get('/sites/{site}/search', [FileManagerController::class, 'search'])->middleware('throttle:command')->name('files.search');
+    Route::get('/sites/{site}/search', [FileManagerController::class, 'search'])->middleware('throttle:search')->name('files.search');
     Route::post('/sites/{site}/upload', [FileManagerController::class, 'upload'])->middleware(['throttle:command', \App\Http\Middleware\StorageLimit::class])->name('files.upload');
     Route::get('/sites/{site}/download', [FileManagerController::class, 'download'])->name('files.download');
     // Every version of every file, the bin of deleted ones, and restore.

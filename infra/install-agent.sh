@@ -253,6 +253,7 @@ ok "cic-agent service installed"
 log "verifying"
 fails=0
 has()  { local pat=$1; shift; local out; out=$("$@" 2>/dev/null) || true; [[ "$out" == *"$pat"* ]]; }
+exec 3>&2 # the real stderr, for a check that must say why it failed
 check(){ if eval "$2" >/dev/null 2>&1; then ok "$1"; else warn "$1"; fails=$((fails+1)); fi; }
 
 check "agent service active"     'systemctl is-active cic-agent'
@@ -297,6 +298,10 @@ if compgen -G "$CIC/caddy/sites/*.caddy" >/dev/null; then
         "https://${CIC_HOST_NAME:-none}.codeinchrome.com/" && return 0
       sleep 3
     done
+    # Say why (fd 3: check() silences the rest): a bare "!!" sent a deploy
+    # hunting for a cause.
+    curl -sS -o /dev/null --max-time 10 --resolve "${CIC_HOST_NAME:-none}.codeinchrome.com:443:127.0.0.1" \
+      -w 'host site: HTTP %{http_code}, TLS verify %{ssl_verify_result}\n' "https://${CIC_HOST_NAME:-none}.codeinchrome.com/" >&3 2>&3 || true
     return 1
   }
   check "host site answers (valid certificate)" 'host_site_answers'

@@ -45,8 +45,11 @@ const (
 
 // mysqlTool builds the docker exec for a MySQL client tool. A variable so the
 // tests can see exactly what would run, without a MySQL server.
+//
+// As nobody, never root: cic-mysql runs with the host's network and holds
+// every site's data, and the client reads what a customer uploaded.
 var mysqlTool = func(ctx context.Context, password string, stdin bool, argv ...string) *exec.Cmd {
-	args := []string{"exec"}
+	args := []string{"exec", "-u", "65534:65534"}
 	if stdin {
 		args = append(args, "-i")
 	}
@@ -173,7 +176,15 @@ func (m *Manager) ImportDB(ctx context.Context, id string, r io.Reader) error {
 	defer done()
 	ctx, cancel := context.WithTimeout(ctx, dbTransferTimeout)
 	defer cancel()
+	// The dump is the customer's file, read by the mysql CLIENT, whose own
+	// commands run before any SQL reaches the server - grants cannot stop
+	// them. Proved on a host (2026-09-25): "\\! cmd" and "system cmd" ran a
+	// shell as root in cic-mysql, "tee" wrote a file there, "source" read one
+	// and echoed it back in its error. --skip-system-command stops the shell
+	// only; --commands=FALSE stops every client command but DELIMITER, which
+	// dumps with triggers and procedures need.
 	cmd := mysqlTool(ctx, password, true, "mysql",
+		"--skip-system-command", "--commands=FALSE",
 		"-h", agentHost, "-u", DBUser(id),
 		"--default-character-set=utf8mb4",
 		DBName(id))

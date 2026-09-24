@@ -154,7 +154,9 @@ return [
             'disk' => (float) env('CIC_OVERCOMMIT_DISK', 2.5),
         ],
         // For each host's own services: MySQL, Caddy, the agent, the OS.
-        'reserve' => ['memory_mb' => 2048, 'disk_gb' => 15],
+        // memory: the host's own services, plus clamd (~1 GB measured on
+        // 2026-09-25, holding the malware signatures in memory).
+        'reserve' => ['memory_mb' => 3072, 'disk_gb' => 15],
         // Figures older than this (the monitor refreshes them every minute)
         // add no capacity: we do not sell into a fleet we cannot see.
         'fresh_seconds' => 600,
@@ -162,12 +164,15 @@ return [
         'alert_below' => (int) env('CIC_STOCK_ALERT_BELOW', 3),
     ],
 
-    'min_agent_version' => '0.26.3',
+    'min_agent_version' => '0.26.7',
 
     // Touched by the control plane's backup after each complete run
     // (infra/setup-control-backup.sh); Monitoring alerts when it is older
     // than a day and a bit. Unset (development): not checked.
     'control_backup_stamp' => env('CIC_CONTROL_BACKUP_STAMP'),
+
+    // Told of every new site and domain (App\Fleet\OwnerNotifier). Unset: no mail.
+    'owner_notify_email' => env('CIC_OWNER_NOTIFY_EMAIL'),
 
     /*
      * The zone every free subdomain is created under, and addresses that are

@@ -40,6 +40,18 @@ func fail(code, hint string) resp {
 	return resp{"ok": false, "error": code, "hint": hint}
 }
 
+// refusedMalware answers a write the malware scan refused (sites/scan.go):
+// 422 and "malware", with the findings, so the control plane can act on it
+// (App\Abuse\Enforcer) and the customer is told what was refused.
+func refusedMalware(w http.ResponseWriter, err error) bool {
+	bad, is := sites.IsMalware(err)
+	if !is {
+		return false
+	}
+	writeJSON(w, http.StatusUnprocessableEntity, resp{"ok": false, "error": "malware", "findings": bad.Findings, "hint": bad.Error()})
+	return true
+}
+
 func Routes(mgr *sites.Manager, version string) http.Handler {
 	mux := http.NewServeMux()
 
@@ -234,6 +246,9 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			return
 		}
 		rev, err := mgr.WriteFileIf(r.Context(), r.PathValue("id"), body.Path, body.Content, body.Expect)
+		if refusedMalware(w, err) {
+			return
+		}
 		if errors.Is(err, sites.ErrConflict) {
 			// Nothing was written. The caller's copy is stale; it must re-read,
 			// reconcile, and try again with the new revision.
@@ -264,6 +279,9 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			return
 		}
 		written, err := mgr.WriteMany(r.Context(), r.PathValue("id"), body.Files, body.Message)
+		if len(written) == 0 && refusedMalware(w, err) {
+			return
+		}
 		var be *sites.BatchError
 		switch {
 		case errors.Is(err, sites.ErrConflict):
@@ -292,6 +310,9 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			return
 		}
 		out, err := mgr.EditFile(r.Context(), r.PathValue("id"), body.Path, body.Edits, body.Expect)
+		if refusedMalware(w, err) {
+			return
+		}
 		if errors.Is(err, sites.ErrConflict) {
 			writeJSON(w, http.StatusConflict, fail("conflict", "The file changed since you read it. Nothing was written: re-read it and edit again."))
 			return
@@ -394,6 +415,9 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 				return
 			}
 			if err := op(r, a, b); err != nil {
+				if refusedMalware(w, err) {
+					return
+				}
 				writeJSON(w, http.StatusBadRequest, fail("cannot_"+name, err.Error()))
 				return
 			}
@@ -436,6 +460,16 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"paths": paths, "truncated": truncated}))
 	})
 
+	// A whole-site malware scan (sites/scan.go), run by the control plane on a
+	// schedule. A scan that cannot run is an error, never "clean".
+	mux.HandleFunc("POST /v1/sites/{id}/scan", func(w http.ResponseWriter, r *http.Request) {
+		found, err := mgr.ScanSite(r.Context(), r.PathValue("id"))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, fail("scan_failed", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"findings": found, "clean": len(found) == 0}))
+	})
 	mux.HandleFunc("GET /v1/sites/{id}/search", func(w http.ResponseWriter, r *http.Request) {
 		limit, _ := strconv.Atoi(r.URL.Query().Get("limit"))
 		hits, err := mgr.Search(r.Context(), r.PathValue("id"), r.URL.Query().Get("q"), limit)
@@ -450,6 +484,9 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	mux.HandleFunc("PUT /v1/sites/{id}/upload", func(w http.ResponseWriter, r *http.Request) {
 		body := http.MaxBytesReader(w, r.Body, sites.MaxUploadSize+1)
 		if err := mgr.Upload(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"), body); err != nil {
+			if refusedMalware(w, err) {
+				return
+			}
 			writeJSON(w, http.StatusBadRequest, fail("cannot_upload", err.Error()))
 			return
 		}

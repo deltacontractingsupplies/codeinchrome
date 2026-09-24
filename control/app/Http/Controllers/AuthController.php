@@ -20,9 +20,17 @@ class AuthController extends Controller
 
     public function register(Request $request): RedirectResponse
     {
+        $request->merge(['email' => strtolower(trim((string) $request->input('email')))]);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:120'],
-            'email' => ['required', 'email', 'max:190', 'unique:users,email'],
+            'email' => ['required', 'email', 'max:190', 'unique:users,email', function (string $attribute, mixed $value, \Closure $fail) {
+                if (! self::signupDomainAllowed((string) $value)) {
+                    $fail(self::signupDomainMessage());
+                } elseif (User::where('email_canonical', \App\Auth\EmailIdentity::canonical((string) $value))->exists()) {
+                    // The same inbox under another spelling (dots, +tag, googlemail.com).
+                    $fail('An account already uses this email address.');
+                }
+            }],
             // Laravel's default rules are a length check only. This adds the
             // compromised-password check, which rejects passwords known to be
             // in a breach corpus - the single most effective filter there is,
@@ -51,6 +59,26 @@ class AuthController extends Controller
         return redirect()->route('dashboard')->with('status', 'Welcome. Create your first site below.');
     }
 
+    /** config/signup.php: the providers an email sign-up may use. */
+    public static function signupDomainAllowed(string $email): bool
+    {
+        $domain = strtolower((string) substr(strrchr($email, '@') ?: '', 1));
+        $allowed = config('signup.email_domains', []);
+        if ($test = config('signup.test_domain')) {
+            $allowed[] = strtolower($test);
+        }
+
+        return $domain !== '' && in_array($domain, $allowed, true);
+    }
+
+    public static function signupDomainMessage(): string
+    {
+        $providers = collect(config('signup.email_domains', []))->reject(fn ($d) => $d === 'googlemail.com')
+            ->map(fn ($d) => ucfirst(strtok($d, '.')))->unique()->implode(', ');
+
+        return 'To keep abuse out, new accounts use Google or Apple sign-in, or an email address from '.($providers ?: 'a trusted provider').'.';
+    }
+
     public function showLogin(): View
     {
         return view('auth.login');
@@ -58,6 +86,7 @@ class AuthController extends Controller
 
     public function login(Request $request): RedirectResponse
     {
+        $request->merge(['email' => strtolower(trim((string) $request->input('email')))]);
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required'],
@@ -79,6 +108,9 @@ class AuthController extends Controller
         }
 
         $user = \App\Models\User::where('email', $credentials['email'])->first();
+        if ($user?->banned_at) {
+            return back()->withErrors(['email' => \App\Http\Middleware\BannedAccount::MESSAGE]);
+        }
         if ($user->two_factor_confirmed_at) {
             $request->session()->regenerate();
             $request->session()->put(['login.id' => $user->id, 'login.remember' => true, 'login.at' => now()->timestamp]);

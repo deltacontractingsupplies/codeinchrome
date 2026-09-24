@@ -275,6 +275,12 @@ async function apiOnce(base, method, query, body) {
     // (redirect to login) or a proxy error page.
   }
 
+  if (response.status === 429) {
+    // Laravel's throttle answers {"message": "Too Many Attempts."}: say it
+    // plainly, with when to try again.
+    const wait = Number(response.headers.get('Retry-After')) || 60;
+    return { ok: false, status: 429, error: 'rate_limited', hint: `Too many requests of this kind; try again in ${wait} seconds.` };
+  }
   if (response.status === 401 || response.status === 419) {
     return { ok: false, status: response.status, error: 'signed_out', hint: 'Your session has ended. Sign in again; unsaved changes are kept as drafts in this tab.' };
   }
@@ -1079,9 +1085,18 @@ async function checkSite({ as, session = false, max = 150 } = {}) {
 async function reviewCode() {
   const review = [];
   const notes = [];
+  // A search that fails is never "nothing found": retried once, then the
+  // review says it could not finish, and cic.check fails (the e2e suite once
+  // saw a page-in-a-route pass because a search had failed quietly).
+  let unfinished = null;
   const find = async (q) => {
-    const r = await searchSite(q);
-    return r.ok ? (r.hits ?? r.results ?? []).map((h) => ({ ...h, path: String(h.path).replace(/^\/+/, '') })) : [];
+    let r = await searchSite(q);
+    if (!r.ok) r = await searchSite(q);
+    if (!r.ok) {
+      unfinished ??= r.hint ?? r.error ?? 'a search failed';
+      return [];
+    }
+    return (r.hits ?? r.results ?? []).map((h) => ({ ...h, path: String(h.path).replace(/^\/+/, '') }));
   };
   const isPhpCode = (p) => /^(routes|app)\/.*\.php$/.test(p) && !p.endsWith('.blade.php');
   const where = (h) => `${h.path}:${h.line}`;
@@ -1101,7 +1116,10 @@ async function reviewCode() {
   const formFiles = [...new Set((await find('<form')).filter((h) => h.path.startsWith('resources/views/')).map((h) => h.path))].slice(0, 20);
   for (const path of formFiles) {
     const f = await cicApi.read(`/${path}`);
-    if (!f.ok) continue;
+    if (!f.ok) {
+      unfinished ??= `${path} could not be read`;
+      continue;
+    }
     for (const m of f.content.matchAll(/<form\b[^>]*>([\s\S]*?)<\/form>/gi)) {
       const method = (m[0].match(/\bmethod\s*=\s*["']?(\w+)/i)?.[1] ?? 'get').toLowerCase();
       if (method !== 'get' && !/@csrf|csrf_field\(|csrf_token\(/.test(m[1])) {
@@ -1118,6 +1136,7 @@ async function reviewCode() {
   if (featureTests.ok && own.length === 0) {
     notes.push("No feature tests of your own in tests/Feature: add one per page and action (make:test), then cic.run('artisan', ['test']).");
   }
+  if (unfinished) review.push(`The code review could not finish (${unfinished}): run cic.check() again.`);
   return { review: [...new Set(review)], notes };
 }
 

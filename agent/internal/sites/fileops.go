@@ -252,6 +252,15 @@ func (m *Manager) Upload(ctx context.Context, id, rel string, body io.Reader) er
 		}
 		return fmt.Errorf("cannot write there")
 	}
+	// Scanned the moment it lands; refused and removed if it is malware or
+	// obfuscated PHP - and if the scan cannot run, it is not kept unscanned.
+	if err := scanFile(ctx, root, rel); err != nil {
+		_ = removeBeneath(root, rel)
+		if _, bad := IsMalware(err); bad {
+			return err
+		}
+		return fmt.Errorf("the upload could not be checked for malware, so it was not kept: %v", err)
+	}
 	m.record(ctx, id, "upload "+m.relativeTo(id, abs))
 	return nil
 }
@@ -516,6 +525,7 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 	}
 
 	intoRel := strings.TrimPrefix(dstRoot, root)
+	var written []string
 	for _, f := range zr.File {
 		rel := filepath.Join(intoRel, filepath.Clean("/"+f.Name))
 		if f.FileInfo().IsDir() {
@@ -530,6 +540,9 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 		}
 		// Kernel-enforced: no symlink anywhere on the way, nothing replaced.
 		out, err := createBeneath(root, rel, 0o640)
+		if err == nil {
+			written = append(written, rel)
+		}
 		if err != nil {
 			rc.Close()
 			return err
@@ -541,6 +554,30 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 		if err != nil {
 			return err
 		}
+	}
+	// Every extracted file scanned as one batch: if any is malware or
+	// obfuscated PHP - or the scan cannot run - none of the archive is kept.
+	var scanErr error
+	var paths []string
+	for _, rel := range written {
+		if bad := scanWrittenPHP(root, rel); bad != nil {
+			scanErr = bad
+			break
+		}
+		paths = append(paths, filepath.Join(root, rel))
+	}
+	if scanErr == nil {
+		if found, err := clamScan(ctx, root, paths...); err != nil {
+			scanErr = fmt.Errorf("the archive could not be checked for malware, so it was not unpacked: %v", err)
+		} else if len(found) > 0 {
+			scanErr = &ErrMalware{Findings: found}
+		}
+	}
+	if scanErr != nil {
+		for _, rel := range written {
+			_ = removeBeneath(root, rel)
+		}
+		return scanErr
 	}
 	m.record(ctx, id, fmt.Sprintf("unzip %s into %s", m.relativeTo(id, src), m.relativeTo(id, dstRoot)))
 	return nil

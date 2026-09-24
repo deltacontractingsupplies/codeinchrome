@@ -45,7 +45,10 @@ db_name() { echo "site_${1//-/_}"; }
 # swallowed whatever the CALLER was feeding on stdin - run under `bash -s`, the
 # rest of the calling script vanished after the first dump.
 mysql_root()       { docker exec    -e MYSQL_PWD="$CIC_MYSQL_ROOT_PASSWORD" cic-mysql "$@" -uroot -h127.0.0.1 </dev/null; }
-mysql_root_stdin() { docker exec -i -e MYSQL_PWD="$CIC_MYSQL_ROOT_PASSWORD" cic-mysql "$@" -uroot -h127.0.0.1; }
+# Reads a dump back in: its rows are customer data, so the client's own
+# commands (\! and system run a shell, tee writes files, source reads them)
+# are off, and it runs as nobody, never root, in the shared container.
+mysql_root_stdin() { docker exec -i -u 65534:65534 -e MYSQL_PWD="$CIC_MYSQL_ROOT_PASSWORD" cic-mysql "$@" --skip-system-command --commands=FALSE -uroot -h127.0.0.1; }
 
 backup_site() {
   local id=$1

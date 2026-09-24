@@ -139,6 +139,11 @@ DB_SYNCHRONOUS=normal
 # when it grows old (infra/setup-control-backup.sh).
 CIC_CONTROL_BACKUP_STAMP=/var/lib/codeinchrome/control-backup.ok
 CIC_SKILL_PATH=/srv/control/skills/codeinchrome/SKILL.md
+# Email sign-up: trusted providers only (config/signup.php); Google and Apple
+# sign-in are always open. The e2e suite's reserved addresses are accepted -
+# they can never receive mail, so they stay unverified and can do nothing.
+CIC_SIGNUP_EMAIL_DOMAINS=gmail.com,googlemail.com
+CIC_SIGNUP_TEST_DOMAIN=codeinchrome.test
 
 SESSION_DRIVER=file
 # __Host-: the browser refuses this cookie if it carries a Domain attribute,
@@ -151,7 +156,7 @@ SESSION_SAME_SITE=lax
 CACHE_STORE=file
 QUEUE_CONNECTION=sync
 
-$(grep -E '^(CLOUDFLARE|LEMONSQUEEZY|LS_VARIANT|CIC_ADMIN|CIC_ALERT|CIC_LEGAL|CIC_SUPPORT|CIC_REFUND|CIC_PAID|MAIL|GOOGLE|APPLE|SHOWCASE)_' .env)
+$(grep -E '^(CLOUDFLARE|LEMONSQUEEZY|LS_VARIANT|CIC_ADMIN|CIC_ALERT|CIC_LEGAL|CIC_SUPPORT|CIC_REFUND|CIC_PAID|CIC_OWNER|MAIL|GOOGLE|APPLE|SHOWCASE)_' .env)
 # The fleet, from infra/hosts.env - the one registry (config/fleet.php).
 CIC_HOSTS="$CIC_HOSTS"
 CIC_HOST_STATES="${CIC_HOST_STATES:-}"

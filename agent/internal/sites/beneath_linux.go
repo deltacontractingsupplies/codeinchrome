@@ -328,3 +328,21 @@ func beneathMode() string {
 	}
 	return "openat2"
 }
+
+// removeBeneath deletes the FILE at rel under root: the parent is reached
+// without following any link, and the name is unlinked there (a folder is
+// refused, and a link is removed as a link, never followed).
+func removeBeneath(root, rel string) error {
+	rootFD, err := unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(rootFD)
+	dir, name := filepath.Split(filepath.Clean("/" + rel))
+	parent, err := openDirBeneath(rootFD, strings.TrimPrefix(dir, "/"))
+	if err != nil {
+		return fmt.Errorf("%w: %s", errOutside, dir)
+	}
+	defer unix.Close(parent)
+	return unix.Unlinkat(parent, name, 0)
+}

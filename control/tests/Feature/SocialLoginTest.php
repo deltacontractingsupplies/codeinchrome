@@ -85,6 +85,52 @@ class SocialLoginTest extends TestCase
         $this->assertSame(0, SocialAccount::count());
     }
 
+    /**
+     * The security audit (2026-09-25): someone registers the victim's address
+     * with their own password - and two-factor - and waits. When the real
+     * owner signs in with Google, the account becomes theirs, and the
+     * squatter's credentials must no longer open it.
+     */
+    public function test_a_squatted_unverified_account_loses_every_credential_when_the_owner_claims_it(): void
+    {
+        $squatted = User::factory()->create(['email' => 'victim@gmail.com', 'email_verified_at' => null,
+            'password' => bcrypt('squatters-password-1'), 'remember_token' => 'squatter-remember',
+            'two_factor_secret' => 'JBSWY3DPEHPK3PXP', 'two_factor_confirmed_at' => now()]);
+        $this->providerReturns('google', 'g-9', 'victim@gmail.com', verified: true);
+
+        $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+        $owner = $squatted->fresh();
+        $this->assertAuthenticatedAs($owner);
+        $this->assertTrue($owner->hasVerifiedEmail());
+        $this->assertFalse(\Illuminate\Support\Facades\Hash::check('squatters-password-1', $owner->password), "the squatter's password still opens it");
+        $this->assertNotSame('squatter-remember', $owner->remember_token);
+        $this->assertNull($owner->two_factor_secret, "the squatter's two-factor would lock the owner out");
+        $this->assertNull($owner->two_factor_confirmed_at);
+
+        auth()->logout();
+        $this->post('/login', ['email' => 'victim@gmail.com', 'password' => 'squatters-password-1']);
+        $this->assertGuest();
+    }
+
+    public function test_a_verified_accounts_credentials_are_left_alone(): void
+    {
+        $user = User::factory()->create(['email' => 'pat@gmail.com', 'password' => bcrypt('owners-own-password')]);
+        $this->providerReturns('google', 'g-10', 'pat@gmail.com', verified: true);
+
+        $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+        $this->assertTrue(\Illuminate\Support\Facades\Hash::check('owners-own-password', $user->fresh()->password));
+    }
+
+    public function test_google_finds_the_account_under_any_spelling_of_the_same_gmail_inbox(): void
+    {
+        $user = User::factory()->create(['email' => 'pat.example@gmail.com']);
+        $this->providerReturns('google', 'g-11', 'patexample@gmail.com', verified: true);
+
+        $this->get('/auth/google/callback')->assertRedirect(route('dashboard'));
+        $this->assertAuthenticatedAs($user);
+        $this->assertSame(1, User::count());
+    }
+
     public function test_two_factor_still_applies(): void
     {
         $user = User::factory()->create(['email' => 'pat@example.com', 'two_factor_confirmed_at' => now(), 'two_factor_secret' => 'JBSWY3DPEHPK3PXP']);

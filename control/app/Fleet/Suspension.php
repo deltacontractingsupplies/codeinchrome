@@ -35,6 +35,10 @@ class Suspension
 
     public function resume(Site $site): bool
     {
+        // A ban is lifted only by abuse:unban (App\Abuse\Enforcer), never by a payment.
+        if ($site->user?->banned_at) {
+            return false;
+        }
         try {
             AgentClient::for($site->host)->setSuspended($site->site_id, false);
         } catch (\Throwable $e) {

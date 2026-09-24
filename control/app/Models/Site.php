@@ -34,7 +34,13 @@ class Site extends Model
         return $this->hasMany(SiteDomain::class);
     }
 
-    public function user(): BelongsTo
+    /** Every new site, whichever path made it, is told to the owner (App\Fleet\OwnerNotifier). */
+    protected static function booted(): void
+    {
+        static::created(fn (Site $site) => \App\Fleet\OwnerNotifier::newSite($site));
+    }
+
+        public function user(): BelongsTo
     {
         return $this->belongsTo(User::class);
     }

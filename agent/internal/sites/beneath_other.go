@@ -140,3 +140,16 @@ func statAt(dir *os.File, name string) (os.FileInfo, error) {
 }
 
 func beneathMode() string { return "portable (component-by-component)" }
+
+// removeBeneath deletes the file at rel under root, its parents checked for
+// links first (the Linux version does it in the kernel).
+func removeBeneath(root, rel string) error {
+	if err := plainParents(root, rel); err != nil {
+		return err
+	}
+	p := filepath.Join(root, filepath.Clean("/"+rel))
+	if info, err := os.Lstat(p); err == nil && info.IsDir() {
+		return fmt.Errorf("that is a folder")
+	}
+	return os.Remove(p)
+}

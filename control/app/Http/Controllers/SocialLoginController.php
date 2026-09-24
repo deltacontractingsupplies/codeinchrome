@@ -93,7 +93,8 @@ class SocialLoginController extends Controller
                 return null;
             }
 
-            $user = User::where('email', $email)->first();
+            // The same mailbox under any spelling (App\Auth\EmailIdentity).
+            $user = User::where('email_canonical', \App\Auth\EmailIdentity::canonical($email))->first();
             if (! $user) {
                 $user = User::create([
                     'name' => $identity->getName() ?: Str::before($email, '@'),
@@ -107,6 +108,23 @@ class SocialLoginController extends Controller
                 Audit::record('account.created', $user, actor: $user, detail: ['via' => $provider]);
             }
             if (! $user->hasVerifiedEmail()) {
+                // An UNVERIFIED account is claimed by whoever proves the
+                // address. Anyone could have made it - with their own
+                // password, even two-factor - hoping the address's owner
+                // would sign in with Google or Apple one day and hand them a
+                // verified account (the security audit, 2026-09-25). So every
+                // credential on it is dropped first: a new random password
+                // (which also signs out every other session - auth.session),
+                // no remember token, no two-factor.
+                $user->forceFill([
+                    'password' => Str::random(64),
+                    'remember_token' => Str::random(60),
+                    'two_factor_secret' => null,
+                    'two_factor_recovery_codes' => null,
+                    'two_factor_confirmed_at' => null,
+                    'two_factor_last_step' => null,
+                ])->save();
+                Audit::record('auth.unverified_account_claimed', $user, actor: $user, detail: ['via' => $provider]);
                 $user->markEmailAsVerified();
             }
             SocialAccount::create(['user_id' => $user->id, 'provider' => $provider,
@@ -117,6 +135,9 @@ class SocialLoginController extends Controller
 
         if (! $user) {
             return redirect()->route('login')->withErrors(['email' => ucfirst($provider).' did not confirm that email address, so it cannot be used to sign in here.']);
+        }
+        if ($user->banned_at) {
+            return redirect()->route('login')->withErrors(['email' => \App\Http\Middleware\BannedAccount::MESSAGE]);
         }
 
         $request->session()->regenerate();
