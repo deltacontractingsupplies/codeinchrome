@@ -41,18 +41,31 @@
     paid plan are not listed. A site leaves the list as soon as it is deleted, paused or moved to a paid plan.
 </p>
 
-<h2>Acceptable use</h2>
-<p>You may not use the service to:</p>
+<h2 id="acceptable-use">Acceptable use</h2>
+<p>You may not use the service to host or do any of the following, on a site or through it:</p>
 <ul>
-    <li>break the law, or host content that infringes someone else's rights;</li>
-    <li>send spam or bulk unsolicited mail (outgoing mail ports are closed to sites);</li>
-    <li>mine cryptocurrency, run proxies or VPN exits, or attack, scan or flood any system;</li>
-    <li>host malware, phishing pages or anything designed to deceive visitors;</li>
-    <li>try to reach another customer's site, data or network, or to get around your plan's limits.</li>
+    <li>anything illegal, or content that infringes someone else's copyright, trademark or other rights;</li>
+    <li>malware, viruses, or downloads that harm devices; programs, installers or archives offered for download
+        (these are refused on free sites); or PHP written to hide what it does (encrypted, encoded or obfuscated code);</li>
+    <li>phishing, fake sign-in or payment pages, scams, or anything designed to deceive visitors, including
+        impersonating a brand, bank or person;</li>
+    <li>pornographic or sexually explicit content, or content harmful to minors; content that sexualises children
+        is removed at once and reported to the authorities;</li>
+    <li>gambling, or the sale of weapons, drugs or other regulated goods;</li>
+    <li>content that promotes hate, violence, terrorism or extremism;</li>
+    <li>spam or bulk unsolicited mail (outgoing mail ports are closed to sites);</li>
+    <li>mining cryptocurrency, running proxies, VPN exits or open redirectors, or attacking, scanning or flooding any
+        system;</li>
+    <li>file hosting, link shortening or sending visitors on to other sites (free sites may redirect only to payment
+        and sign-in providers);</li>
+    <li>trying to reach another customer's site, data or network, or to get around your plan's limits.</li>
 </ul>
 <p>
-    We may suspend a site that breaks these rules or endangers other customers, without notice
-    where the harm is ongoing, and will tell you why at your account's email address.
+    Sites are checked for malware automatically, and anyone can <a href="{{ route('report') }}">report a site</a>.
+    A site that breaks these rules is taken down. On the free plan, an account found hosting malware, encrypted
+    code or any of the content above is closed without notice, and its sites taken down; nothing on them is deleted
+    at that point, so a closure made in error can be reversed. On a paid plan we suspend the site, without notice where the
+    harm is ongoing, and tell you why at your account's email address.
 </p>
 
 <h2>Plans, payment and cancellation</h2>

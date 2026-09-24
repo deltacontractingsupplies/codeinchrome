@@ -15,7 +15,7 @@ class PublicSurfaceTest extends TestCase
 {
     private const PUBLIC = [
         'GET|HEAD /', 'GET|HEAD .well-known/security.txt', 'GET|HEAD agent/skill.md', 'GET|HEAD explore',
-        'GET|HEAD pricing', 'GET|HEAD terms', 'GET|HEAD privacy', 'GET|HEAD refunds',
+        'GET|HEAD pricing', 'GET|HEAD terms', 'GET|HEAD privacy', 'GET|HEAD refunds', 'GET|HEAD report', 'POST report',
         'GET|HEAD demos/{demo}/code', 'GET|HEAD up',
         'GET|HEAD login', 'POST login', 'GET|HEAD register', 'POST register',
         'GET|HEAD forgot-password', 'POST forgot-password', 'GET|HEAD reset-password/{token}', 'POST reset-password',

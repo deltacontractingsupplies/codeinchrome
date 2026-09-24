@@ -23,5 +23,5 @@ return [
         'license' => 'FSL-1.1-ALv2',
     ],
     // Shown on every legal page.
-    'updated' => '2026-09-24',
+    'updated' => '2026-09-25',
 ];

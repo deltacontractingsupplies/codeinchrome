@@ -522,6 +522,15 @@ be hard to abuse. Every item is verified live, never assumed.
       canonical email) from the operator side; a banned account cannot sign
       back in or sign up again.
 
+- [x] **Report a site, and rules that match our hosts'** (2026-09-25): a public
+      form at /report (only sites we host; 3 a minute, 10 an hour per visitor;
+      the IP kept only as a keyed hash) saved and emailed to the owner with
+      the ban command; linked from every page and Explore. The terms now
+      forbid adult content, content harmful to minors (reported to the
+      authorities), gambling, regulated goods, hate/extremism, downloads,
+      open redirectors and obfuscated code, and say how enforcement works.
+      LEFT (owner): an abuse@ mailbox (Cloudflare Email Routing).
+
 **Outbound abuse (Hetzner suspends servers for these)**
       DONE: App\Abuse\Enforcer - banned, signed out, cannot sign in by password or Google/Apple, every site taken down (nothing deleted), a payment never lifts it; abuse:ban (with a reason) and abuse:unban; the owner is emailed each ban with the evidence.
 - [x] **Container egress policy** (verified live on h1 2026-09-25): private,
