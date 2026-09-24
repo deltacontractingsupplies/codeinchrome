@@ -74,6 +74,10 @@ class AppServiceProvider extends ServiceProvider
         RateLimiter::for('provision', fn (Request $r) => Limit::perMinute(10)->by($by($r)));
         RateLimiter::for('domains', fn (Request $r) => Limit::perMinute(20)->by($by($r)));
         RateLimiter::for('command', fn (Request $r) => Limit::perMinute(20)->by($by($r)));
+        // Read-only and capped at 20 s on the host, and cic.check's code
+        // review makes several at once: it shared 'command' (20 a minute)
+        // with artisan and failed on a busy session.
+        RateLimiter::for('search', fn (Request $r) => Limit::perMinute(90)->by($by($r)));
         RateLimiter::for('db', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
         // Completion fires as someone types: generous, but still bounded.
         RateLimiter::for('lsp', fn (Request $r) => Limit::perMinute(600)->by($by($r)));

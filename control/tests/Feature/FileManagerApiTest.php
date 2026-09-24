@@ -101,4 +101,15 @@ class FileManagerApiTest extends TestCase
         $as->post($this->url('files.upload'), ['path' => '/a', 'file' => UploadedFile::fake()->create('a.txt', 1)], ['Accept' => 'application/json'])->assertNotFound();
         Http::assertNothingSent();
     }
+
+    public function test_search_has_its_own_limit_not_the_command_one(): void
+    {
+        // cic.check's review searches several times while artisan runs; on
+        // the 20-a-minute command limit it failed a busy session.
+        $route = app('router')->getRoutes()->getByName('files.search');
+        $this->assertContains('throttle:search', $route->gatherMiddleware());
+        $this->assertNotContains('throttle:command', $route->gatherMiddleware());
+        $limit = \Illuminate\Support\Facades\RateLimiter::limiter('search')(request());
+        $this->assertGreaterThanOrEqual(60, (is_array($limit) ? $limit[0] : $limit)->maxAttempts);
+    }
 }

@@ -275,6 +275,12 @@ async function apiOnce(base, method, query, body) {
     // (redirect to login) or a proxy error page.
   }
 
+  if (response.status === 429) {
+    // Laravel's throttle answers {"message": "Too Many Attempts."}: say it
+    // plainly, with when to try again.
+    const wait = Number(response.headers.get('Retry-After')) || 60;
+    return { ok: false, status: 429, error: 'rate_limited', hint: `Too many requests of this kind; try again in ${wait} seconds.` };
+  }
   if (response.status === 401 || response.status === 419) {
     return { ok: false, status: response.status, error: 'signed_out', hint: 'Your session has ended. Sign in again; unsaved changes are kept as drafts in this tab.' };
   }
