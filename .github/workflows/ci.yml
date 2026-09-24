@@ -9,7 +9,22 @@ on:
   schedule:
     - cron: '17 6 * * 1'
 
+# Read-only everywhere: pull requests from forks run this workflow, and it
+# needs to read the code, nothing more. Forks never get the repository's secrets.
+permissions:
+  contents: read
+
 jobs:
+  secrets:
+    name: no secrets in the change (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # The official image; .gitleaks.toml in the repository is its config.
+      - run: docker run --rm -v "$PWD:/repo" ghcr.io/gitleaks/gitleaks:v8.30.1 git /repo --no-banner --redact --config /repo/.gitleaks.toml
+
   agent:
     name: agent (go)
     runs-on: ubuntu-latest

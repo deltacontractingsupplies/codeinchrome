@@ -129,4 +129,8 @@ Blocked on the owner, not on code:
 
 ## Licence
 
-See LICENSE.md.
+Source-available under the Functional Source License, version 1.1, with an
+Apache-2.0 future license ([LICENSE.md](LICENSE.md), FSL-1.1-ALv2): use, modify
+and contribute for any purpose except a competing product or service; each
+version becomes Apache-2.0 two years after its release. Contributions: see
+[CONTRIBUTING.md](CONTRIBUTING.md) and the [CLA](CLA.md).

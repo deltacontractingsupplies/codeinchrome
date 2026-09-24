@@ -1,49 +1,32 @@
-# Security
+# Security policy
 
-## Reporting
+codeinchrome hosts other people's applications, so a vulnerability here can
+reach their data. We take every report seriously.
 
-Email **security@codeinchrome.com** rather than opening an issue. Please include
-what you did, what happened, and what you expected. We will confirm receipt
-within 72 hours.
+## Reporting a vulnerability
 
-Please do not test against other customers' sites. If you want a target, create
-an account — the free plan provisions a real, isolated site in a few seconds,
-and you are welcome to attack your own.
+**Do not open a public issue.** Report it privately:
 
-## What is in scope
+- through GitHub: **Security → Report a vulnerability** on this repository
+  (private vulnerability reporting), or
+- by email to the address in <https://app.codeinchrome.com/.well-known/security.txt>.
 
-- Reaching another tenant's files, network, processes or database
-- Serving anything outside a site's `public/` directory
-- Escaping a customer container, or reaching the host from one
-- Reaching the host agent (`127.0.0.1:9440`) or the Caddy admin API from a
-  container or from the internet
-- Forging or replaying a billing webhook
-- Acting on a site you do not own through the control plane
+Please include what you found, how to reproduce it, and what an attacker could
+do with it. We will acknowledge your report within 3 working days and keep you
+informed until it is fixed. We will not take legal action against research done
+in good faith that respects these rules:
 
-## What is already known and deliberate
+- test only against your own account and your own sites;
+- never access, change or keep another customer's data - stop and report as
+  soon as you see any;
+- no denial of service, spam, social engineering or physical attacks.
 
-- **Host IP addresses are public.** Every site resolves directly to its host;
-  there is no proxy in front, because the certificate is issued to the host so
-  the TLS is genuinely the customer's own. Hosts are firewalled to 22, 80 and
-  443.
-- **Customers get no shell and no root.** This is a product decision, not an
-  oversight. It removes mining, spam relaying and outbound attacks as a class
-  of problem rather than policing them after the fact.
-- **A `past_due` subscription keeps serving.** A failed card is a billing
-  problem, and taking a customer offline while the processor is still retrying
-  loses the customer as well as the payment.
-- **A plan downgrade never deletes sites.** Destroying a customer's work on a
-  payment event is irreversible and is not a decision a webhook gets to make.
+## Scope
 
-## How the boundaries are verified
+In scope: the control plane (`control/`), the host agent (`agent/`), the site
+container image (`infra/images/`), the deploy and backup scripts (`infra/`),
+and the live service at `*.codeinchrome.com`.
 
-`infra/verify-isolation.sh` runs against a live host and proves, per claim,
-that one tenant cannot reach another's files, network, processes, logs, vhost,
-the docker socket, the agent or the Caddy admin API, and that SMTP and mining
-egress are refused.
-
-It carries **positive controls**. An earlier version reported fifteen confident
-DENIEDs against a container that did not exist, because `docker exec` fails the
-same way whether the boundary held or the subject was absent. It now proves the
-container is alive, can read its own files and has working egress before any
-DENIED is allowed to count.
+Of particular interest: one tenant reading or changing another tenant's files,
+database, logs or `.env`; anything served from outside a site's `public/`
+directory; escaping a site container; secrets in logs or responses.

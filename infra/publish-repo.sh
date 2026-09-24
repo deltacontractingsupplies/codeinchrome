@@ -57,7 +57,10 @@ esac
 ok()  { printf '\033[32m  ok\033[0m %s\n' "$*"; }
 die() { printf '\033[31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
 
-REMOVE_PATHS=(tests/e2e/report)
+# LICENSE: an MIT licence file that was committed before the project chose the
+# Functional Source License (LICENSE.md). It was never published; publishing
+# history that carries it would let anyone claim those versions as MIT.
+REMOVE_PATHS=(tests/e2e/report LICENSE)
 # .env settings that are public by design and may appear in the code.
 # APPLE_CLIENT_ID is the Sign in with Apple Services ID, sent in the browser's
 # address bar on every sign-in; the SHOWCASE_* addresses and the demo admin's
