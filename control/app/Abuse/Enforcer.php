@@ -45,7 +45,10 @@ class Enforcer
         Audit::record('abuse.banned', $user, actor: null, detail: ['reason' => mb_substr($reason, 0, 500), 'sites' => $down]);
         Log::warning('account banned', ['user' => $user->id, 'sites' => $down]);
 
-        if ($first) {
+        // The platform's own test accounts (the e2e suite bans one each run)
+        // are not news for the owner.
+        $isTest = collect(config('showcase.explore.exclude_email_suffixes', []))->contains(fn ($s) => str_ends_with($user->email, $s));
+        if ($first && ! $isTest) {
             $this->tellOwner("Account banned: {$user->email}", "Account: {$user->email}\nSites taken down: ".(implode(', ', $down) ?: 'none')."\n\n$reason\n\n"
                 ."Nothing was deleted. To reverse this: php artisan abuse:unban {$user->email}");
         }

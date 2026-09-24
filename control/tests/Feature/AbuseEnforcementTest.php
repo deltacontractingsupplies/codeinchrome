@@ -131,4 +131,16 @@ class AbuseEnforcementTest extends TestCase
         $this->artisan('abuse:ban', ['email' => 'phish@gmail.com', '--reason' => 'phishing page for a bank'])->assertSuccessful();
         $this->assertStringContainsString('phishing page for a bank', $user->fresh()->banned_reason);
     }
+
+    public function test_the_owner_is_emailed_a_ban_but_not_the_test_suites_own(): void
+    {
+        // The real (array) mailer, as OwnerNotifierTest: every message sent is seen.
+        $sent = [];
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Mail\Events\MessageSent::class, function ($e) use (&$sent) { $sent[] = $e->message->getSubject(); });
+
+        app(\App\Abuse\Enforcer::class)->ban(User::factory()->create(['email' => 'real@gmail.com']), 'phishing');
+        app(\App\Abuse\Enforcer::class)->ban(User::factory()->create(['email' => 'e2e-x@codeinchrome.test']), 'e2e');
+
+        $this->assertSame(['[codeinchrome] Account banned: real@gmail.com'], $sent);
+    }
 }
