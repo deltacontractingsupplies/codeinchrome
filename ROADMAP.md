@@ -581,7 +581,8 @@ be hard to abuse. Every item is verified live, never assumed.
       LEFT: a small "Hosted on codeinchrome - report" badge on free sites
       (Lovable's "Edit with Lovable"); a DMCA designated agent (owner, legal);
       keeping a deleted site's access logs for 30 days as evidence (phishing
-      kits delete their sites within hours).
+      kits delete their sites within hours) - DONE 2026-09-25 (agent 0.27.0,
+      /var/log/caddy/deleted, pruned daily; said in the privacy policy).
 - [ ] **Push to GitHub** so the community can help find abuse and security
       gaps (SECURITY.md, private reporting already on).
 

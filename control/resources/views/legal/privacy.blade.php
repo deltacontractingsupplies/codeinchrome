@@ -34,7 +34,8 @@
     <li>Site content: until you delete the site. Backups: nightly, kept for up to 3 months while
         the site exists, and deleted within 30 days after the site is deleted.</li>
     <li>Audit log: 400 days.</li>
-    <li>Site request logs: up to 90 days.</li>
+    <li>Site request logs: up to 90 days. When a site is deleted, its request log is kept 30 more
+        days, only to answer abuse reports about it, then removed.</li>
 </ul>
 
 <h2>Who else handles it</h2>

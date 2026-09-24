@@ -172,6 +172,17 @@ systemctl start cic-mounts.service
 ok "site disks mounted before docker at boot"
 
 # ─────────────────────────────────────────────────────────────────────────────
+log "evidence retention"
+# A deleted site's access log is kept 30 days for abuse reports (the agent
+# moves it to /var/log/caddy/deleted), then removed: they hold visitors' IPs.
+cat > /etc/cron.daily/cic-evidence-prune <<'CRON'
+#!/bin/sh
+find /var/log/caddy/deleted -type f -name '*.log' -mtime +30 -delete 2>/dev/null
+exit 0
+CRON
+chmod 0755 /etc/cron.daily/cic-evidence-prune
+ok "deleted sites' access logs kept 30 days, then removed"
+
 log "weekly base image rebuild"
 # --pull fetches the latest php:8.3-apache: this is how PHP and Apache security
 # fixes arrive. The Dockerfile asserts every extension loads, so a broken
