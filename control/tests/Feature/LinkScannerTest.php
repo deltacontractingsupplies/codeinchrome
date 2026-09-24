@@ -100,4 +100,29 @@ class LinkScannerTest extends TestCase
         $this->assertSame(1, $r['pages']);
         $this->assertCount(1, $r['ban']);
     }
+
+    public function test_a_clickfix_fake_captcha_is_a_ban(): void
+    {
+        $this->pages(['https://shopx.codeinchrome.com/' => '<h1>Verify you are human</h1><button onclick="navigator.clipboard.writeText(\'powershell -w hidden -enc SQBFAFgA\')">I am not a robot</button>'
+            .'<p>Press Windows + R, then Ctrl + V and Enter.</p>']);
+        $r = app(LinkScanner::class)->scan($this->site());
+        $this->assertStringContainsString('ClickFix malware page', implode("\n", $r['ban']));
+    }
+
+    public function test_win_r_and_paste_instructions_alone_are_a_review(): void
+    {
+        // A separate test: a second Http::fake for the same address does not replace the first.
+        $this->pages(['https://shopx.codeinchrome.com/' => '<p>To finish verification press Win + R and paste the code.</p>']);
+        $r = app(LinkScanner::class)->scan($this->site());
+        $this->assertSame([], $r['ban']);
+        $this->assertStringContainsString('possible ClickFix fake CAPTCHA', implode("\n", $r['review']));
+    }
+
+    public function test_a_copy_button_for_ordinary_text_is_not_flagged(): void
+    {
+        $this->pages(['https://shopx.codeinchrome.com/' => '<button onclick="navigator.clipboard.writeText(\'SAVE10\')">Copy coupon</button><p>Use Ctrl + V at checkout.</p>']);
+        $r = app(LinkScanner::class)->scan($this->site());
+        $this->assertSame([], $r['ban']);
+        $this->assertSame([], $r['review']);
+    }
 }

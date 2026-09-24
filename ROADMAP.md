@@ -567,8 +567,21 @@ be hard to abuse. Every item is verified live, never assumed.
       access first - designed, not yet rolled out.
 
 **Research**
-- [ ] **How Lovable, Replit, Vercel, Netlify, Render handle abuse** on free
+- [x] **How Lovable, Replit, Vercel, Netlify, Render handle abuse** on free
       tiers: what they block, detect and require, adopted where it fits.
+      DONE 2026-09-25 (sources: Proofpoint and SC Media on Lovable abuse,
+      Lovable's security page, Replit's Trust and Safety docs, Trend Micro on
+      fake CAPTCHA pages, Kaseya on Vercel phishing). Already matched: scan on
+      publish (ours: on write and scheduled), policy categories (terms),
+      custom domains paid-only (ours), stopping abuse at sign-up (Google/Apple
+      or Gmail, one inbox one account), a public abuse form with categories.
+      Adopted now: ClickFix fake-CAPTCHA detection in the link check (a script
+      putting a PowerShell/mshta/shell command on the clipboard bans; "Win+R
+      and paste" instructions go to review).
+      LEFT: a small "Hosted on codeinchrome - report" badge on free sites
+      (Lovable's "Edit with Lovable"); a DMCA designated agent (owner, legal);
+      keeping a deleted site's access logs for 30 days as evidence (phishing
+      kits delete their sites within hours).
 - [ ] **Push to GitHub** so the community can help find abuse and security
       gaps (SECURITY.md, private reporting already on).
 
