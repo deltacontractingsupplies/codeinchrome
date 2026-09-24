@@ -1,9 +1,11 @@
+import { execFileSync } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { confirmSignup } from '../helpers/fixtures.js';
 import { waitForDns } from '../helpers/dns.js';
 import { httpsGet } from '../helpers/https.js';
 import { destroySite } from '../helpers/cleanup.js';
+import { fleetHostIps } from '../helpers/control-host.js';
 
 /**
  * The editor, driven the two ways it is meant to be: by a person clicking and
@@ -566,6 +568,21 @@ Route::get('/', function () {
     const bin = await page.evaluate(() => window.cic.bin());
     expect(bin.bin.map((b) => b.path)).toEqual(expect.arrayContaining(['app/Shop/Cart.php', 'app/Shop/Trolley.php']));
   });
+  await test.step("a dump's mysql client commands never run: no shell, no files, on any host", async () => {
+    // Proved exploitable before the fix (2026-09-25): these lines ran a shell
+    // as root inside the shared MySQL container during an import.
+    const marker = `/tmp/cic-e2e-${stamp}`;
+    const hostile = await page.evaluate(([m]) => window.cic.db.import(new Blob([
+      `\\! touch ${m}-bang\n`, `system touch ${m}-system\n`, `tee ${m}-tee\n`, 'SELECT 1;\n',
+    ], { type: 'application/sql' }), { confirm: true }), [marker]);
+    expect(hostile.ok, 'a dump carrying client commands must be refused').toBe(false);
+    for (const ip of fleetHostIps()) {
+      const left = execFileSync('ssh', ['-n', '-o', 'BatchMode=yes', `root@${ip}`,
+        `docker exec cic-mysql sh -c 'ls ${marker}-* 2>/dev/null | wc -l'`], { encoding: 'utf8' }).trim();
+      expect(left, 'a file was created inside cic-mysql by an import').toBe('0');
+    }
+  });
+
   await test.step('the database imports a .sql file through window.cic and exports as .sql.gz', async () => {
     const refused = await page.evaluate(() => window.cic.db.import(new Blob(['SELECT 1;'], { type: 'application/sql' })));
     expect(refused.error).toBe('needs_confirm');

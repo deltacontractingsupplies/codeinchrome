@@ -487,11 +487,12 @@ The code is public and free sites are listed on Explore, so the platform must
 be hard to abuse. Every item is verified live, never assumed.
 
 **Notify the owner**
-- [ ] **Email the owner on every new site**: to delta.contracting.supplies@gmail.com,
+- [x] **Email the owner on every new site**: to delta.contracting.supplies@gmail.com,
       with the site's address (and custom domain, if any) and the account, so
       each new site can be checked. Sent through the platform's own mail.
 
 **Stop malicious redirects and downloads (free sites)**
+      DONE 2026-09-25: App\Fleet\OwnerNotifier on every new site and domain (the e2e suite's accounts left out); a real test mail was accepted by Gmail (250 OK).
 - [x] **No redirect to an arbitrary site**: a free site may not send visitors to
       another domain except an allow-list of trusted destinations (payment
       gateways such as Stripe and PayPal checkout, the platform itself). A
@@ -512,15 +513,17 @@ be hard to abuse. Every item is verified live, never assumed.
       Content-Disposition filename, so a PHP script streaming an .exe from an
       address with no extension is refused too; a CSV or PDF download still
       works. LEFT: a link to an executable hosted elsewhere - the scanner.
-- [ ] **ClamAV scanning**: uploaded and written files scanned; a detection, or
+- [x] **ClamAV scanning**: uploaded and written files scanned; a detection, or
       encrypted/obfuscated PHP (eval/base64/gzinflate droppers, ionCube/
       encoded loaders), suspends the site and bans the account (free plan: no
       appeal needed). Scan on write and on a schedule.
-- [ ] **Ban an abuser**: suspend a site and ban an account (and its
+      DONE 2026-09-25 (agent 0.26.7): ClamAV on h1/h3/h4 (EICAR found by the post-check); saves of obfuscated PHP refused before they are written; uploads and archives scanned as they land; abuse:scan every 6 hours. All 6 live sites scanned clean before enforcement went on. Proved on production by tests/e2e/specs/abuse.spec.js.
+- [x] **Ban an abuser**: suspend a site and ban an account (and its
       canonical email) from the operator side; a banned account cannot sign
       back in or sign up again.
 
 **Outbound abuse (Hetzner suspends servers for these)**
+      DONE: App\Abuse\Enforcer - banned, signed out, cannot sign in by password or Google/Apple, every site taken down (nothing deleted), a payment never lifts it; abuse:ban (with a reason) and abuse:unban; the owner is emailed each ban with the evidence.
 - [x] **Container egress policy** (verified live on h1 2026-09-25): private,
       reserved and metadata ranges refused; mail, mining and brute-force ports
       refused; UDP limited to DNS/QUIC; per-container limits on open
