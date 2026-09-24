@@ -384,6 +384,12 @@ class AgentClient
         return ['paths' => $r['paths'] ?? [], 'truncated' => (bool) ($r['truncated'] ?? false)];
     }
 
+    /** How widely each site on this host reaches out (agent sites/egress.go): {sites: [...]}. */
+    public function egress(): array
+    {
+        return $this->send('get', '/v1/egress');
+    }
+
     /** Every site's CPU counter on this host (agent sites/cpu.go): {sites: [...], at}. */
     public function cpu(): array
     {

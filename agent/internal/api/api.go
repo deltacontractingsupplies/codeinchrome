@@ -460,6 +460,15 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"paths": paths, "truncated": truncated}))
 	})
 
+	// How widely each site reaches out (sites/egress.go), for spotting a scan.
+	mux.HandleFunc("GET /v1/egress", func(w http.ResponseWriter, r *http.Request) {
+		eg, err := mgr.Egress(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, fail("egress_unreadable", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"sites": eg}))
+	})
 	// Every site's CPU counter (sites/cpu.go), for spotting a miner.
 	mux.HandleFunc("GET /v1/cpu", func(w http.ResponseWriter, r *http.Request) {
 		cpu, err := mgr.CPU(r.Context())
