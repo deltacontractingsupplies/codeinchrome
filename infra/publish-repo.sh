@@ -175,6 +175,16 @@ if [[ -f $deny ]]; then
   ok "nothing from infra/publish-deny.local in the code, messages, notes or authors of any commit"
 fi
 
+# An independent scanner too (gitleaks: hundreds of secret patterns, not ours),
+# over every commit of the clean copy. Required for --public.
+if command -v gitleaks >/dev/null; then
+  gitleaks git --no-banner --redact --exit-code 1 . >/dev/null 2>&1 \
+    || { gitleaks git --no-banner --redact . 2>&1 | tail -20 >&2; die "gitleaks found secrets in history"; }
+  ok "gitleaks: nothing in any commit"
+elif [[ $visibility == public ]]; then
+  die "--public needs gitleaks (brew install gitleaks)"
+fi
+
 artifacts=$(git log --all --format= --name-only | sort -u | grep -iE '\.(zip|webm|har|sqlite|sqlite3|db|pem|key|p12)$' || true)
 [[ -z $artifacts ]] || die "binary artifacts in history: $artifacts"
 ok "no binary artifacts in history"

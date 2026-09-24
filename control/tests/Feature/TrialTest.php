@@ -90,7 +90,7 @@ class TrialTest extends TestCase
 
     public function test_signing_up_starts_a_three_day_trial_that_the_dashboard_counts_down(): void
     {
-        $this->post('/register', ['name' => 'T', 'email' => 't@example.org', 'password' => 'a-long-enough-pass-9Q', 'password_confirmation' => 'a-long-enough-pass-9Q']);
+        $this->post('/register', ['name' => 'T', 'email' => 't@example.org', 'password' => 'a-long-enough-pass-9Q', 'password_confirmation' => 'a-long-enough-pass-9Q']); // gitleaks:allow - a throwaway test password
         $user = User::where('email', 't@example.org')->firstOrFail();
 
         $this->assertEqualsWithDelta(now()->addDays(3)->getTimestamp(), $user->trial_ends_at->getTimestamp(), 5);

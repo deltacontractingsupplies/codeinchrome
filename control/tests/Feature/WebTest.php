@@ -59,8 +59,8 @@ class WebTest extends TestCase
         $this->post('/register', [
             'name' => 'Test Owner',
             'email' => 'new@example.com',
-            'password' => 'correct-horse-battery-staple-92',
-            'password_confirmation' => 'correct-horse-battery-staple-92',
+            'password' => 'correct-horse-battery-staple-92', // gitleaks:allow - a throwaway test password
+            'password_confirmation' => 'correct-horse-battery-staple-92', // gitleaks:allow - a throwaway test password
         ])->assertRedirect(route('dashboard'));
 
         $this->assertAuthenticated();

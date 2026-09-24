@@ -7,7 +7,7 @@ import (
 )
 
 func TestEveryRouteButLivenessAndTLSAskNeedsTheToken(t *testing.T) {
-	const token = "0123456789abcdef0123456789abcdef"
+	const token = "0123456789abcdef0123456789abcdef" // gitleaks:allow - a test token
 	reached := false
 	h := authenticated(token, http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { reached = true }))
 
