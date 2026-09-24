@@ -313,7 +313,8 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
       codeinchrome sells the hosting and the editor only. Shown beside our own
       plans so nobody expects the agent to be included
 
-- [ ] **Confirm support@codeinchrome.com receives mail** (owner: Cloudflare
+- [x] **Confirm support@codeinchrome.com receives mail** (done: see the
+      support inbox item above - a DKIM-signed test landed in the inbox) (owner: Cloudflare
       dashboard, Email Routing): the terms, privacy and refund pages and
       security.txt all publish it; mail for the domain goes through Cloudflare
       Email Routing, whose rules our API token cannot read, so it is unverified

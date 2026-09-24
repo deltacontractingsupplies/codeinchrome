@@ -118,14 +118,14 @@ monitoring with incidents, weekly security-patch rollout, two-factor sign-in,
 an append-only audit log, a strict CSP, email verification and password
 reset over the platform's own DKIM-signed mail, and dependency scanning in CI.
 
-Blocked on the owner, not on code:
+What a user sees today:
 
-- **Billing products** - Lemon Squeezy products are dashboard-only; the
-  configured store belongs to another business. Checkout is built and was
-  validated against the live API.
-- **Pushing this repository (private)** - needs `gh auth login`, then
-  `infra/publish-repo.sh --private OWNER/NAME` (a history-cleaned copy,
-  scanned for secrets; this working repository is never rewritten).
+- **Free only, for now.** Paid plans wait for the payment provider (Lemon
+  Squeezy) to approve the store. Checkout is built and switched off with one
+  setting (`CIC_PAID_PLANS_OPEN`). Until then every account is on the free
+  plan, and its sites are kept when paid plans open.
+- **Custom domains** work today, with certificates issued on demand. Moving
+  them to Cloudflare for SaaS is planned (see the roadmap).
 
 ## Licence
 

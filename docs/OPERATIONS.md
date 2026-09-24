@@ -74,7 +74,9 @@ address in `infra/hosts.local.env`, gitleaks findings, binary artifacts.
   scrub removed, so it never leaves this machine.
 - `main` on GitHub takes pull requests only. Push a branch
   (`git push public main:<branch>`), open a pull request, wait for CI, merge.
-  Pull merged work back with `git pull --rebase public main`.
+  Pull requests are squash-merged, so afterwards bring `main` level with
+  `git fetch public && git reset --keep public/main` (first check
+  `git diff public/main main` is empty: the squash holds the same files).
 - Every push to GitHub first runs `infra/check-outgoing.sh` on the commits
   being sent (`infra/hooks/pre-push`): the same checks as the publication,
   and it refuses `private-history` outright. The checks fail closed: without
