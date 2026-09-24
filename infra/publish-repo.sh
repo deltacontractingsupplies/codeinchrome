@@ -59,7 +59,10 @@ die() { printf '\033[31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
 
 REMOVE_PATHS=(tests/e2e/report)
 # .env settings that are public by design and may appear in the code.
-PUBLIC_KEYS='^(APP_NAME|APP_ENV|APP_URL|APP_DEBUG|CLOUDFLARE_ZONE_NAME|MAIL_(MAILER|HOST|PORT|SCHEME|FROM_ADDRESS|FROM_NAME)|LOG_.*|DB_CONNECTION|SESSION_.*|CACHE_STORE|QUEUE_CONNECTION)$'
+# APPLE_CLIENT_ID is the Sign in with Apple Services ID, sent in the browser's
+# address bar on every sign-in; the SHOWCASE_* addresses and the demo admin's
+# email are printed on the home page. The demo PASSWORDS are not listed here.
+PUBLIC_KEYS='^(APP_NAME|APP_ENV|APP_URL|APP_DEBUG|CLOUDFLARE_ZONE_NAME|MAIL_(MAILER|HOST|PORT|SCHEME|FROM_ADDRESS|FROM_NAME)|LOG_.*|DB_CONNECTION|SESSION_.*|CACHE_STORE|QUEUE_CONNECTION|APPLE_CLIENT_ID|SHOWCASE_(URL|ADMIN_URL|ADMIN_EMAIL|FLOWERS_URL|FLOWERS_ADMIN_URL|FLOWERS_ADMIN_EMAIL|RECORDING))$'
 
 [[ -z $(git status --porcelain) ]] || die "commit or stash first: the copy is made from committed history only"
 scrub=$root/infra/publish-scrub.local.pl
