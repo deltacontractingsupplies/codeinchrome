@@ -319,10 +319,14 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
 - [x] **security.txt (RFC 9116)** at /.well-known/security.txt: contact, an
       Expires kept a year ahead, canonical address, policy. LegalTest
 
-- [ ] **Paid plans switched OFF until Lemon Squeezy approves the store** (owner's
+- [x] **Paid plans switched OFF until Lemon Squeezy approves the store** (owner's
       request, 2026-09-24): free only - no paid option shown or sold anywhere
-      (home, pricing, billing, checkout, emails) - behind ONE switch that turns
-      Starter back on with nothing else to change
+      (home, pricing, billing, register, terms; checkout refuses) - behind ONE
+      switch, CIC_PAID_PLANS_OPEN in .env (App\Billing\Sales). While off no
+      trial runs out (owner's choice); a customer who already pays keeps and
+      sees their plan. To open: set it true, deploy, `php artisan
+      trials:restart` (every free account: a fresh trial and an email).
+      SalesTest (mutation-checked); verified live
 - [ ] **Public repository** (owner's decisions, 2026-09-24): PUBLIC, under a new
       codeinchrome GitHub organization; FSL-1.1-ALv2 (no competing use, each
       version Apache-2.0 after 2 years), Copyright 2026 Ahmed Omar; contributor

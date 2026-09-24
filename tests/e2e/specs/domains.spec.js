@@ -1,14 +1,8 @@
 import { test, expect } from '@playwright/test';
 import { waitForDns } from '../helpers/dns.js';
 import { httpsGet } from '../helpers/https.js';
-import { readFileSync } from 'node:fs';
 
-/** The customer hosts' addresses, from infra/hosts.env. */
-function fleetHostIps() {
-  const env = readFileSync(new URL('../../../infra/hosts.env', import.meta.url), 'utf8');
-  const hosts = env.match(/^CIC_HOSTS="([^"]+)"/m)[1];
-  return hosts.split(/\s+/).map((h) => h.split(':')[1]);
-}
+import { fleetHostIps } from '../helpers/control-host.js';
 import { destroySite } from '../helpers/cleanup.js';
 import { setPlan, dnsCreate, dnsDeleteUnder, confirmSignup } from '../helpers/fixtures.js';
 
