@@ -23,6 +23,7 @@ class PasswordResetController extends Controller
     public function email(Request $request): RedirectResponse
     {
         abort_unless(config('fleet.mail_enabled'), 404);
+        $request->merge(['email' => strtolower(trim((string) $request->input('email')))]);
         $request->validate(['email' => ['required', 'email']]);
 
         Password::sendResetLink($request->only('email'));
@@ -42,6 +43,7 @@ class PasswordResetController extends Controller
     public function update(Request $request): RedirectResponse
     {
         abort_unless(config('fleet.mail_enabled'), 404);
+        $request->merge(['email' => strtolower(trim((string) $request->input('email')))]);
         $request->validate([
             'token' => ['required'],
             'email' => ['required', 'email'],

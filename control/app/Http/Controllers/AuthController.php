@@ -20,11 +20,15 @@ class AuthController extends Controller
 
     public function register(Request $request): RedirectResponse
     {
+        $request->merge(['email' => strtolower(trim((string) $request->input('email')))]);
         $data = $request->validate([
             'name' => ['required', 'string', 'max:120'],
             'email' => ['required', 'email', 'max:190', 'unique:users,email', function (string $attribute, mixed $value, \Closure $fail) {
                 if (! self::signupDomainAllowed((string) $value)) {
                     $fail(self::signupDomainMessage());
+                } elseif (User::where('email_canonical', \App\Auth\EmailIdentity::canonical((string) $value))->exists()) {
+                    // The same inbox under another spelling (dots, +tag, googlemail.com).
+                    $fail('An account already uses this email address.');
                 }
             }],
             // Laravel's default rules are a length check only. This adds the
@@ -82,6 +86,7 @@ class AuthController extends Controller
 
     public function login(Request $request): RedirectResponse
     {
+        $request->merge(['email' => strtolower(trim((string) $request->input('email')))]);
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required'],

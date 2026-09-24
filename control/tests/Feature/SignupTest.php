@@ -27,7 +27,10 @@ class SignupTest extends TestCase
     public function test_an_address_at_a_trusted_provider_can_sign_up(): void
     {
         $this->register('Someone.New@Gmail.com')->assertSessionHasNoErrors();
-        $this->assertNotNull(User::where('email', 'Someone.New@Gmail.com')->first());
+        // Kept in lower case, with the mailbox it reaches.
+        $user = User::where('email', 'someone.new@gmail.com')->first();
+        $this->assertNotNull($user);
+        $this->assertSame('someonenew@gmail.com', $user->email_canonical);
     }
 
     public function test_any_other_domain_is_refused_and_told_to_use_google_or_apple(): void
@@ -59,5 +62,23 @@ class SignupTest extends TestCase
     {
         $this->get('/register')->assertOk()->assertSee('data-signup-domains', false)
             ->assertSee('gmail.com')->assertSee('use Google or Apple above');
+    }
+
+    public function test_one_gmail_inbox_is_one_account_whatever_the_spelling(): void
+    {
+        $this->register('pat.example@gmail.com')->assertSessionHasNoErrors();
+        auth()->logout();
+        foreach (['patexample@gmail.com', 'Pat.Example+free2@gmail.com', 'p.a.t.example@googlemail.com', 'PATEXAMPLE@GMAIL.COM'] as $alias) {
+            $this->register($alias)->assertSessionHasErrors(['email' => 'An account already uses this email address.']);
+        }
+        $this->assertSame(1, User::count());
+    }
+
+    public function test_sign_in_and_reset_ignore_the_case_of_the_address(): void
+    {
+        $this->register('Mixed.Case@Gmail.com')->assertSessionHasNoErrors();
+        auth()->logout();
+        $this->post('/login', ['email' => 'MIXED.case@gmail.COM', 'password' => 'correct-horse-battery-9']);
+        $this->assertAuthenticated();
     }
 }

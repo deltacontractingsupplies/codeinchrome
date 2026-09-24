@@ -20,6 +20,17 @@ class User extends Authenticatable implements MustVerifyEmail
     /** @use HasFactory<UserFactory> */
     use HasFactory, Notifiable;
 
+    /** Addresses are kept in lower case, with the mailbox they reach (App\Auth\EmailIdentity). */
+    protected static function booted(): void
+    {
+        static::saving(function (User $user) {
+            if ($user->isDirty('email') || $user->email_canonical === null) {
+                $user->email = strtolower(trim((string) $user->email));
+                $user->email_canonical = \App\Auth\EmailIdentity::canonical($user->email);
+            }
+        });
+    }
+
     public function sites(): HasMany
     {
         return $this->hasMany(Site::class);
