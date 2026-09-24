@@ -1,0 +1,14 @@
+# gitleaks (infra/publish-repo.sh runs it over every commit before publishing).
+# Gitleaks' own rules, plus an allow-list of throwaway values used in tests -
+# exact values only, so a real secret next to them is still found.
+[extend]
+useDefault = true
+
+[[allowlists]]
+description = "Throwaway test values: a registration test password, a login test password, a test agent token"
+regexTarget = "secret"
+regexes = [
+  '''^a-long-enough-pass-9Q$''',
+  '''^correct-horse-battery-staple-92$''',
+  '''^0123456789abcdef0123456789abcdef$''',
+]
