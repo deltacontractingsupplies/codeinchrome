@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { confirmSignup, setPlan } from '../helpers/fixtures.js';
 import { waitForDns } from '../helpers/dns.js';
@@ -14,7 +15,7 @@ import { destroySite } from '../helpers/cleanup.js';
 const stamp = Date.now().toString(36);
 const siteName = `bg-${stamp}`.slice(0, 40);
 const email = `bg-${stamp}@codeinchrome.test`;
-const password = `bg-${stamp}-${Math.random().toString(36).slice(2)}-Zt7`;
+const password = `bg-${stamp}-${randomBytes(9).toString('hex')}-Zt7`;
 
 test.describe.configure({ mode: 'serial' });
 test.afterAll(() => destroySite(siteName));

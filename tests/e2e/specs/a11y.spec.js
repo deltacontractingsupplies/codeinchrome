@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import AxeBuilder from '@axe-core/playwright';
 import { confirmSignup } from '../helpers/fixtures.js';
@@ -14,7 +15,7 @@ import { destroySite } from '../helpers/cleanup.js';
 const stamp = Date.now().toString(36);
 const siteName = `ax-${stamp}`.slice(0, 40);
 const email = `ax-${stamp}@codeinchrome.test`;
-const password = `ax-${stamp}-${Math.random().toString(36).slice(2)}-Kd4`;
+const password = `ax-${stamp}-${randomBytes(9).toString('hex')}-Kd4`;
 
 test.describe.configure({ mode: 'serial' });
 test.afterAll(() => destroySite(siteName));

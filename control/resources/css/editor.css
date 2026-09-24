@@ -241,6 +241,12 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg
 
 /* "For AI agents": a small disclosure in the title bar, its text in a popover. */
 .agent-hint { position: relative; }
+.agent-banner { display: flex; align-items: center; gap: 8px; padding: 4px 10px; font-size: 12px;
+  background: color-mix(in srgb, var(--link) 16%, transparent); border-bottom: 1px solid var(--border, #333); }
+.agent-banner[hidden] { display: none; }
+.agent-banner code { font-size: 12px; }
+.agent-banner button { margin-left: auto; background: none; border: 0; color: inherit; cursor: pointer; font-size: 14px; }
+.agent-badge { font-size: 11px; color: #3fb950; white-space: nowrap; }
 .agent-hint > summary { list-style: none; cursor: pointer; }
 .agent-hint > summary::-webkit-details-marker { display: none; }
 .agent-hint-body {

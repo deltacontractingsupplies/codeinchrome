@@ -38,6 +38,9 @@
                     <li>The same speed as Starter</li>
                 @endif
                 <li>{{ $plan['custom_domains'] ? 'Your own domains, with HTTPS' : 'A free .codeinchrome.com address' }}</li>
+                @unless ($paid)
+                    <li>Listed on <a href="{{ route('explore') }}" class="underline">Explore</a> by its address</li>
+                @endunless
                 @if ($plan['background'] ?? false)
                     <li>Queue worker, scheduler and Reverb WebSockets</li>
                 @endif

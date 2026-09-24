@@ -38,10 +38,19 @@ return [
             'database' => env('DB_DATABASE', database_path('database.sqlite')),
             'prefix' => '',
             'foreign_key_constraints' => env('DB_FOREIGN_KEYS', true),
-            'busy_timeout' => null,
-            'journal_mode' => null,
-            'synchronous' => null,
-            'transaction_mode' => 'DEFERRED',
+            // Found in production (2026-09-24): a Google sign-in failed with
+            // "database is locked" - its transaction read, then wrote, while
+            // the scheduler was writing, and SQLite cannot make a DEFERRED
+            // reader wait for a write lock without risking deadlock, so it
+            // refuses at once. IMMEDIATE takes the write lock when the
+            // transaction begins, where waiting is safe; busy_timeout is how
+            // long it waits (ms). The control plane also runs WAL
+            // (DB_JOURNAL_MODE=wal, set by infra/deploy-control.sh), so
+            // readers never block the writer.
+            'busy_timeout' => (int) env('DB_BUSY_TIMEOUT', 10000),
+            'journal_mode' => env('DB_JOURNAL_MODE'),
+            'synchronous' => env('DB_SYNCHRONOUS'),
+            'transaction_mode' => env('DB_TRANSACTION_MODE', 'IMMEDIATE'),
         ],
 
         'mysql' => [

@@ -7,6 +7,13 @@
  * given; re-check them there before changing any (they change).
  */
 return [
+    // The agent skill: one file, skills/codeinchrome/SKILL.md, served as plain
+    // text at /agent/skill.md and paged by cic.skill() in the editor - so an
+    // agent that never loaded the skill can still read it. In production PHP
+    // may only read inside /srv/control (open_basedir), so infra/deploy-control.sh
+    // puts it at /srv/control/skills and sets CIC_SKILL_PATH.
+    'skill_path' => env('CIC_SKILL_PATH', base_path('../skills/codeinchrome/SKILL.md')),
+
     'checked_on' => '2026-09-24',
 
     'extension' => [

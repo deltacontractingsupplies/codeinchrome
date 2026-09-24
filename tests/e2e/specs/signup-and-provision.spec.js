@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { confirmSignup } from '../helpers/fixtures.js';
 import { waitForDns, waitForDnsGone } from '../helpers/dns.js';
@@ -16,7 +17,7 @@ const account = {
   email: `e2e-${stamp}@codeinchrome.test`,
   // Long and random so it cannot collide with a breach corpus, which
   // registration checks against.
-  password: `e2e-${stamp}-${Math.random().toString(36).slice(2)}-Zq7`,
+  password: `e2e-${stamp}-${randomBytes(9).toString('hex')}-Zq7`,
 };
 const siteName = `e2e-${stamp}`.slice(0, 40);
 const siteUrl = `https://${siteName}.codeinchrome.com`;
@@ -38,7 +39,7 @@ test('a visitor can sign up, provision a site, and see it live', async ({ page }
     await expect(editor.getByRole('navigation', { name: 'Files' })).toBeVisible();
     // How to start with Claude in Chrome, and who is paid for what.
     await expect(page.getByRole('heading', { name: 'Get started with Claude in Chrome' })).toBeVisible();
-    await expect(page.getByRole('link', { name: /Add Claude in Chrome/ })).toHaveAttribute('href', /chromewebstore\.google\.com\/detail\/claude\//);
+    await expect(page.getByRole('link', { name: /Add Claude in Chrome/ })).toHaveAttribute('href', /^https:\/\/chromewebstore\.google\.com\/detail\/claude\//);
     await expect(page.getByText('It does not include an AI agent.')).toBeVisible();
     // A plan card is always there: Starter when paid plans are for sale, the free plan either way.
     await expect(page.locator('[data-plan="free"]')).toBeVisible();

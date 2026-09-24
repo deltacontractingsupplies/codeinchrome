@@ -42,6 +42,12 @@
             </div>
             <button class="rounded-md bg-teal-500 px-4 py-2 font-medium text-neutral-950 hover:bg-teal-400">Create</button>
         </form>
+        @unless (auth()->user()->isPaid())
+            {{-- Said BEFORE the site exists: free sites are listed, with no opt-out. --}}
+            <p class="mt-2 basis-full text-xs text-neutral-500" data-explore-notice>
+                Free sites are listed on <a href="{{ route('explore') }}" class="underline">Explore</a> by their address - never your name or anything inside. Sites on a paid plan are not listed.
+            </p>
+        @endunless
     @else
         <a href="{{ route('billing') }}" class="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-300 hover:border-neutral-500">
             {{ auth()->user()->isPaid() ? 'All '.$plan['sites'].' sites in use' : 'Upgrade to Starter for 3 sites' }}

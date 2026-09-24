@@ -30,10 +30,16 @@ class User extends Authenticatable implements MustVerifyEmail
         return $this->hasMany(Subscription::class);
     }
 
-    /** Operators are listed in CIC_ADMIN_EMAILS; nothing in the app can grant it. */
+    /**
+     * Operators are listed in CIC_ADMIN_EMAILS; nothing in the app can grant it.
+     * And the address must be PROVED: anyone can register an unverified account
+     * under an operator's address that has no account yet (found 2026-09-24 -
+     * /status is open to unverified accounts, as email verification is).
+     */
     public function isOperator(): bool
     {
-        return in_array(strtolower($this->email), array_map('strtolower', config('fleet.admin_emails')), true);
+        return $this->hasVerifiedEmail()
+            && in_array(strtolower($this->email), array_map('strtolower', config('fleet.admin_emails')), true);
     }
 
     /**

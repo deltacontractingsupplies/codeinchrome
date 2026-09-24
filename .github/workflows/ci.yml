@@ -103,7 +103,13 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck -S warning infra/*.sh infra/hooks/*
+          shellcheck -S warning infra/*.sh infra/hooks/* .github/cla/*.sh
+      - name: the contributor-agreement check
+        run: bash .github/cla/test.sh
+      - name: workflow audit (zizmor)
+        run: |
+          pipx install zizmor==1.30.1
+          zizmor --offline --min-severity medium .github/workflows/
       - name: no code may target a server outside the fleet
         # The addresses are not in this repository (they are in the operator's
         # infra/hosts.local.env); CI gets them from the CIC_FORBIDDEN_HOSTS

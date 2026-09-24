@@ -1,10 +1,11 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { confirmSignup } from '../helpers/fixtures.js';
 import { totp } from '../helpers/totp.js';
 
 const stamp = Date.now().toString(36);
 const email = `acct-${stamp}@codeinchrome.test`;
-const password = `acct-${stamp}-${Math.random().toString(36).slice(2)}-Pq2`;
+const password = `acct-${stamp}-${randomBytes(9).toString('hex')}-Pq2`;
 
 test('two-factor: set up, then a password alone no longer signs in', async ({ page }) => {
   page.on('dialog', (d) => { throw new Error(`native dialog: ${d.message()}`); });

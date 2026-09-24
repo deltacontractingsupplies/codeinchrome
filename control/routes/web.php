@@ -24,6 +24,8 @@ use App\Http\Controllers\WebhookController;
 use Illuminate\Support\Facades\Route;
 
 Route::view('/', 'welcome')->name('home');
+// Every free, live, built site, by its address only (App\Showcase\Explore).
+Route::get('/explore', fn (\App\Showcase\Explore $explore) => view('explore', ['sites' => $explore->listed()]))->name('explore');
 Route::view('/pricing', 'pricing')->name('pricing');
 // RFC 9116: how to report a vulnerability. The contact is the support
 // address; Expires is kept a year ahead, as the RFC asks it never lapse.
@@ -32,9 +34,29 @@ Route::get('/.well-known/security.txt', fn () => response(implode("\n", [
     'Expires: '.now()->addYear()->startOfDay()->utc()->format('Y-m-d\TH:i:s\Z'),
     'Preferred-Languages: en',
     'Canonical: '.url('/.well-known/security.txt'),
-    'Policy: '.route('terms'),
+    // SECURITY.md: how to report, what is in scope, safe harbour.
+    'Policy: '.config('legal.source.url').'/security/policy',
 ])."\n", 200, ['Content-Type' => 'text/plain; charset=utf-8']))->name('security.txt');
 Route::view('/terms', 'legal.terms')->name('terms');
+// The agent skill, as plain text: for an agent that never loaded it (the
+// editor's cic.skill() pages the same file). Public, like the repository.
+Route::get('/agent/skill.md', function () {
+    $path = config('agent.skill_path');
+    try {
+        $text = is_string($path) && is_file($path) ? file_get_contents($path) : false;
+    } catch (\ErrorException $e) {
+        // Outside open_basedir, say: logged for us, a 404 for the reader - never a 500.
+        report($e);
+        $text = false;
+    }
+    abort_if($text === false, 404);
+
+    return response($text, 200, [
+        'Content-Type' => 'text/plain; charset=utf-8',
+        'X-Content-Type-Options' => 'nosniff',
+        'Cache-Control' => 'public, max-age=300',
+    ]);
+})->name('agent.skill');
 // The demos' source, open to read (DemoCodeController: config-listed sites only).
 Route::get('/demos/{demo}/code', [\App\Http\Controllers\DemoCodeController::class, 'index'])
     ->where('demo', '[a-z0-9-]+')->middleware('throttle:demo-code')->name('demos.code');

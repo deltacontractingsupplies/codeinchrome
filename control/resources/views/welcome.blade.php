@@ -87,7 +87,9 @@
             <p class="text-sm text-teal-300">Step 5</p>
             <h3 class="mt-1 font-medium text-neutral-100">Open Claude beside the editor and say what you want</h3>
             <p class="mt-2 text-sm leading-relaxed text-neutral-400">
-                On the editor's tab, click the Claude icon to open it in Chrome's side panel, and describe the site: "a booking page for my
+                On the editor's tab, click the Claude icon to open it in Chrome's side panel. Press <strong class="text-neutral-200">Copy for agent</strong> at the top of the editor
+                and paste it into Claude's chat: Claude reads how to work here and answers that it is connected - the editor shows "Agent connected".
+                Then describe the site: "a booking page for my
                 barbershop, with an admin to see the day's appointments". The editor tells Claude how to work in it; you watch every file it writes,
                 and every change is a version you can undo. Any other AI agent that can drive a browser can work here the same way.
             </p>
@@ -206,6 +208,12 @@
 {{-- What is for sale (App\Billing\Sales); WebSockets only where Reverb runs (a paid plan's background processes). --}}
 @php($measured = collect(\App\Billing\Sales::plans())->map(fn ($p, $k) => ['plan' => $p, 'cap' => ($c = $capacity->forPlan($k)) && ! ($p['background'] ?? false) ? ['websocket_connections' => null, 'websocket_label' => null] + $c : $c])->filter(fn ($r) => $r['cap']))
 @if ($measured->isNotEmpty())
+<section id="explore" class="mt-24" aria-labelledby="explore-heading">
+    <h2 id="explore-heading" class="text-2xl font-semibold text-white">Sites people are building here</h2>
+    @include('partials.explore-list', ['sites' => app(\App\Showcase\Explore::class)->listed(config('showcase.explore.on_home'))])
+    <p class="mt-4"><a href="{{ route('explore') }}" class="text-sm text-teal-300 underline">Explore every free site</a></p>
+</section>
+
 <section class="mt-24" aria-labelledby="capacity-heading">
     <h2 id="capacity-heading" class="text-2xl font-semibold text-white">How much traffic each plan handles</h2>
     <p class="mt-3 max-w-2xl text-neutral-400">
@@ -248,5 +256,16 @@
     <h2 id="plans" class="text-2xl font-semibold text-white">Plans</h2>
     @include('partials.plans')
     <p class="mt-2 text-sm text-neutral-500">Monthly, in US dollars, cancel any time. <a href="{{ route('pricing') }}" class="underline">Pricing details</a>.</p>
+</section>
+
+<section id="source" class="mt-24" aria-labelledby="source-heading">
+    <h2 id="source-heading" class="text-2xl font-semibold text-white">The code is public</h2>
+    <p class="mt-3 max-w-2xl text-neutral-400">Every line of codeinchrome is on GitHub: the control panel, the agent that runs on each server, the editor and the scripts that set it all up. Read how your site is isolated, check our security for yourself, report a problem or send an improvement.</p>
+    <ul class="mt-4 max-w-2xl space-y-2 text-sm text-neutral-400">
+        <li><strong class="text-neutral-200">Free to read, change and contribute to.</strong> The one thing it may not be used for is a competing commercial product or service. Each version becomes available under the Apache 2.0 licence two years after its release (<a href="{{ config('legal.source.url') }}/blob/main/LICENSE.md" class="underline" rel="noopener">{{ config('legal.source.license') }}</a>).</li>
+        <li><strong class="text-neutral-200">Every change is reviewed.</strong> Pull requests are welcome, and none is merged without our review and passing tests.</li>
+        <li><strong class="text-neutral-200">Found a security problem?</strong> Report it privately, never in a public issue: <a href="{{ config('legal.source.url') }}/security/policy" class="underline" rel="noopener">our security policy</a>.</li>
+    </ul>
+    <p class="mt-5"><a href="{{ config('legal.source.url') }}" rel="noopener" class="inline-block rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-200 hover:border-neutral-500">View the code on GitHub</a></p>
 </section>
 @endsection

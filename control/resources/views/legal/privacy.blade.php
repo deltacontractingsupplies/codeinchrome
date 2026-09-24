@@ -64,6 +64,13 @@
     forgery. No analytics, no tracking, no third-party cookies.
 </p>
 
+<h2>What we publish</h2>
+<p data-privacy-explore>
+    The address of each site on the free plan (for example <code>my-shop.codeinchrome.com</code>), on our Explore and
+    home pages. Nothing else: never your name, your email, or anything your site holds. Sites on a paid plan are not
+    listed. The address is public anyway - anyone can visit it - but we tell you before you create a site.
+</p>
+
 <h2>Your sites' visitors</h2>
 <p>
     For the personal data your own application collects from its visitors, you are the controller

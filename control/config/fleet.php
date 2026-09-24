@@ -164,6 +164,11 @@ return [
 
     'min_agent_version' => '0.26.3',
 
+    // Touched by the control plane's backup after each complete run
+    // (infra/setup-control-backup.sh); Monitoring alerts when it is older
+    // than a day and a bit. Unset (development): not checked.
+    'control_backup_stamp' => env('CIC_CONTROL_BACKUP_STAMP'),
+
     /*
      * The zone every free subdomain is created under, and addresses that are
      * off limits: servers outside this fleet that must never be provisioned

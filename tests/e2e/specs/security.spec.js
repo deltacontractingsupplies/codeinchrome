@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { confirmSignup } from '../helpers/fixtures.js';
 
@@ -6,12 +7,12 @@ import { confirmSignup } from '../helpers/fixtures.js';
  * way a signed-in customer could reach something that is not theirs.
  */
 
-const stamp = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 6)}`;
+const stamp = () => `${Date.now().toString(36)}${randomBytes(2).toString('hex')}`;
 
 async function register(page, id) {
   const account = {
     email: `sec-${id}@codeinchrome.test`,
-    password: `sec-${id}-${Math.random().toString(36).slice(2)}-Xr4`,
+    password: `sec-${id}-${randomBytes(9).toString('hex')}-Xr4`,
   };
   await page.goto('/register');
   await page.getByLabel('Name').fill(`Sec ${id}`);

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { paidPlansOpen } from '../helpers/sales.js';
 import { confirmSignup, setPlan, runTrialClock } from '../helpers/fixtures.js';
@@ -17,7 +18,7 @@ import { destroySite } from '../helpers/cleanup.js';
 const stamp = Date.now().toString(36);
 const siteName = `tr-${stamp}`.slice(0, 40);
 const email = `tr-${stamp}@codeinchrome.test`;
-const password = `tr-${stamp}-${Math.random().toString(36).slice(2)}-Qm8`;
+const password = `tr-${stamp}-${randomBytes(9).toString('hex')}-Qm8`;
 const host = `${siteName}.codeinchrome.com`;
 
 test.describe.configure({ mode: 'serial' });

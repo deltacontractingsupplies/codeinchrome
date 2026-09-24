@@ -82,7 +82,8 @@ define('blade', () => monaco.languages.setMonarchTokensProvider('blade', {
     bladeEcho: [[/\}\}/, { token: 'delimiter.bracket', next: '@pop', nextEmbedded: '@pop' }]],
     bladeRaw: [[/!!\}/, { token: 'delimiter.bracket', next: '@pop', nextEmbedded: '@pop' }]],
     bladePhpBlock: [[/[@]endphp\b/, { token: 'keyword', next: '@pop', nextEmbedded: '@pop' }]],
-    htmlComment: [[/-->/, 'comment', '@pop'], [/[^-]+/, 'comment'], [/./, 'comment']],
+    // HTML also ends a comment at "--!>".
+    htmlComment: [[/--!?>/, 'comment', '@pop'], [/[^-]+/, 'comment'], [/./, 'comment']],
     tag: [
       [/\/?>/, 'delimiter', '@pop'],
       [/"([^"]*)"/, 'attribute.value'],

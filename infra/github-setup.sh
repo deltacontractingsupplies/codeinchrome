@@ -77,7 +77,9 @@ fi
 ok "branch cla-signatures for contributor-agreement signatures"
 
 # ── the ruleset on main ──────────────────────────────────────────────────────
-# The required checks are the CI job names in .github/workflows/ci.yml.
+# The required checks are the CI job names in .github/workflows/ci.yml, and
+# the status .github/cla/cla.sh sets - accepted from GitHub Actions (app
+# 15368) only, so no other token can mark a pull request as signed.
 name="main: reviewed pull requests only"
 existing=$(gh api "repos/$repo/rulesets" -q ".[] | select(.name == \"$name\") | .id")
 ruleset=$(cat <<JSON
@@ -106,7 +108,7 @@ ruleset=$(cat <<JSON
           { "context": "agent (go)" },
           { "context": "control plane (laravel)" },
           { "context": "infra scripts" },
-          { "context": "CLAAssistant" }
+          { "context": "contributor agreement", "integration_id": 15368 }
         ]
     } }
   ]

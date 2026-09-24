@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { confirmSignup } from '../helpers/fixtures.js';
 import { waitForDns } from '../helpers/dns.js';
@@ -16,7 +17,7 @@ import { destroySite } from '../helpers/cleanup.js';
 const stamp = Date.now().toString(36);
 const account = {
   email: `files-${stamp}@codeinchrome.test`,
-  password: `files-${stamp}-${Math.random().toString(36).slice(2)}-Kp9`,
+  password: `files-${stamp}-${randomBytes(9).toString('hex')}-Kp9`,
 };
 const siteName = `f-${stamp}`.slice(0, 40);
 

@@ -36,6 +36,15 @@ else
   echo "WARNING: deploying WITHOUT running tests (CIC_SKIP_TESTS=1)" >&2
 fi
 
+# The browser code is shipped as built here (public/build), so build it from
+# the source being deployed - every time. Once a fix to editor.js was deployed
+# with an older build: the source was right and production ran the old code,
+# with cic.check broken, until the e2e suite said so.
+( cd control && npm run build --silent >/dev/null 2>&1 ) || {
+  echo "REFUSING to deploy: the front end does not build (cd control && npm run build)" >&2
+  exit 1
+}
+
 say()  { printf '\n\033[1;36m[%s]\033[0m %s\n' "$name" "$*"; }
 ok()   { printf '\033[32m  ok\033[0m %s\n' "$*"; }
 die()  { printf '\033[31mFAIL\033[0m %s\n' "$*" >&2; exit 1; }
@@ -82,11 +91,17 @@ say "code"
 rsync -az --delete --no-o --no-g \
   --exclude /vendor/ --exclude /node_modules/ --exclude /.env --exclude '/database/*.sqlite' \
   --exclude /storage/ --exclude /bootstrap/cache/ --exclude /public/build/ --exclude /tests/ \
-  --exclude /.phpunit.result.cache --exclude /.predeploy-tests.log \
+  --exclude /.phpunit.result.cache --exclude /.predeploy-tests.log --exclude /skills/ \
   -e 'ssh -o StrictHostKeyChecking=accept-new' \
   control/ "root@$ip:/srv/control/"
 ssh_ 'cd /srv/control && mkdir -p storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache'
 rsync -az --no-o --no-g -e 'ssh -o StrictHostKeyChecking=accept-new' control/public/build/ "root@$ip:/srv/control/public/build/"
+# The agent skill, served at /agent/skill.md and read by cic.skill() in the
+# editor. Inside /srv/control: php-fpm's open_basedir allows nothing outside
+# it (CIC_SKILL_PATH below points here). Excluded from the sync above, so
+# its --delete never removes it.
+rsync -az --delete --no-o --no-g -e 'ssh -o StrictHostKeyChecking=accept-new' skills/ "root@$ip:/srv/control/skills/"
+ssh_ 'rm -rf /srv/skills' # where it went first, before open_basedir said no
 ok "source synced"
 
 say "environment"
@@ -113,6 +128,17 @@ LOG_LEVEL=warning
 
 DB_CONNECTION=sqlite
 DB_DATABASE=/var/lib/codeinchrome/control.sqlite
+# WAL: readers never block the writer (a sign-in once failed with "database
+# is locked" while the scheduler wrote). WAL adds control.sqlite-wal and -shm
+# beside the file, created by whoever opens it first - so EVERYTHING that opens
+# it runs as codeinchrome (artisan via sudo -u, the backup via runuser); a
+# root-owned -shm would leave the app unable to write at all.
+DB_JOURNAL_MODE=wal
+DB_SYNCHRONOUS=normal
+# Touched by cic-control-backup after each complete run; monitoring alerts
+# when it grows old (infra/setup-control-backup.sh).
+CIC_CONTROL_BACKUP_STAMP=/var/lib/codeinchrome/control-backup.ok
+CIC_SKILL_PATH=/srv/control/skills/codeinchrome/SKILL.md
 
 SESSION_DRIVER=file
 # __Host-: the browser refuses this cookie if it carries a Domain attribute,

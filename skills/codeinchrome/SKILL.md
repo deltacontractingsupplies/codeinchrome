@@ -30,6 +30,40 @@ calls and a few minutes**, not dozens of calls and an hour.
 - **Do not take screenshots to read code, and do not type into the editor.** The editor
   is for the person watching; you use `cic`.
 
+## The code must be real, clean Laravel (required)
+
+The person is paying for a site they can keep, extend and hand to a developer. Write
+it the way a senior Laravel developer would, every time - even for "just a page".
+A page in a route closure, or HTML in a PHP string, is a failure, not a shortcut.
+
+- **Routes only route.** `routes/web.php` maps URLs to controllers
+  (`Route::get('/', HomeController::class)`, `Route::resource('items', ItemController::class)`).
+  No closures that build pages, no markup, no queries.
+- **Controllers stay thin** (`php artisan make:controller ItemController --resource`):
+  load data, authorize, return a view or a redirect.
+- **Validation in Form Requests** (`make:request StoreItemRequest`), never ad-hoc in the
+  controller. Validate every input.
+- **Blade views, with one layout.** `resources/views/layouts/app.blade.php` (or an
+  `<x-layout>` component) holds the `<html>`, head and navigation; pages extend it;
+  anything repeated is a component or partial. Styles go in `/public/css/app.css`
+  (there is no Vite here), not walls of inline `style=""`. Semantic, accessible,
+  responsive HTML.
+- **Eloquent, done properly.** A migration for every table; models with `$fillable`,
+  casts and relationships; factories and seeders for sample data; `with()` to avoid
+  N+1 queries; pagination for lists; a transaction for multi-step writes.
+- **Secure by default.** `{{ }}` escaping (never `{!! !!}` with anything a user typed);
+  `@csrf` on every form; `auth` middleware and policies (`make:policy`) for anything
+  private; passwords only through Laravel's hashing; `env()` only inside `config/`,
+  code reads `config()`; rate limits on login and public forms.
+- **Laravel's names and conventions**: singular models, plural tables, named resource
+  routes, typed properties and return types, PSR-12.
+- **Tests for what you build**: a feature test per page and action
+  (`make:test ItemTest`), run with `await cic.run('artisan', ['test'])`.
+
+If a senior Laravel reviewer would reject it, it is not done. `cic.check()` reports
+code that breaks these rules (a page built in `routes/web.php`, for one): fix what it
+says before you tell the person you are finished.
+
 ## Step 1 - open the editor (1-2 calls)
 
 1. If the person gave you a sign-in link, open it first; it signs this browser in to
@@ -46,6 +80,12 @@ calls and a few minutes**, not dozens of calls and an hour.
      the site is missing, stop and tell the person exactly that. Do not create a site
      unless they asked you to (the dashboard's Create form makes one);
    - the page is still loading: wait a second and check again.
+4. Once it is the site object, run `await cic.hello()` and tell the person what it says:
+   it proves you are driving the editor, and the page shows "Agent connected".
+
+This skill is also served by the platform, for an agent that did not load it:
+`https://app.codeinchrome.com/agent/skill.md` (read the page text), or
+`await cic.skill()` in the editor (its sections; `cic.skill('Step 3')` for one).
 
 ## Reading files: use `cic.view`, not `cic.read`
 

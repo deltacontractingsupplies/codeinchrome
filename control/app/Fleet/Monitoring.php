@@ -102,6 +102,16 @@ class Monitoring
                 $last ? 'newest complete backup '.$last->diffForHumans() : 'no complete backup yet', null];
         }
 
+        // The control plane's own backup (infra/setup-control-backup.sh)
+        // touches this file after every complete run. It once stopped for 32
+        // hours on a stale lock, and only a failed systemd unit said so.
+        if ($stamp = config('fleet.control_backup_stamp')) {
+            clearstatcache(true, $stamp);
+            $at = is_file($stamp) ? \Illuminate\Support\Carbon::createFromTimestamp(filemtime($stamp)) : null;
+            $out['control:backup'] = ['control plane backups', $at !== null && $at->greaterThan($limit),
+                $at ? 'newest complete backup '.$at->diffForHumans() : 'no complete backup recorded', null];
+        }
+
         return $out;
     }
 

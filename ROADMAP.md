@@ -363,6 +363,96 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
       on GitHub; only with the owner's go-ahead (a force-push, or a fresh
       repository).
 
+### The repository is public now (owner, 2026-09-24): link it, and check everything
+
+People can see the code now: every item below is checked on the live site or
+on GitHub, not assumed.
+
+**On the site**
+- [x] **The GitHub repository on the site**: footer of every public page, a
+      short "Open source" block on the home page (licence in plain words:
+      free to read, change and contribute; no competing service; each version
+      Apache-2.0 after two years), and the link in the editor's help. Only the
+      repository address, never an internal one. Tested, and seen live.
+      DONE 2026-09-24: footer of every public page, the home page's "The code is public", the editor's help; security.txt Policy is SECURITY.md. Tested (LegalTest, HomePageTest) and seen live.
+- [x] **The skill inside the editor** (owner, 2026-09-24): `cic.skill()`
+      returns SKILL.md in pages an agent's tool will print, so an agent that
+      never loaded the skill can still read it; the same file served as plain
+      text at a public address; a small "Copy for your agent" button whose text
+      tells the agent to read the skill and prove it is connected; and a
+      marker on the page once an agent has really run code there. Tested, and
+      tried live with Claude in Chrome.
+      DONE: /agent/skill.md (plain text, served from inside open_basedir), cic.skill(), cic.hello(), "Copy for agent", "Agent connected" - the editor e2e passed on production. LEFT for the owner: one real session in the Claude in Chrome side panel.
+
+- [ ] **Sign-in must never fail on a busy database** (production, 2026-09-24:
+      Google sign-in answered 500, "database is locked" - its transaction
+      read then wrote while the scheduler wrote). Fixed: IMMEDIATE
+      transactions, a 10 s busy timeout, WAL; every root access to the
+      database moved to the app's user (WAL's -shm would otherwise be
+      root's). Deployed and verified on production (journal_mode wal,
+      busy_timeout 10000; -wal/-shm owned by the app). LEFT: the owner signs
+      in with Google once more.
+- [x] **The control plane's own backup had stopped for 32 hours** (a stale
+      restic lock, found while fixing the above): unlock before each run, a
+      stamp after each complete run, and monitoring alerts when it is older
+      than 30 hours. Verified: a run completes and the check reads green.
+      DONE: a run completed on production after the fix; monitoring reads "newest complete backup 12 seconds ago".
+- [ ] **An agent finds window.cic on its own** (owner, 2026-09-24: Claude in
+      Chrome built a page by typing into routes/web.php, "because I couldn't
+      expand the file tree" - it never read the agent instructions nor the
+      skill). Whatever it reads first must say it: the page title, the first
+      text of <main>, the page-text read, a screenshot - never behind a click
+      on "For AI agents". DONE: the tab's title and a banner on screen say how
+      until an agent calls window.cic (e2e on production). LEFT: tried live
+      with Claude in Chrome with NO skill loaded and no pasted message.
+- [x] **The skill demands real Laravel** (owner, 2026-09-24): routes stay thin;
+      controllers, form requests (validation), Blade layouts and components,
+      Eloquent models with migrations and factories, policies for
+      authorisation, config and not env() in code, tests for what it builds;
+      CSRF, escaping, mass-assignment protection. Never a page in a route
+      closure, never markup in PHP strings. And `cic.check` or a review call
+      that flags it (HTML in routes/web.php, inline <style> walls, no tests).
+      DONE: the skill's required section; cic.check() reviews the code (HTML in PHP, queries in routes, env() outside config/, forms without @csrf) and a fresh site passes it - both proved by the editor e2e on production.
+- [x] **Explore: every free site listed publicly** (owner, 2026-09-24): the home
+      page (and its own page) lists free sites beside the highlighted demos -
+      the site's address only, nothing else (no owner, email, credentials or
+      content). Free sites are listed, no opt-out, and the person is told so
+      BEFORE creating one (create form, pricing, terms, privacy); paid sites
+      are not listed. Only live sites that answer; a site that is taken down
+      or deleted leaves the list.
+      DONE: /explore and the home page, refreshed hourly; told on the create form, pricing, terms and privacy (ExploreTest). Live, listing the one built free site.
+
+**On GitHub**
+- [x] Repository page: homepage https://codeinchrome.com, topics, the
+      licence named in the README.
+- [ ] **Code scanning** (CodeQL default setup: Go, JavaScript, Actions) on
+      pull requests and weekly; zero open alerts, or each one fixed.
+- [ ] **Workflow audit** (zizmor): the contributor-agreement action is from an
+      ARCHIVED repository (no more fixes) and runs on pull_request_target
+      with a write token. Replace it with our own small check (no pull-request
+      code ever runs, inputs never interpolated), keep the same required
+      check; zizmor clean in CI.
+- [x] CI actions pinned to commits, no persisted checkout token, Dependabot
+      version updates (pull request #3); the agent's LSP test race it
+      exposed, fixed.
+- [ ] After every change: secret-scanning, Dependabot and code-scanning
+      alerts read back as zero.
+
+**Security, double-checked now that the code is public**
+- [ ] Whole-history scan again, on GitHub's copy: gitleaks, the deny list,
+      every registry address, .env values (a fresh clone, not this one).
+- [ ] Nothing a reader could use against production: no admin URL that
+      skips authentication, no debug route, no default credential, no token
+      in a test that is also real. Read the routes and the configuration
+      with an attacker's eyes.
+- [ ] Rotate what lived on a laptop (defence in depth - none is in the
+      history): the Lemon Squeezy API key and webhook secret, the Cloudflare
+      token. Owner, in each dashboard.
+- [ ] SECURITY.md reporting path tested: private vulnerability reporting
+      opens a draft advisory (checked on GitHub).
+- [ ] Only our emails in the published history (above): the owner decides
+      between a one-time rewrite and a fresh repository.
+
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):
       the privacy policy said Cloudflare did DNS only - every site and the app

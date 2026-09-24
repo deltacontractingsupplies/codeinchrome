@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { confirmSignup } from '../helpers/fixtures.js';
 import { waitForDns } from '../helpers/dns.js';
@@ -11,7 +12,7 @@ import { destroySite } from '../helpers/cleanup.js';
 
 const stamp = Date.now().toString(36);
 const siteName = `ed-${stamp}`.slice(0, 40);
-const password = `ed-${stamp}-${Math.random().toString(36).slice(2)}-Wq3`;
+const password = `ed-${stamp}-${randomBytes(9).toString('hex')}-Wq3`;
 
 test.describe.configure({ mode: 'serial' });
 // One long journey through the whole editor, including the PHP language
@@ -57,6 +58,61 @@ test('a person and an agent can both edit a real site, without erasing each othe
     // It opens routes/web.php on its own, from the real site.
     await expectShown(page, /Route::/);
     await expect(page.locator('#sbMsg')).toHaveText('Ready');
+  });
+
+  await test.step('an agent that never loaded the skill reads it here and proves it is connected; the person sees it', async () => {
+    const editUrl = page.url();
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write'], { origin: new URL(editUrl).origin });
+    // A fresh tab: nothing has called window.cic in it yet.
+    const fresh = await page.context().newPage();
+    await fresh.goto(editUrl);
+    await expect(fresh.locator('#sbMsg')).toHaveText(/^(Ready|Restored)/);
+    // The editor's own loading never counts as an agent.
+    await expect(fresh.locator('#agentBadge')).toBeHidden();
+    // An agent that reads only the screen or the tab list still learns how
+    // to work here, without clicking anything.
+    await expect(fresh.locator('#agentBanner')).toBeVisible();
+    await expect(fresh.locator('#agentBanner')).toContainText('await cic.hello()');
+    await expect(fresh).toHaveTitle(/AI agent: run await cic\.hello\(\) in this page$/);
+
+    // The message the person pastes into their agent's chat.
+    await fresh.getByRole('button', { name: 'Copy for agent' }).click();
+    const message = await fresh.evaluate(() => navigator.clipboard.readText());
+    expect(message).toContain(`${siteName}.codeinchrome.com`);
+    expect(message).toContain(`/sites/${siteName}/edit`);
+    expect(message).toContain('/agent/skill.md');
+    expect(message).toContain('await cic.hello()');
+    await expect(fresh.locator('#agentBadge')).toBeHidden(); // a button press is not an agent
+
+    const r = await fresh.evaluate(async () => ({
+      contents: await cic.skill(),
+      section: await cic.skill('Step 3'),
+      next: await cic.skill('Step 3', 2),
+      none: await cic.skill('no such section'),
+      hello: cic.hello(),
+    }));
+    // Each answer is one a browser tool prints whole (it cuts at 1,000 characters).
+    for (const answer of [r.contents, r.section, r.next]) expect(answer.length).toBeLessThan(1000);
+    expect(r.contents).toContain('Read it ALL before you change anything');
+    expect(r.contents).toContain('/agent/skill.md');
+    expect(r.contents).toContain('Step 3 - build it');
+    expect(r.section).toMatch(/^## Step 3 - build it/);
+    expect(r.section).toMatch(/\[page 1 of \d+: await cic\.skill\("Step 3", 2\) for more\]$/);
+    expect(r.next).toMatch(/\[(page 2 of \d+|end of "Step 3")/);
+    expect(r.none).toContain('No section about "no such section"');
+    expect(r.hello).toContain(`codeinchrome editor connected: ${siteName}.codeinchrome.com`);
+    await expect(fresh.locator('#agentBadge')).toBeVisible();
+    await expect(fresh.locator('#agentBadge')).toHaveAttribute('title', /cic\.hello/);
+    // Its work done, the hint steps aside for the person.
+    await expect(fresh.locator('#agentBanner')).toBeHidden();
+    await expect(fresh).not.toHaveTitle(/AI agent/);
+
+    // The same skill, whole, as an agent's page-text tool reads it.
+    const md = await fresh.request.get('/agent/skill.md');
+    expect(md.status()).toBe(200);
+    expect(md.headers()['content-type']).toBe('text/plain; charset=utf-8');
+    expect(await md.text()).toContain('name: codeinchrome');
+    await fresh.close();
   });
 
   await test.step('the site was given its own MySQL database', async () => {
@@ -559,7 +615,34 @@ Route::get('/', function () {
     const [, good] = await page.evaluate(() => Promise.all([cic.run('artisan', ['about']), cic.check()]));
     expect(good.problems).toEqual([]);
     expect(good.errors).toEqual([]);
+    // A fresh Laravel app is clean code: the review has nothing to say.
+    expect(good.review).toEqual([]);
     expect(good.ok).toBe(true);
+  });
+
+  await test.step('cic.check rejects code a senior Laravel developer would: a page in a route, a form without @csrf, env() in code', async () => {
+    const web = (await page.evaluate(() => cic.read('/routes/web.php'))).content;
+    // What an agent really did (2026-09-24): a whole page as a string in a route.
+    const bad = {
+      '/routes/web.php': `${web}\nRoute::get('/e2e-shortcut', fn () => '<!DOCTYPE html><html><body>hi</body></html>');\n`,
+      '/resources/views/e2e-form.blade.php': '<form method="POST" action="/x"><input name="a"></form>',
+      '/app/Support/E2eEnv.php': "<?php\n\nnamespace App\\Support;\n\nclass E2eEnv\n{\n    public static function key() { return env('APP_KEY'); }\n}\n",
+    };
+    expect((await page.evaluate(([f]) => cic.writeMany(f), [bad])).ok).toBe(true);
+    const r = await page.evaluate(() => cic.check());
+    expect(r.ok).toBe(false);
+    const said = r.review.join('\n');
+    expect(said).toMatch(/HTML inside PHP at routes\/web\.php:\d+/);
+    expect(said).toContain('POST form without @csrf in resources/views/e2e-form.blade.php');
+    expect(said).toMatch(/env\(\) outside config\/ at app\/Support\/E2eEnv\.php:\d+/);
+
+    expect((await page.evaluate(([c]) => cic.write('/routes/web.php', c), [web])).ok).toBe(true);
+    for (const f of ['/resources/views/e2e-form.blade.php', '/app/Support/E2eEnv.php']) {
+      expect((await page.evaluate(([p]) => cic.rm(p), [f])).ok).toBe(true);
+    }
+    const clean = await page.evaluate(() => cic.check());
+    expect(clean.review).toEqual([]);
+    expect(clean.ok).toBe(true);
   });
 
   await test.step('reading as an agent: every page says what it is, and a sign-in that cannot work is said once', async () => {

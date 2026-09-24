@@ -179,6 +179,8 @@ while IFS= read -r line; do
   [[ -z $line || $line == \#* || $line != *=* ]] && continue
   k=${line%%=*}; v=${line#*=}; v=${v%\"}; v=${v#\"}
   [[ $k =~ $PUBLIC_KEYS || ${#v} -lt 8 ]] && continue
+  # Loopback (Laravel's default REDIS_HOST, MEMCACHED_HOST): never a secret.
+  [[ $v =~ ^(127\.0\.0\.1|localhost|::1)$ ]] && continue
   if grep -qF -- "$v" "$hist"; then echo "  the value of $k is in history" >&2; leaks=$((leaks+1)); fi
 done < "$root/.env"
 (( leaks == 0 )) || die "$leaks secret value(s) from .env found in history"

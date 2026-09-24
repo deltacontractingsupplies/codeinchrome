@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { confirmSignup } from '../helpers/fixtures.js';
 import { waitForDns } from '../helpers/dns.js';
@@ -18,7 +19,7 @@ import { destroySite } from '../helpers/cleanup.js';
 const stamp = Date.now().toString(36);
 const siteName = `sx-${stamp}`.slice(0, 40);
 const email = `sx-${stamp}@codeinchrome.test`;
-const password = `sx-${stamp}-${Math.random().toString(36).slice(2)}-Wq9`;
+const password = `sx-${stamp}-${randomBytes(9).toString('hex')}-Wq9`;
 const host = `${siteName}.codeinchrome.com`;
 
 test.describe.configure({ mode: 'serial' });

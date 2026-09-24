@@ -52,6 +52,7 @@
      data-search="{{ route('files.search', $site) }}"
      data-upload="{{ route('files.upload', $site) }}"
      data-download="{{ route('files.download', $site) }}"
+     data-skill="{{ route('agent.skill') }}"
      data-back="{{ route('dashboard') }}">
 
     <header class="titlebar">
@@ -62,8 +63,15 @@
             <div class="agent-hint-body" role="note">
                 <p>This page is the editor of the live site. Agents build here, by running JavaScript in this page - never on their own computer.</p>
                 <p><code>await cic.help()</code> lists every call. The fast path: <code>cic.writeMany({...})</code>, <code>cic.run('artisan', [...])</code>, <code>cic.request('/path')</code>.</p>
+                <p>No codeinchrome skill loaded? Read it first: <code>await cic.skill()</code>, or whole at <a href="{{ route('agent.skill') }}" target="_blank" rel="noopener">{{ route('agent.skill') }}</a>. Then <code>await cic.hello()</code>.</p>
+                <p>This editor is open source: <a href="{{ config('legal.source.url') }}" target="_blank" rel="noopener">codeinchrome on GitHub</a>.</p>
             </div>
         </details>
+        {{-- A message for the person to paste into their agent's chat: read the
+             skill, work through window.cic, prove the connection. --}}
+        <button type="button" class="open-site" id="btnCopyAgent" title="Copy a short message for your AI agent, then paste it into Claude's chat">Copy for agent</button>
+        {{-- Lit by any window.cic call: an agent is really driving this page. --}}
+        <span id="agentBadge" class="agent-badge" role="status" hidden>● Agent connected</span>
         <button type="button" class="open-site" data-theme-toggle title="Switch between system, light and dark">Theme: <span data-theme-label>System</span></button>
         <a class="open-site" href="{{ $site->url() }}" target="_blank" rel="noopener">Open site ↗</a>
     </header>
@@ -137,6 +145,8 @@
                  typing into the editor instead of calling window.cic. --}}
             <section id="agent-instructions" class="sr-only" aria-label="Instructions for AI agents">
                 <h2>For AI agents (Claude in Chrome and others): read this first</h2>
+                <p>If you have not loaded the codeinchrome skill, read it before anything else: open {{ route('agent.skill') }} in a tab and read the page's text,
+                   or run <code>await cic.skill()</code> here. Then run <code>await cic.hello()</code> and say its answer in your chat, so the person knows you are connected.</p>
                 <p>This page IS the code editor of the live Laravel site {{ $site->domain }}. Every file you save here is live at {{ $site->url() }} at once.
                    Do NOT write code on your own computer, in a local folder or in a terminal: nothing local reaches this site.</p>
                 <p>Build by running JavaScript in THIS page (your javascript tool), not by typing into the editor:
@@ -151,6 +161,12 @@
                    that fail, and <code>await cic.run('artisan', ['test'])</code> runs the app's tests on an in-memory database.</p>
                 <p>Every save is a version; <code>cic.history(path)</code> and <code>cic.restore(path, commit)</code> undo anything.</p>
             </section>
+            {{-- On screen, for an agent that reads screenshots: gone once an
+                 agent calls window.cic, or when the person closes it. --}}
+            <div id="agentBanner" class="agent-banner" role="note">
+                <span><strong>AI agent?</strong> Do not click or type in this editor. Run JavaScript in this page: <code>await cic.hello()</code>, then read <code>await cic.skill()</code>.</span>
+                <button type="button" id="agentBannerClose" title="Hide this for people">×</button>
+            </div>
             <div id="tabs" class="tabs" role="group" aria-label="Open files"></div>
             <div id="conflict" class="conflict" hidden>
                 <span id="conflictText"></span>

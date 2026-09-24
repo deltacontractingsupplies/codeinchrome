@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { confirmSignup } from '../helpers/fixtures.js';
 import { waitForDns } from '../helpers/dns.js';
@@ -13,7 +14,7 @@ import { destroySite } from '../helpers/cleanup.js';
 const stamp = Date.now().toString(36);
 const siteName = `ex-${stamp}`.slice(0, 40);
 const email = `ex-${stamp}@codeinchrome.test`;
-const password = `ex-${stamp}-${Math.random().toString(36).slice(2)}-Hv3`;
+const password = `ex-${stamp}-${randomBytes(9).toString('hex')}-Hv3`;
 const mac = process.platform === 'darwin';
 
 test.describe.configure({ mode: 'serial' });

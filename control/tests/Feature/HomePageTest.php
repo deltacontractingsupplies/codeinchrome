@@ -174,4 +174,20 @@ class HomePageTest extends TestCase
             ->assertSee(route('demos.code', 'ember-and-oak'), false)->assertSee(route('demos.code', 'petal-and-stem'), false);
     }
 
+
+    public function test_the_home_page_says_the_code_is_public_and_on_what_terms(): void
+    {
+        $this->get('/')->assertOk()
+            ->assertSee('id="source"', false)
+            ->assertSee('The code is public')
+            ->assertSee('competing commercial product or service')
+            ->assertSee('Apache 2.0 licence two years after its release')
+            ->assertSee('https://github.com/deltacontractingsupplies/codeinchrome/blob/main/LICENSE.md', false)
+            ->assertSee('https://github.com/deltacontractingsupplies/codeinchrome/security/policy', false);
+    }
+
+    public function test_getting_started_tells_the_person_to_hand_the_agent_the_editors_message(): void
+    {
+        $this->get('/')->assertOk()->assertSee('Copy for agent')->assertSee('Agent connected');
+    }
 }

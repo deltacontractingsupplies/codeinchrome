@@ -64,9 +64,35 @@ const SITE = {
   searchUrl: root.dataset.search,
   uploadUrl: root.dataset.upload,
   downloadUrl: root.dataset.download,
+  skillUrl: root.dataset.skill,
 };
 const CSRF = document.querySelector('meta[name=csrf-token]')?.content ?? '';
 const DRAFTS_KEY = `cic.drafts.${SITE.id}`;
+
+let agentCalls = 0;
+
+/* An agent that works from screenshots and the tab list never clicks "For AI
+ * agents" (seen 2026-09-24: Claude in Chrome typed a whole page into
+ * routes/web.php "because I couldn't expand the file tree"). So until an agent
+ * calls window.cic, the tab's title and a banner on screen say how - and the
+ * person can switch both off. */
+const AGENT_HINT_KEY = 'cic.agentHint.off';
+let agentHintOff = localStorage.getItem(AGENT_HINT_KEY) === '1';
+let baseTitle = document.title;
+function agentHintShown() {
+  return !agentHintOff && agentCalls === 0;
+}
+function paintTitle() {
+  document.title = agentHintShown() ? `${baseTitle} · AI agent: run await cic.hello() in this page` : baseTitle;
+  const banner = document.getElementById('agentBanner');
+  if (banner) banner.hidden = !agentHintShown();
+}
+document.getElementById('agentBannerClose')?.addEventListener('click', () => {
+  agentHintOff = true;
+  localStorage.setItem(AGENT_HINT_KEY, '1');
+  paintTitle();
+});
+paintTitle();
 
 const $ = (id) => document.getElementById(id);
 
@@ -1032,14 +1058,67 @@ async function checkSite({ as, session = false, max = 150 } = {}) {
     errors = (logAfter.log?.lines ?? '').split('\n').filter((l) => /\.(ERROR|CRITICAL|ALERT|EMERGENCY):/.test(l)).map((l) => l.replace(/^\[[^\]]+\]\s*/, '').slice(0, 200));
   }
   const problems = results.filter((r) => r.status === 0 || r.status >= 400);
+  const code = await reviewCode();
   return {
-    ok: problems.length === 0 && errors.length === 0,
+    ok: problems.length === 0 && errors.length === 0 && code.review.length === 0,
+    review: code.review.slice(0, 10),
+    notes: code.notes.slice(0, 5),
     checked: results.length,
     problems: problems.map((r) => `${r.status || 'no answer'} ${r.path}${r.why ? ` (${r.why})` : ''}`).slice(0, 30),
     errors: [...new Set(errors)].slice(0, 10),
     unchecked: queue.length,
     seconds: Math.round((Date.now() - started) / 1000),
   };
+}
+
+/* The code, reviewed for what a senior Laravel developer would reject
+ * outright (skills/codeinchrome/SKILL.md, "real, clean Laravel"). Seen
+ * 2026-09-24: an agent built a whole page as an HTML string in a route
+ * closure. Only precise rules that a fresh Laravel app passes; each finding
+ * says where and what to do instead. `review` fails cic.check; `notes` do not. */
+async function reviewCode() {
+  const review = [];
+  const notes = [];
+  const find = async (q) => {
+    const r = await searchSite(q);
+    return r.ok ? (r.hits ?? r.results ?? []).map((h) => ({ ...h, path: String(h.path).replace(/^\/+/, '') })) : [];
+  };
+  const isPhpCode = (p) => /^(routes|app)\/.*\.php$/.test(p) && !p.endsWith('.blade.php');
+  const where = (h) => `${h.path}:${h.line}`;
+
+  const markup = [...await find('<!doctype'), ...await find('<html'), ...await find('<body')].filter((h) => isPhpCode(h.path));
+  for (const h of markup.slice(0, 5)) {
+    review.push(`HTML inside PHP at ${where(h)}: put it in a Blade view (resources/views), returned by a controller.`);
+  }
+  for (const q of ['::all(', '::where(', 'db::']) {
+    for (const h of (await find(q)).filter((x) => x.path.startsWith('routes/')).slice(0, 3)) {
+      review.push(`A query in a route file at ${where(h)}: routes only route - move it to a controller.`);
+    }
+  }
+  for (const h of (await find('env(')).filter((x) => /^(app|routes|resources\/views)\//.test(x.path) && /(^|[^\w>$])env\(/.test(x.text)).slice(0, 5)) {
+    review.push(`env() outside config/ at ${where(h)}: it returns null once config is cached - add a config key and read config().`);
+  }
+  const formFiles = [...new Set((await find('<form')).filter((h) => h.path.startsWith('resources/views/')).map((h) => h.path))].slice(0, 20);
+  for (const path of formFiles) {
+    const f = await cicApi.read(`/${path}`);
+    if (!f.ok) continue;
+    for (const m of f.content.matchAll(/<form\b[^>]*>([\s\S]*?)<\/form>/gi)) {
+      const method = (m[0].match(/\bmethod\s*=\s*["']?(\w+)/i)?.[1] ?? 'get').toLowerCase();
+      if (method !== 'get' && !/@csrf|csrf_field\(|csrf_token\(/.test(m[1])) {
+        review.push(`A ${method.toUpperCase()} form without @csrf in ${path}: Laravel refuses it (419) - add @csrf inside the form.`);
+      }
+    }
+  }
+
+  for (const h of (await find('{!!')).filter((x) => x.path.startsWith('resources/views/')).slice(0, 3)) {
+    notes.push(`Unescaped output {!! !!} at ${where(h)}: make sure nothing a user typed can reach it, or use {{ }}.`);
+  }
+  const featureTests = await cicApi.ls('/tests/Feature');
+  const own = (featureTests.listing?.entries ?? []).filter((e) => !e.dir && e.name !== 'ExampleTest.php');
+  if (featureTests.ok && own.length === 0) {
+    notes.push("No feature tests of your own in tests/Feature: add one per page and action (make:test), then cic.run('artisan', ['test']).");
+  }
+  return { review: [...new Set(review)], notes };
 }
 
 /* ───────────────────────── what the web can see ─────────────────────────
@@ -1128,7 +1207,7 @@ async function replaceAcross(query, replacement, { caseSensitive = false, confir
   if (confirm && !(await ask(`Replace ${count} occurrence${count === 1 ? '' : 's'} of "${query}" across ${files.length} file${files.length === 1 ? '' : 's'} with "${replacement}"?\n\nAll of them are saved as one version, which History can undo.`, { okLabel: 'Replace' }))) {
     return { ok: false, error: 'cancelled', hint: 'Nothing was replaced.' };
   }
-  const res = await window.cic.writeMany(files, { message: `replace "${query.slice(0, 60)}" with "${replacement.slice(0, 60)}"` });
+  const res = await cicApi.writeMany(files, { message: `replace "${query.slice(0, 60)}" with "${replacement.slice(0, 60)}"` });
   if (!res.ok) return res;
   status(`Replaced ${count} in ${files.length} file${files.length === 1 ? '' : 's'}`);
   return { ok: true, files: files.length, replacements: count, written: res.written.map((w) => w.path), syntaxErrors: res.syntaxErrors };
@@ -1469,7 +1548,8 @@ function show(path) {
   }
   $('crumb').textContent = has ? path.slice(1).split('/').join('  ›  ') : '';
   $('winTitle').textContent = has ? `${baseName(path)} — ${SITE.id}` : SITE.id;
-  document.title = has ? `${baseName(path)} — ${SITE.id}` : `${SITE.id} — codeinchrome`;
+  baseTitle = has ? `${baseName(path)} — ${SITE.id}` : `${SITE.id} — codeinchrome`;
+  paintTitle();
   $('sbRev').textContent = has && t.revision ? `rev ${t.revision.slice(0, 7)}` : '';
   paintVisibility(has ? path : null);
 
@@ -2241,6 +2321,9 @@ Every call returns the server's answer: ok (the verdict), plus error and hint wh
 false. Nothing is paraphrased.
 
   cic.site                     { id, domain, url }
+  cic.skill(section, page)     the codeinchrome skill (how to work here): no argument = its
+                               contents and how to read it whole; 'Step 3' = that section
+  cic.hello()                  proof you are connected: say its answer in your chat
   cic.ls(path = '/')           list a directory                 -> { ok, listing }
   cic.view(path, { from, to, match }) READ a file as an agent: numbered lines, as many as a
                                browser tool shows in full (~900 characters). The LAST line says which
@@ -2900,13 +2983,78 @@ async function confirmRestore(path, rev, at) {
   return { ok: false, error: 'cancelled', hint: 'Not restored.' };
 }
 
-window.cic = Object.freeze({
+/* ───────── the skill, and whether an agent is really here ─────────
+ * skills/codeinchrome/SKILL.md, served at /agent/skill.md: an agent that never
+ * loaded the skill can still read it (owner's request, 2026-09-24). 20 KB is
+ * twenty-odd pages of what a browser tool prints, so cic.skill() gives the
+ * contents and the way to read it whole (one page-text read of the address),
+ * and cic.skill('Step 3') one section in pages. */
+let skillText = null;
+async function loadSkill() {
+  if (skillText === null) {
+    try {
+      const res = await fetch(SITE.skillUrl, { headers: { Accept: 'text/plain' }, credentials: 'same-origin' });
+      if (res.ok) skillText = (await res.text()).replace(/\r\n/g, '\n');
+    } catch {
+      // Offline or refused: said in the answer, never thrown.
+    }
+  }
+  return skillText;
+}
+const skillSections = (text) => text.split(/\n(?=## )/).filter((b) => b.startsWith('## '));
+
+/* The person sees when an agent is really driving this page: any window.cic
+ * call lights the marker (the editor's own buttons never go through
+ * window.cic, so they do not). */
+
+function markAgent(call) {
+  agentCalls += 1;
+  paintTitle();
+  const badge = document.getElementById('agentBadge');
+  if (!badge) return;
+  badge.hidden = false;
+  badge.title = `An AI agent is driving this editor through window.cic (${agentCalls} call${agentCalls === 1 ? '' : 's'}, last: cic.${call})`;
+}
+
+const cicApi = {
   version: '1.0',
   site: Object.freeze({ id: SITE.id, domain: SITE.domain, url: SITE.url }),
   // cic.help('request') shows only the lines about one call or topic.
   // Shaped like cic.view: pages of what a browser tool shows in full (about
   // 1,000 characters), "=" as "＝" so the answer is not blocked as a query
   // string. A simulated agent had cic.help('edit') refused whole.
+  // The skill, for an agent that never loaded it: cic.skill() is the
+  // contents and how to read it whole; cic.skill('Step 3', page) one section.
+  skill: async (section, page = 1) => {
+    const text = await loadSkill();
+    if (text === null) return `The skill could not be loaded just now. Read it at ${SITE.skillUrl}`;
+    const sections = skillSections(text);
+    const titles = sections.map((b) => b.split('\n')[0].replace(/^## /, ''));
+    if (!section) {
+      return agentSafe([
+        'The codeinchrome skill: how to build a site in this editor. Read it ALL before you change anything.',
+        `Whole, in one read: open ${SITE.skillUrl} in a tab and read the page's text.`,
+        'Or one section here: await cic.skill(\'Step 3\') (a word from the title is enough).',
+        'Sections:',
+        ...titles.map((t) => `  - ${t}`),
+        'Then: await cic.hello()',
+      ].join('\n'));
+    }
+    const hit = sections.filter((b) => b.split('\n')[0].toLowerCase().includes(String(section).toLowerCase()));
+    if (!hit.length) return `No section about "${section}". Sections: ${titles.join(' | ')}`;
+    const pages = pageLines(agentSafe(hit.join('\n')).split('\n'));
+    const n = Math.min(Math.max(1, Math.trunc(Number(page)) || 1), pages.length);
+    const more = n < pages.length
+      ? `\n[page ${n} of ${pages.length}: await cic.skill(${JSON.stringify(String(section))}, ${n + 1}) for more]`
+      : `\n[end of "${section}"]`;
+    return pages[n - 1].join('\n') + more;
+  },
+
+  // Proof the agent is connected: it reports this back in its chat, and the
+  // page shows "Agent connected" (markAgent) for the person to see.
+  hello: () => `codeinchrome editor connected: ${SITE.domain} (live at ${SITE.url}), window.cic ${cicApi.version}. `
+    + `Skill: ${SITE.skillUrl} (await cic.skill()). Start with: await cic.overview()`,
+
   help: (topic, page = 1) => {
     let text = HELP;
     if (topic) {
@@ -3232,6 +3380,40 @@ window.cic = Object.freeze({
       })),
     };
   },
+};
+
+// Every call marks the page as agent-driven (markAgent), then runs as written.
+window.cic = Object.freeze(Object.fromEntries(Object.entries(cicApi).map(([name, value]) => [
+  name,
+  typeof value === 'function'
+    // Object.assign keeps what hangs off a call (cic.request.reset, ...): the
+    // first wrapper dropped it, and cic.check - which resets cic.request -
+    // failed on the live site until the e2e suite caught it.
+    ? Object.assign(function cicCall(...args) {
+      markAgent(name);
+      return value.apply(cicApi, args);
+    }, value)
+    : value,
+])));
+
+/* "Copy for agent": what the person pastes into Claude's chat - read the
+ * skill, work only through window.cic, prove the connection with cic.hello(). */
+function agentMessage() {
+  return [
+    `Build my codeinchrome site ${SITE.domain} with Claude in Chrome. Its editor is open in my browser: ${location.origin}${location.pathname}`,
+    `1. First read the codeinchrome skill, all of it: open ${SITE.skillUrl} in a tab and read the page text (or run await cic.skill() in the editor tab).`,
+    '2. Work only by running JavaScript in the editor tab, through window.cic - never on this computer: nothing local reaches the site.',
+    '3. Run await cic.hello() in the editor tab and tell me what it says, so I know you are connected.',
+    'Then ask me what to build.',
+  ].join('\n');
+}
+document.getElementById('btnCopyAgent')?.addEventListener('click', async () => {
+  try {
+    await navigator.clipboard.writeText(agentMessage());
+    status("Copied. Paste it into Claude's chat beside this tab.");
+  } catch {
+    status('The browser did not allow copying to the clipboard.', true);
+  }
 });
 
 /* ───────────────────────── start ───────────────────────── */

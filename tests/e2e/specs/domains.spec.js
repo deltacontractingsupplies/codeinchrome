@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { waitForDns } from '../helpers/dns.js';
 import { httpsGet } from '../helpers/https.js';
@@ -21,7 +22,7 @@ const stamp = Date.now().toString(36);
 const siteName = `dm-${stamp}`;
 const custom = `${siteName}.cdtest.codeinchrome.com`;
 const email = `dm-${stamp}@codeinchrome.test`;
-const password = `dm-${stamp}-${Math.random().toString(36).slice(2)}-Tk8`;
+const password = `dm-${stamp}-${randomBytes(9).toString('hex')}-Tk8`;
 
 test.describe.configure({ mode: 'serial' });
 test.afterAll(async () => {

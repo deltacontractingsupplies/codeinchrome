@@ -65,14 +65,26 @@ set -a; . /opt/codeinchrome/etc/control-backup.env; set +a
 export RESTIC_CACHE_DIR=/var/cache/cic-restic
 install -d -m 0700 -o restserver -g restserver "$RESTIC_CACHE_DIR"
 stage=/var/backups/cic-control
-install -d -m 0700 "$stage"
+install -d -m 0700 -o codeinchrome -g codeinchrome "$stage"
 # sqlite's online backup API: a consistent copy while the app keeps writing.
 # Copying the live file with cp can capture a torn page mid-transaction.
-sqlite3 /var/lib/codeinchrome/control.sqlite ".backup '$stage/control.sqlite'"
-sqlite3 "$stage/control.sqlite" 'PRAGMA integrity_check' | grep -qx ok \
+# As codeinchrome, never root: the database runs in WAL mode, and if root
+# opened it first it would create control.sqlite-shm as root, which the app
+# (codeinchrome) could then not write - every sign-in would fail.
+as_app() { runuser -u codeinchrome -- "$@"; }
+# A copy left by a run that failed part-way (root's, before this ran as the
+# app) would make the next copy "attempt to write a readonly database".
+rm -f "$stage/control.sqlite"
+as_app sqlite3 -cmd '.timeout 10000' /var/lib/codeinchrome/control.sqlite ".backup '$stage/control.sqlite'"
+as_app sqlite3 "$stage/control.sqlite" 'PRAGMA integrity_check' | grep -qx ok \
   || { echo "the database copy failed its integrity check; not backing it up" >&2; exit 1; }
 as_owner() { setpriv --reuid=restserver --regid=restserver --init-groups -- "$@"; }
 [[ -f $RESTIC_REPOSITORY/config ]] || as_owner restic init >/dev/null
+# A run that died leaves its lock behind, and every later run refuses: that
+# stopped this backup for 32 hours (2026-09-22/24) with nothing but a failed
+# unit to show for it. unlock removes only STALE locks (a dead process, or
+# older than 30 minutes); a live run's lock stays.
+restic --no-cache unlock --quiet
 # restic reads the files as root (they are root-only); the repository must end
 # up owned by rest-server's user, so ownership is restored afterwards.
 restic --no-cache backup --quiet --tag control \
@@ -80,6 +92,9 @@ restic --no-cache backup --quiet --tag control \
 chown -R restserver:restserver "$RESTIC_REPOSITORY"
 as_owner restic forget --quiet --tag control --keep-daily 14 --keep-weekly 8 --keep-monthly 6 >/dev/null
 rm -f "$stage/control.sqlite"
+# Proof of a complete run, read by the control plane's monitoring (as the
+# app's user, so it can read it; never written on failure - set -e).
+as_app touch /var/lib/codeinchrome/control-backup.ok
 SCRIPT
 control 'chmod 0750 /opt/codeinchrome/bin/cic-control-backup'
 ok "cic-control-backup installed"

@@ -1,3 +1,4 @@
+import { randomBytes } from 'node:crypto';
 import { test, expect } from '@playwright/test';
 import { paidPlansOpen } from '../helpers/sales.js';
 import { confirmSignup, billingOf, lsSubscription, lsCancel, lsResume, lsCancelAllFor } from '../helpers/fixtures.js';
@@ -18,7 +19,7 @@ import { confirmSignup, billingOf, lsSubscription, lsCancel, lsResume, lsCancelA
 
 const stamp = Date.now().toString(36);
 const email = `bill-${stamp}@codeinchrome.test`;
-const password = `bill-${stamp}-${Math.random().toString(36).slice(2)}-Pq2`;
+const password = `bill-${stamp}-${randomBytes(9).toString('hex')}-Pq2`;
 
 // Lemon Squeezy's documented test card; accepted only in test mode.
 const TEST_CARD = { number: '4242424242424242', expiry: '12 / 34', cvc: '123' };
@@ -58,7 +59,7 @@ test('a new customer pays for Starter, and cancel/resume stay in step', async ({
 
   await test.step('choose Starter: the checkout is ours, in test mode, at the advertised price', async () => {
     await page.getByRole('button', { name: 'Choose Starter' }).click();
-    await page.waitForURL(/codeinchrome\.lemonsqueezy\.com\/checkout/);
+    await page.waitForURL(/^https:\/\/codeinchrome\.lemonsqueezy\.com\/checkout/);
     await expect(page.getByText('Test mode is currently enabled')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Starter' })).toBeVisible();
     await expect(page.getByText('$12.00 billed every month')).toBeVisible();
@@ -91,7 +92,7 @@ test('a new customer pays for Starter, and cancel/resume stay in step', async ({
     // Lemon Squeezy confirms on its own page; Continue follows redirect_url.
     await expect(page.getByRole('heading', { name: 'Thanks for your order!' })).toBeVisible({ timeout: 90_000 });
     await page.getByRole('button', { name: 'Continue' }).click();
-    await page.waitForURL(/app\.codeinchrome\.com\/billing/, { timeout: 60_000 });
+    await page.waitForURL(/^https:\/\/app\.codeinchrome\.com\/billing/, { timeout: 60_000 });
     await expect(page.getByText('Your payment is being confirmed')).toBeVisible();
 
     const state = await waitForBilling(page, (s) => s.plan === 'starter' && s.status === 'active', 'plan starter, status active');

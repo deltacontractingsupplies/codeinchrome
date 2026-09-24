@@ -46,5 +46,15 @@ class LegalTest extends TestCase
         $this->assertSame(1, preg_match('/^Expires: (\S+)$/m', $body, $m));
         $expires = \Illuminate\Support\Carbon::parse($m[1]);
         $this->assertTrue($expires->isFuture() && $expires->lessThanOrEqualTo(now()->addYear()), 'in the future, at most a year ahead');
+        // The policy is SECURITY.md on GitHub (scope, safe harbour), not the terms.
+        $this->assertStringContainsString("Policy: https://github.com/deltacontractingsupplies/codeinchrome/security/policy\n", $body);
+    }
+
+    public function test_every_public_page_links_the_public_source_code(): void
+    {
+        foreach (['/', '/pricing', '/terms', '/privacy', '/refunds', '/login', '/register'] as $page) {
+            $this->get($page)->assertOk()
+                ->assertSee('href="https://github.com/deltacontractingsupplies/codeinchrome"', false);
+        }
     }
 }

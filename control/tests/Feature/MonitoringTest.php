@@ -147,6 +147,12 @@ class MonitoringTest extends TestCase
         config(['fleet.admin_emails' => ['ops@codeinchrome.com']]);
 
         $this->actingAs(User::factory()->create(['email' => 'someone@example.com']))->get('/status')->assertNotFound();
+        // An operator's address registered by someone who cannot read its mail:
+        // unverified, so not an operator.
+        $claimed = User::factory()->create(['email' => 'ops@codeinchrome.com', 'email_verified_at' => null]);
+        $this->assertFalse($claimed->isOperator());
+        $this->actingAs($claimed)->get('/status')->assertNotFound();
+        $claimed->delete();
         $this->actingAs(User::factory()->create(['email' => 'OPS@codeinchrome.com']))->get('/status')
             ->assertOk()->assertSee('site shop.codeinchrome.com');
     }
@@ -203,6 +209,35 @@ class MonitoringTest extends TestCase
         Site::where('site_id', 'shop')->delete();
         $monitor->run();
         $this->assertSame(0, \App\Models\Monitor::where('key', 'like', 'site:shop%')->count());
+    }
+
+    public function test_the_control_planes_own_backup_is_watched_by_its_stamp(): void
+    {
+        $monitor = app(\App\Fleet\Monitoring::class);
+        // Not configured (development): not checked at all.
+        config(['fleet.control_backup_stamp' => null]);
+        $this->assertArrayNotHasKey('control:backup', $monitor->run());
+
+        // Beside the repository, not in the system temp dir (the internal disk).
+        $stamp = storage_path('framework/testing/control-backup-'.getmypid().'.ok');
+        @unlink($stamp);
+        config(['fleet.control_backup_stamp' => $stamp]);
+        try {
+            $this->assertFalse($monitor->run()['control:backup'][1], 'no stamp: no backup ever completed');
+            $this->assertStringContainsString('no complete backup recorded', $monitor->run()['control:backup'][2]);
+
+            touch($stamp, now()->subHours(2)->getTimestamp());
+            $this->assertTrue($monitor->run()['control:backup'][1], 'two hours old is fine');
+
+            // It once stopped for 32 hours on a stale lock with no alert.
+            touch($stamp, now()->subHours(32)->getTimestamp());
+            $check = $monitor->run()['control:backup'];
+            $this->assertFalse($check[1]);
+            $this->assertStringContainsString('newest complete backup 1 day ago', $check[2]);
+            $this->assertNotNull(\App\Models\Monitor::where('key', 'control:backup')->first(), 'kept, never retired as a gone site');
+        } finally {
+            @unlink($stamp);
+        }
     }
 
     public function test_a_site_whose_backups_stopped_is_alerted_once(): void

@@ -12,6 +12,17 @@
  * uploads) and are left out of the code view.
  */
 return [
+    /*
+     * Explore (App\Showcase\Explore): every free, live, built site, listed by
+     * its address only. Free sites are listed with no opt-out; the person is
+     * told before creating one.
+     */
+    'explore' => [
+        'on_home' => 12,
+        // The platform's own test accounts, never listed.
+        'exclude_email_suffixes' => ['@codeinchrome.test'],
+    ],
+
     'demos' => array_filter([
         'ember-and-oak' => [
             'site' => 'shop',

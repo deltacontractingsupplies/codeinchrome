@@ -35,6 +35,11 @@
     move it elsewhere at any time. When you delete a site, its container, disk and database
     are removed at once; its backups are deleted within 30 days.
 </p>
+<p data-terms-explore>
+    Sites on the free plan are listed publicly on our <a href="{{ route('explore') }}">Explore</a> page and home page,
+    by their address only, once they answer with a page of their own. There is no opt-out on the free plan; sites on a
+    paid plan are not listed. A site leaves the list as soon as it is deleted, paused or moved to a paid plan.
+</p>
 
 <h2>Acceptable use</h2>
 <p>You may not use the service to:</p>

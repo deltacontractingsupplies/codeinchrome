@@ -53,9 +53,11 @@
             <span>Your code, your server. Take it with you.</span>
             <nav class="flex flex-wrap gap-4">
                 <a href="{{ route('pricing') }}" class="hover:text-neutral-300">Pricing</a>
+                <a href="{{ route('explore') }}" class="hover:text-neutral-300">Explore</a>
                 <a href="{{ route('terms') }}" class="hover:text-neutral-300">Terms</a>
                 <a href="{{ route('privacy') }}" class="hover:text-neutral-300">Privacy</a>
                 <a href="{{ route('refunds') }}" class="hover:text-neutral-300">Refunds</a>
+                <a href="{{ config('legal.source.url') }}" class="hover:text-neutral-300" rel="noopener" data-source-link>Source on GitHub</a>
                 <a href="mailto:{{ config('legal.support_email') }}" class="hover:text-neutral-300">{{ config('legal.support_email') }}</a>
             </nav>
         </div>
