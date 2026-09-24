@@ -460,6 +460,18 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"paths": paths, "truncated": truncated}))
 	})
 
+	// Every site's CPU counter (sites/cpu.go), for spotting a miner.
+	mux.HandleFunc("GET /v1/cpu", func(w http.ResponseWriter, r *http.Request) {
+		cpu, err := mgr.CPU(r.Context())
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, fail("cpu_unreadable", err.Error()))
+			return
+		}
+		if cpu == nil {
+			cpu = []sites.SiteCPU{}
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"sites": cpu, "at": time.Now().UTC()}))
+	})
 	// A whole-site malware scan (sites/scan.go), run by the control plane on a
 	// schedule. A scan that cannot run is an error, never "clean".
 	mux.HandleFunc("POST /v1/sites/{id}/scan", func(w http.ResponseWriter, r *http.Request) {
@@ -467,6 +479,9 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, fail("scan_failed", err.Error()))
 			return
+		}
+		if found == nil {
+			found = []sites.Finding{}
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"findings": found, "clean": len(found) == 0}))
 	})

@@ -164,7 +164,7 @@ return [
         'alert_below' => (int) env('CIC_STOCK_ALERT_BELOW', 3),
     ],
 
-    'min_agent_version' => '0.26.7',
+    'min_agent_version' => '0.26.8',
 
     // Touched by the control plane's backup after each complete run
     // (infra/setup-control-backup.sh); Monitoring alerts when it is older

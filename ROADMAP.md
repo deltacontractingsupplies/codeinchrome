@@ -542,7 +542,12 @@ be hard to abuse. Every item is verified live, never assumed.
       and made persistent across reboots.
 - [ ] **Scan detector**: count distinct destinations per container over time;
       a container that fans out (a scan) is cut off and the operator told.
-- [ ] **CPU/mining detection**: sustained CPU at the ceiling is flagged.
+- [x] **CPU/mining detection**: sustained CPU at the ceiling is flagged.
+      DONE 2026-09-25 (agent 0.26.8): each site's cgroup CPU counter, read
+      every 5 minutes (abuse:cpu); at 90%+ of its limit the owner is emailed
+      after 30 minutes and the site paused after 2 hours (not banned - a busy
+      app can run hot); abuse:resume brings it back. A container restart is
+      never read as a spike.
 
 **Inbound / origin**
 - [ ] **Origin reachable only through Cloudflare** (80/443): needs custom domains
