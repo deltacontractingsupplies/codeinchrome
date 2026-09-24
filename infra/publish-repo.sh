@@ -99,13 +99,9 @@ rm -rf .git/refs/original
 # The scrub: every TEXT file of every commit (lock files excluded - their
 # hashes must stay byte-exact), every message, every note.
 if [[ -f $scrub ]]; then
-  cat > "$work/scrub-tree.sh" <<SCRUB
-git ls-files -z | grep -zvE '(^|/)(composer\.lock|package-lock\.json|yarn\.lock|pnpm-lock\.yaml)$' \\
-  | xargs -0 grep -IlZ '' 2>/dev/null | xargs -0 perl -pi "$scrub" 2>/dev/null || true
-SCRUB
   env_filter=":"
   [[ -n $author ]] && env_filter="export GIT_AUTHOR_NAME='${author_name//\'/}' GIT_AUTHOR_EMAIL='$author_email' GIT_COMMITTER_NAME='${author_name//\'/}' GIT_COMMITTER_EMAIL='$author_email'"
-  FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --tree-filter "bash '$work/scrub-tree.sh'" \
+  FILTER_BRANCH_SQUELCH_WARNING=1 git filter-branch -f --tree-filter "perl '$root/infra/publish-scrub-tree.pl' '$scrub'" \
     --msg-filter "perl -p '$scrub'" --env-filter "$env_filter" -- --all >/dev/null
   rm -rf .git/refs/original
   git checkout -q -f HEAD
@@ -160,7 +156,12 @@ if [[ -f $deny ]]; then
   hits=0
   while IFS= read -r re; do
     [[ -z $re || $re == \#* ]] && continue
-    if grep -qE -- "$re" "$text"; then echo "  still in history: /$re/ ($(grep -cE -- "$re" "$text") line(s))" >&2; hits=$((hits+1)); fi
+    if grep -qE -- "$re" "$text"; then
+      echo "  still in history: /$re/ ($(grep -cE -- "$re" "$text") line(s)), first in:" >&2
+      # Where, not what: the nearest file or commit header above the first match.
+      awk -v re="$re" '/^(diff --git|commit )/ {where=$0} $0 ~ re {print "    " where; exit}' "$text" >&2
+      hits=$((hits+1))
+    fi
   done < "$deny"
   rm -f "$text"
   (( hits == 0 )) || die "$hits denied pattern(s) remain (infra/publish-deny.local); nothing published"
