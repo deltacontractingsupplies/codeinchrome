@@ -552,8 +552,9 @@ be hard to abuse. Every item is verified live, never assumed.
       container's address. Site, HTTPS, DNS and MySQL still work; SMTP,
       metadata, private ranges and RDP are refused. LEFT: rolled out to h3/h4
       and made persistent across reboots.
-- [ ] **Scan detector**: count distinct destinations per container over time;
+- [x] **Scan detector**: count distinct destinations per container over time;
       a container that fans out (a scan) is cut off and the operator told.
+      DONE 2026-09-25 (agent 0.27.1): each site's outbound spread from the host's connection table (GET /v1/egress); abuse:egress every 2 minutes pauses a site reaching 150+ distinct public hosts or 100+ distinct ports and emails the owner (paused, not banned). Verified live: one request from a site reads as 1 connection, 1 host.
 - [x] **CPU/mining detection**: sustained CPU at the ceiling is flagged.
       DONE 2026-09-25 (agent 0.26.8): each site's cgroup CPU counter, read
       every 5 minutes (abuse:cpu); at 90%+ of its limit the owner is emailed
@@ -583,8 +584,9 @@ be hard to abuse. Every item is verified live, never assumed.
       keeping a deleted site's access logs for 30 days as evidence (phishing
       kits delete their sites within hours) - DONE 2026-09-25 (agent 0.27.0,
       /var/log/caddy/deleted, pruned daily; said in the privacy policy).
-- [ ] **Push to GitHub** so the community can help find abuse and security
+- [x] **Push to GitHub** so the community can help find abuse and security
       gaps (SECURITY.md, private reporting already on).
+      DONE: pull requests #1-#5 on the recreated public repository, every one through the leak checks, CI, CodeQL and the contributor-agreement check.
 
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):
