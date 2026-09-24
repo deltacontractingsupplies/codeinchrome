@@ -44,6 +44,39 @@ Addresses outside this fleet that must never be touched are listed in
 - Stock: `Stock::available()` counts paid plans only; trials use what is left.
   Monitoring alerts when fewer than `CIC_STOCK_ALERT_BELOW` (3) remain.
 
+### Paid plans on or off: one switch
+
+`CIC_PAID_PLANS_OPEN` in the repository's `.env` (`App\Billing\Sales`).
+
+- **Off** (until the payment provider approves the store): only the free plan is
+  shown or sold, checkout refuses, no trial runs out, no stock alert for paid
+  plans. Customers who already pay keep and see their plan.
+- **To open:** set `CIC_PAID_PLANS_OPEN=true`, run `infra/deploy-control.sh`, then
+  on the control server `php artisan trials:restart --dry-run` (who would get a
+  trial) and `php artisan trials:restart` - every free account gets a full
+  trial starting then, and an email. Then run the purchase e2e spec
+  (`tests/e2e/specs/billing.spec.js`), which skips itself while paid is off.
+
+## The public repository
+
+The repository is published as a cleaned copy, never pushed from here:
+`infra/publish-repo.sh` rewrites a fresh clone's history and refuses to publish
+on any finding - `.env` values, private keys, anything in the uncommitted
+`infra/publish-deny.local` (other businesses, personal details), every server
+address in `infra/hosts.local.env`, gitleaks findings, binary artifacts.
+
+- First publication, after the owner has made the `codeinchrome` organization
+  and run `gh auth login` + `gh auth refresh -s admin:org`: `infra/go-public.sh`
+  (deploys, checks Google sign-in, publishes, applies the GitHub rules, reads
+  them back).
+- The GitHub rules are code: `infra/github-setup.sh` (re-run it after changing
+  them): `main` takes reviewed pull requests only, with CI and the contributor
+  agreement (`.github/workflows/cla.yml`, signatures on branch
+  `cla-signatures`) required; secret scanning with push protection.
+- Licence: FSL-1.1-ALv2 (`LICENSE.md`); contributions under `CLA.md`.
+- Never commit a server address, a secret, or another business's name: CI's
+  gitleaks job and the publish checks refuse them, but the rule comes first.
+
 ## Security guarantees, and where they are enforced
 
 | Guarantee | Enforced by | Proved by |
