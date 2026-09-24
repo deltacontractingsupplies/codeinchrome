@@ -72,7 +72,8 @@ deny_rules=$root/infra/publish-deny.local
 # then denied - so a host added later is covered without editing any rule.
 registry_ips=()
 if [[ -f $root/infra/hosts.local.env ]]; then
-  mapfile -t registry_ips < <(grep -E '^CIC_(HOSTS|CONTROL_HOST|FORBIDDEN_HOSTS)=' "$root/infra/hosts.local.env" \
+  # A read loop, not mapfile: macOS ships bash 3.2.
+  while IFS= read -r ip; do registry_ips+=("$ip"); done < <(grep -E '^CIC_(HOSTS|CONTROL_HOST|FORBIDDEN_HOSTS)=' "$root/infra/hosts.local.env" \
     | grep -oE '([0-9]{1,3}\.){3}[0-9]{1,3}' | sort -u)
 fi
 mkdir -p "$work.rules"
