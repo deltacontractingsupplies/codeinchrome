@@ -21,6 +21,12 @@ final class Sales
         return (bool) config('billing.paid_open');
     }
 
+    /** A plan's name as shown: while nothing is for sale the free plan is no trial, just "Free". */
+    public static function name(array $plan): string
+    {
+        return ! self::open() && (int) $plan['price'] === 0 ? 'Free' : $plan['name'];
+    }
+
     /** The plans shown and sold right now, keyed like config('billing.plans'). */
     public static function plans(): array
     {

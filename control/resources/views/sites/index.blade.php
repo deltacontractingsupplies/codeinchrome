@@ -18,7 +18,7 @@
     <div>
         <h1 class="text-2xl font-semibold text-white">Your sites</h1>
         <p class="mt-1 text-sm text-neutral-400">
-            {{ $plan['name'] }} plan, {{ $sites->count() }} of {{ $plan['sites'] }} {{ Str::plural('site', $plan['sites']) }} used{{ $sites->whereNotNull('usage_at')->isNotEmpty() ? ', '.number_format($sites->sum(fn ($s) => (int) $s->totalBytes()) / 1073741824, 1).' of '.$plan['storage_gb'].' GB of storage' : '' }}.
+            {{ \App\Billing\Sales::name($plan) }} plan, {{ $sites->count() }} of {{ $plan['sites'] }} {{ Str::plural('site', $plan['sites']) }} used{{ $sites->whereNotNull('usage_at')->isNotEmpty() ? ', '.number_format($sites->sum(fn ($s) => (int) $s->totalBytes()) / 1073741824, 1).' of '.$plan['storage_gb'].' GB of storage' : '' }}.
             {{-- Capacity as it was measured, never CPU or RAM figures. --}}
             @if ($cap = app(\App\Billing\Capacity::class)->forPlan(auth()->user()->plan ?? 'free'))
                 Each site handles up to about {{ number_format($cap['concurrent_visitors']) }} visitors at once<a href="{{ route('pricing') }}#capacity" class="underline">*</a>.

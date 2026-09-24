@@ -6,7 +6,7 @@
         @php($cap = app(\App\Billing\Capacity::class)->forPlan($key))
         <div class="flex flex-col rounded-lg border p-6 {{ $paid ? 'border-teal-700/70 ring-1 ring-teal-500/30' : 'border-neutral-800' }}" data-plan="{{ $key }}">
             <div class="flex items-start justify-between gap-3">
-                <div class="font-medium text-neutral-100">{{ $plan['name'] }}</div>
+                <div class="font-medium text-neutral-100">{{ \App\Billing\Sales::name($plan) }}</div>
                 @if ($paid)
                     @include('partials.stock', ['left' => $stock[$key] ?? null])
                 @endif

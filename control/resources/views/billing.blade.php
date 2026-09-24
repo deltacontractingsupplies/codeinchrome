@@ -3,7 +3,7 @@
 @section('content')
 <h1 class="text-2xl font-semibold text-white">Billing</h1>
 <p class="mt-1 text-sm text-neutral-400">
-    You are on the <strong class="text-neutral-200">{{ $plans[$current]['name'] ?? $current }}</strong> plan.
+    You are on the <strong class="text-neutral-200">{{ \App\Billing\Sales::name($plans[$current] ?? auth()->user()->planConfig()) }}</strong> plan.
     @if ($subscription)
         Subscription {{ str_replace('_', ' ', $subscription->status) }}@if ($subscription->renews_at && $subscription->status === 'active'), renews {{ $subscription->renews_at->toFormattedDateString() }}@endif
         @if ($subscription->ends_at), ends {{ $subscription->ends_at->toFormattedDateString() }}@endif.
@@ -21,7 +21,7 @@
     @foreach ($plans as $key => $plan)
         <div class="rounded-lg border p-5 {{ $key === $current ? 'border-teal-600' : 'border-neutral-800' }}">
             <div class="flex items-start justify-between gap-3">
-                <div class="font-medium text-neutral-100">{{ $plan['name'] }}</div>
+                <div class="font-medium text-neutral-100">{{ \App\Billing\Sales::name($plan) }}</div>
                 @if ($plan['price'] > 0 && $key !== $current)
                     @include('partials.stock', ['left' => $stock[$key] ?? null])
                 @endif

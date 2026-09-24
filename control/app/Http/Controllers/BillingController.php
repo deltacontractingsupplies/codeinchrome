@@ -15,7 +15,9 @@ class BillingController extends Controller
 
         return view('billing', [
             'current' => $user->plan,
-            'plans' => \App\Billing\Sales::plans(),
+            // What is for sale - and always the plan this account is on, so a
+            // customer who already pays sees it even while it is not sold.
+            'plans' => \App\Billing\Sales::plans() + [$request->user()->plan => $request->user()->planConfig()],
             'subscription' => $user->subscriptions()->latest()->first(),
         ]);
     }

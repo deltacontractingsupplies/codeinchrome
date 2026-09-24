@@ -54,6 +54,16 @@ class SalesTest extends TestCase
         $this->assertSame('free', $user->fresh()->plan);
     }
 
+    public function test_a_customer_who_already_pays_still_sees_their_plan(): void
+    {
+        $paying = User::factory()->create(['plan' => 'starter']);
+
+        $this->actingAs($paying)->get(route('billing'))->assertOk()
+            ->assertSee('You are on the <strong class="text-neutral-200">Starter</strong> plan.', false)
+            ->assertSee('Current plan');
+        $this->actingAs($paying)->get(route('dashboard'))->assertOk()->assertSee('Starter plan');
+    }
+
     public function test_no_trial_runs_out_while_nothing_is_for_sale(): void
     {
         Notification::fake();
