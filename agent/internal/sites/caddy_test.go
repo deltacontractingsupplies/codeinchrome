@@ -184,6 +184,9 @@ func TestEveryAppResponseIsCheckedForDownloadsAndOffsiteRedirects(t *testing.T) 
 				t.Errorf("%s: missing %q:\n%s", s.ID, want, out)
 			}
 		}
+		if strings.Contains(out, "copy_response_headers") {
+			t.Errorf("%s: copy_response_headers doubles every header of an allowed redirect", s.ID)
+		}
 		// One value per line: Caddy's response header matcher silently ignored
 		// the rest of a line with several (found testing on a host).
 		for _, line := range strings.Split(out, "\n") {

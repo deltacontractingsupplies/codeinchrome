@@ -12,5 +12,5 @@
 @endif
 <p class="mt-3 text-xs text-neutral-500">
     Every site on the free plan is listed here by its address, and only its address - never who made it or anything inside it.
-    Built by our users, not checked by us. Something wrong with one? <a href="mailto:{{ config('legal.support_email') }}?subject=Report%20a%20site" class="underline">Report it</a>.
+    Built by our users, not checked by us. Something wrong with one? <a href="{{ route('report') }}" class="underline">Report it</a>.
 </p>

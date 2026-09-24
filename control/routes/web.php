@@ -26,6 +26,9 @@ use Illuminate\Support\Facades\Route;
 Route::view('/', 'welcome')->name('home');
 // Every free, live, built site, by its address only (App\Showcase\Explore).
 Route::get('/explore', fn (\App\Showcase\Explore $explore) => view('explore', ['sites' => $explore->listed()]))->name('explore');
+// Anyone can report a hosted site (AbuseReportController).
+Route::get('/report', [\App\Http\Controllers\AbuseReportController::class, 'show'])->name('report');
+Route::post('/report', [\App\Http\Controllers\AbuseReportController::class, 'store'])->middleware('throttle:abuse-report')->name('report.store');
 Route::view('/pricing', 'pricing')->name('pricing');
 // RFC 9116: how to report a vulnerability. The contact is the support
 // address; Expires is kept a year ahead, as the RFC asks it never lapse.

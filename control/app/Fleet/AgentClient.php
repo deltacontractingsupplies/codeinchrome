@@ -384,6 +384,12 @@ class AgentClient
         return ['paths' => $r['paths'] ?? [], 'truncated' => (bool) ($r['truncated'] ?? false)];
     }
 
+    /** Every site's CPU counter on this host (agent sites/cpu.go): {sites: [...], at}. */
+    public function cpu(): array
+    {
+        return $this->send('get', '/v1/cpu');
+    }
+
     /**
      * A whole-site malware scan (agent sites/scan.go): list of findings, each
      * {path, kind: malware|obfuscated, detail}. Throws if the scan could not

@@ -58,6 +58,7 @@
                 <a href="{{ route('privacy') }}" class="hover:text-neutral-300">Privacy</a>
                 <a href="{{ route('refunds') }}" class="hover:text-neutral-300">Refunds</a>
                 <a href="{{ config('legal.source.url') }}" class="hover:text-neutral-300" rel="noopener" data-source-link>Source on GitHub</a>
+                <a href="{{ route('report') }}" class="hover:text-neutral-300">Report a site</a>
                 <a href="mailto:{{ config('legal.support_email') }}" class="hover:text-neutral-300">{{ config('legal.support_email') }}</a>
             </nav>
         </div>
