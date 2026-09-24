@@ -358,7 +358,8 @@ behaviour: read its explorer and workbench code and match it, rather than guess.
       refuses any commit that carries one (author, committer, message or
       co-author line - tested on the published history, which it refuses).
       LEFT: the history published on 2026-09-24 carries the personal address
-      (129 commits, one notes commit, and the co-author lines GitHub wrote into
+      (GitHub's user filter hides it - the account behind it is not public -
+      but every commit's .patch and any clone show it) (129 commits, one notes commit, and the co-author lines GitHub wrote into
       pull requests #1 and #2). Removing it needs the history rewritten
       on GitHub; only with the owner's go-ahead (a force-push, or a fresh
       repository).
@@ -425,9 +426,9 @@ on GitHub, not assumed.
 **On GitHub**
 - [x] Repository page: homepage https://codeinchrome.com, topics, the
       licence named in the README.
-- [ ] **Code scanning** (CodeQL default setup: Go, JavaScript, Actions) on
+- [x] **Code scanning** (CodeQL default setup: Go, JavaScript, Actions) on
       pull requests and weekly; zero open alerts, or each one fixed.
-- [ ] **Workflow audit** (zizmor): the contributor-agreement action is from an
+- [x] **Workflow audit** (zizmor): the contributor-agreement action is from an
       ARCHIVED repository (no more fixes) and runs on pull_request_target
       with a write token. Replace it with our own small check (no pull-request
       code ever runs, inputs never interpolated), keep the same required
@@ -435,8 +436,14 @@ on GitHub, not assumed.
 - [x] CI actions pinned to commits, no persisted checkout token, Dependabot
       version updates (pull request #3); the agent's LSP test race it
       exposed, fixed.
-- [ ] After every change: secret-scanning, Dependabot and code-scanning
+- [x] After every change: secret-scanning, Dependabot and code-scanning
       alerts read back as zero.
+      DONE 2026-09-24, read back from GitHub after pull request #5: code
+      scanning 0 open (CodeQL extended suite; its JavaScript findings fixed,
+      its seven Go findings read against the code and dismissed with the
+      reason), secret scanning 0, Dependabot 0. The contributor agreement is
+      now .github/cla/cla.sh (16 tests, zizmor clean in CI); its first live
+      run set the required status on pull request #5.
 
 **Security, double-checked now that the code is public**
 - [x] Whole-history scan again, on GitHub's copy: gitleaks, the deny list,
@@ -458,8 +465,10 @@ on GitHub, not assumed.
 - [ ] Rotate what lived on a laptop (defence in depth - none is in the
       history): the Lemon Squeezy API key and webhook secret, the Cloudflare
       token. Owner, in each dashboard.
-- [ ] SECURITY.md reporting path tested: private vulnerability reporting
-      opens a draft advisory (checked on GitHub).
+- [x] SECURITY.md reporting path tested: private vulnerability reporting
+      opens a draft advisory (checked on GitHub). DONE 2026-09-24: reporting
+      enabled (API), the policy page shows "Report a vulnerability", its form
+      asks a signed-out visitor to sign in, security.txt's Policy points there.
 - [ ] Only our emails in the published history (above): the owner decides
       between a one-time rewrite and a fresh repository.
 
