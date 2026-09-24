@@ -151,7 +151,11 @@ for i in "${!note_keys[@]}"; do
     GIT_AUTHOR_NAME=$author_name GIT_AUTHOR_EMAIL=$author_email GIT_COMMITTER_NAME=$author_name GIT_COMMITTER_EMAIL=$author_email \
       git notes add -f -F "${note_files[$i]}" "$new"
   else
-    git notes add -f -F "${note_files[$i]}" "$new"
+    # The repository's own identity (the one its commits carry), not this
+    # machine's global one - which may be a different, personal address.
+    GIT_AUTHOR_NAME=$(git -C "$root" config user.name) GIT_AUTHOR_EMAIL=$(git -C "$root" config user.email) \
+      GIT_COMMITTER_NAME=$(git -C "$root" config user.name) GIT_COMMITTER_EMAIL=$(git -C "$root" config user.email) \
+      git notes add -f -F "${note_files[$i]}" "$new"
   fi
 done
 ok "clean copy at .publish/repo ($(git rev-list --count HEAD) commits, ${#note_keys[@]} note(s) carried over)"
