@@ -68,7 +68,7 @@ func TestExportRunsAsTheSitesOwnUserWithThePasswordNeverInArgv(t *testing.T) {
 		t.Fatalf("export content %q", sql.String())
 	}
 	cmd := (*calls)[0]
-	for _, want := range []string{"docker exec -e MYSQL_PWD cic-mysql mysqldump", "-u " + DBUser(id), "--single-transaction", DBName(id)} {
+	for _, want := range []string{"docker exec -u 65534:65534 -e MYSQL_PWD cic-mysql mysqldump", "-u " + DBUser(id), "--single-transaction", DBName(id)} {
 		if !strings.Contains(cmd, want) {
 			t.Fatalf("export command %q lacks %q", cmd, want)
 		}
@@ -144,5 +144,37 @@ func TestAFailedImportSaysTheOldDatabaseIsKept(t *testing.T) {
 	}
 	if _, err := m.BeforeImport(id); err != nil {
 		t.Fatal("the pre-import copy is missing after a failed import")
+	}
+}
+
+// A dump is the customer's file, read by the mysql client: its own commands
+// (\! and system: a shell; tee: write a file; source: read one) must be off,
+// and the client must not run as root in the shared MySQL container.
+func TestImportTurnsOffTheClientsCommandsAndRunsAsNobody(t *testing.T) {
+	m, id := withDB(t)
+	calls, _ := fakeMySQL(t, "", false)
+	dump := "\\! touch /tmp/pwned\nsystem id\ntee /tmp/x\nsource /etc/passwd\nCREATE TABLE t (id int);\n"
+	_ = m.ImportDB(context.Background(), id, strings.NewReader(dump))
+	var importCall string
+	for _, c := range *calls {
+		if strings.Contains(c, " mysql ") && !strings.Contains(c, "mysqldump") {
+			importCall = c
+		}
+	}
+	if importCall == "" {
+		t.Fatalf("no mysql import call in %v", *calls)
+	}
+	for _, want := range []string{"--skip-system-command", "--commands=FALSE", "exec -u 65534:65534"} {
+		if !strings.Contains(importCall, want) {
+			t.Errorf("import call lacks %q: %s", want, importCall)
+		}
+	}
+	if i, j := strings.Index(importCall, "--commands=FALSE"), strings.Index(importCall, DBName(id)); i < 0 || j < i {
+		t.Errorf("the options must come before the database name: %s", importCall)
+	}
+	for _, c := range *calls {
+		if strings.HasPrefix(c, "docker exec") && !strings.Contains(c, "-u 65534:65534") {
+			t.Errorf("a MySQL tool runs as root: %s", c)
+		}
 	}
 }
