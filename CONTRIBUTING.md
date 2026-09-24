@@ -12,8 +12,10 @@ documentation, security hardening and new features.
    - control plane: `cd control && PAO_DISABLE=1 php artisan test`
    - agent: `cd agent && go vet ./... && go test -race ./...`
    - end to end (optional locally): `tests/e2e`, see its README
-4. **Open a pull request** using the template. On your first one you will be
-   asked to agree to the [Contributor License Agreement](CLA.md) with a comment.
+4. **Open a pull request** using the template. On your first one a check asks
+   you to agree to the [Contributor License Agreement](CLA.md): read it, then
+   comment exactly `I have read the CLA Document and I hereby sign the CLA`.
+   Your agreement is recorded once, for all your future pull requests.
 5. **Review.** CI must pass - tests, static checks and a secret scan - and a
    maintainer reviews every pull request. Nothing reaches `main` without that
    review; `main` accepts no direct pushes.

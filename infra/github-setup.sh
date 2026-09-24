@@ -63,6 +63,17 @@ gh api -X PUT "repos/$repo/actions/permissions/workflow" --silent \
   -f default_workflow_permissions=read -F can_approve_pull_request_reviews=false
 ok "workflows: read-only token, cannot approve pull requests"
 
+# ── where contributor-agreement signatures are kept ──────────────────────────
+# .github/workflows/cla.yml commits signatures/cla.json to this branch; main
+# only takes reviewed pull requests, so they cannot live there. An orphan
+# branch from the empty tree: no code of its own.
+if ! gh api "repos/$repo/branches/cla-signatures" --silent 2>/dev/null; then
+  empty_tree=4b825dc642cb6eb9a060e54bf8d69288fbee4904
+  commit=$(gh api -X POST "repos/$repo/git/commits" -f message="Contributor agreement signatures" -f tree=$empty_tree -q .sha)
+  gh api -X POST "repos/$repo/git/refs" --silent -f ref=refs/heads/cla-signatures -f sha="$commit"
+fi
+ok "branch cla-signatures for contributor-agreement signatures"
+
 # ── the ruleset on main ──────────────────────────────────────────────────────
 # The required checks are the CI job names in .github/workflows/ci.yml.
 name="main: reviewed pull requests only"
@@ -92,7 +103,8 @@ ruleset=$(cat <<JSON
           { "context": "no secrets in the change (gitleaks)" },
           { "context": "agent (go)" },
           { "context": "control plane (laravel)" },
-          { "context": "infra scripts" }
+          { "context": "infra scripts" },
+          { "context": "CLAAssistant" }
         ]
     } }
   ]
