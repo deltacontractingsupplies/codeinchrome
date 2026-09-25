@@ -34,6 +34,8 @@ class FileManagerApiTest extends TestCase
             '127.0.0.1:944*/v1/sites/*/tree*' => fn ($r) => str_contains($r->url(), 'confirm=1')
                 ? Http::response(['ok' => true, 'deleted' => true])
                 : Http::response(['ok' => false, 'error' => 'needs_confirm', 'hint' => 'Pass confirm=1.'], 409),
+            '127.0.0.1:944*/v1/sites/*/grep*' => Http::response(['ok' => true, 'hits' => [['path' => '/routes/web.php', 'line' => 3, 'text' => "Route::get('/')"]], 'truncated' => false]),
+            '127.0.0.1:944*/v1/sites/*/find*' => Http::response(['ok' => true, 'entries' => [['path' => '/app/Models', 'dir' => true, 'size' => 96, 'mtime' => 1]], 'files' => 12, 'bytes' => 4096, 'truncated' => false]),
             '127.0.0.1:944*/v1/sites/*/search*' => Http::response(['ok' => true, 'hits' => [['path' => '/routes/web.php', 'line' => 2, 'text' => 'checkout']]]),
             '127.0.0.1:944*/v1/sites/*/files/*' => Http::response(['ok' => true, 'done' => 'x']),
         ]);
@@ -97,6 +99,8 @@ class FileManagerApiTest extends TestCase
         $as->postJson($this->url('files.unzip'), ['archive' => '/a.zip', 'into' => '/b'])->assertNotFound();
         $as->deleteJson($this->url('files.tree.destroy', ['path' => '/a', 'confirm' => 1]))->assertNotFound();
         $as->getJson($this->url('files.search', ['q' => 'xx']))->assertNotFound();
+        $as->getJson($this->url('files.grep', ['pattern' => 'xx']))->assertNotFound();
+        $as->getJson($this->url('files.find'))->assertNotFound();
         $as->get($this->url('files.download', ['path' => '/a']))->assertNotFound();
         $as->post($this->url('files.upload'), ['path' => '/a', 'file' => UploadedFile::fake()->create('a.txt', 1)], ['Accept' => 'application/json'])->assertNotFound();
         Http::assertNothingSent();
@@ -111,5 +115,41 @@ class FileManagerApiTest extends TestCase
         $this->assertNotContains('throttle:command', $route->gatherMiddleware());
         $limit = \Illuminate\Support\Facades\RateLimiter::limiter('search')(request());
         $this->assertGreaterThanOrEqual(60, (is_array($limit) ? $limit[0] : $limit)->maxAttempts);
+    }
+
+    public function test_grep_and_find_carry_the_shells_flags_to_the_host(): void
+    {
+        $as = $this->actingAs($this->owner);
+        $as->getJson($this->url('files.grep', ['pattern' => 'Route::(get|post)', 'regex' => 1, 'icase' => 0,
+            'under' => '/routes', 'include' => ['*.php', '*.blade.php']]))
+            ->assertOk()->assertJsonPath('hits.0.line', 3)->assertJsonPath('truncated', false);
+        // Repeated include keys (Go reads a list that way), booleans as 1, and
+        // a false flag left out rather than sent as "0".
+        Http::assertSent(function ($r) {
+            $q = parse_url($r->url(), PHP_URL_QUERY) ?? '';
+
+            return str_contains($r->url(), '/v1/sites/shop/grep?')
+                && str_contains($q, 'include=%2A.php&include=%2A.blade.php') && str_contains($q, 'regex=1')
+                && str_contains($q, 'pattern=Route%3A%3A%28get%7Cpost%29') && ! str_contains($q, 'icase');
+        });
+
+        $as->getJson($this->url('files.find', ['name' => '*.php', 'type' => 'd', 'maxdepth' => 2, 'newer' => 1700000000]))
+            ->assertOk()->assertJsonPath('entries.0.path', '/app/Models')->assertJsonPath('bytes', 4096);
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/v1/sites/shop/find?')
+            && str_contains($r->url(), 'type=d') && str_contains($r->url(), 'maxdepth=2') && str_contains($r->url(), 'newer=1700000000'));
+    }
+
+    public function test_grep_and_find_refuse_flags_the_host_would_not_understand(): void
+    {
+        $as = $this->actingAs($this->owner);
+        $as->getJson($this->url('files.grep'))->assertStatus(422);
+        $as->getJson($this->url('files.grep', ['pattern' => str_repeat('a', 201)]))->assertStatus(422);
+        $as->getJson($this->url('files.grep', ['pattern' => 'x', 'include' => array_fill(0, 11, '*.php')]))->assertStatus(422);
+        $as->getJson($this->url('files.find', ['type' => 'l']))->assertStatus(422);
+        $as->getJson($this->url('files.find', ['newer' => 'yesterday']))->assertStatus(422);
+        Http::assertNothingSent();
+        foreach (['files.grep', 'files.find'] as $name) {
+            $this->assertContains('throttle:search', app('router')->getRoutes()->getByName($name)->gatherMiddleware());
+        }
     }
 }

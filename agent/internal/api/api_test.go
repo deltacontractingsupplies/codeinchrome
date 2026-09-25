@@ -132,3 +132,32 @@ func TestIndexingRefusesABadBodyAnInvalidIdAndAnUnknownSite(t *testing.T) {
 		}
 	}
 }
+
+// cic.sh's grep and find: the flags reach the sites package, and a bad
+// pattern or a newer that is not a time is a 400, not an empty answer.
+func TestGrepAndFindCarryTheirFlags(t *testing.T) {
+	srv, app := server(t)
+	os.MkdirAll(filepath.Join(app, "routes"), 0o755)
+	os.WriteFile(filepath.Join(app, "routes", "web.php"), []byte("<?php\nRoute::get('/a');\nRoute::post('/b');\n"), 0o644)
+
+	_, j := call(t, "GET", srv.URL+"/v1/sites/shop/grep?pattern=Route::(get|post)&regex=1&include=*.php&under=/routes", "")
+	if hits, _ := j["hits"].([]any); len(hits) != 2 {
+		t.Fatalf("grep -E: %v", j)
+	}
+	_, j = call(t, "GET", srv.URL+"/v1/sites/shop/grep?pattern=ROUTE&icase=1&include=*.css", "")
+	if hits, _ := j["hits"].([]any); len(hits) != 0 {
+		t.Fatalf("--include=*.css matched a .php file: %v", j)
+	}
+	if res, _ := call(t, "GET", srv.URL+"/v1/sites/shop/grep?pattern=(&regex=1", ""); res.StatusCode != 400 {
+		t.Fatalf("a broken regex: %d, want 400", res.StatusCode)
+	}
+
+	_, j = call(t, "GET", srv.URL+"/v1/sites/shop/find?name=*.php&type=f", "")
+	entries, _ := j["entries"].([]any)
+	if len(entries) != 1 || entries[0].(map[string]any)["path"] != "/routes/web.php" {
+		t.Fatalf("find -name *.php: %v", j)
+	}
+	if res, _ := call(t, "GET", srv.URL+"/v1/sites/shop/find?newer=yesterday", ""); res.StatusCode != 400 {
+		t.Fatalf("newer=yesterday: %d, want 400", res.StatusCode)
+	}
+}

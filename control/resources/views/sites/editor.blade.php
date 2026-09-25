@@ -50,6 +50,8 @@
      data-unzip="{{ route('files.unzip', $site) }}"
      data-tree="{{ route('files.tree.destroy', $site) }}"
      data-search="{{ route('files.search', $site) }}"
+     data-grep="{{ route('files.grep', $site) }}"
+     data-find="{{ route('files.find', $site) }}"
      data-upload="{{ route('files.upload', $site) }}"
      data-download="{{ route('files.download', $site) }}"
      data-skill="{{ route('agent.skill') }}"
@@ -207,7 +209,7 @@
                 <div id="termView" class="panel-body">
                     <pre id="termOut" class="term-out" aria-live="polite"></pre>
                     <form id="termForm" class="term-line">
-                        <select id="termTool" aria-label="Tool"><option>artisan</option><option>composer</option></select>
+                        <select id="termTool" aria-label="Tool"><option>artisan</option><option>composer</option><option value="sh">sh</option></select>
                         <input id="termArgs" autocomplete="off" spellcheck="false" placeholder="migrate:status" aria-label="Arguments">
                         <button type="submit">Run</button>
                     </form>

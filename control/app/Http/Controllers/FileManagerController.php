@@ -88,6 +88,46 @@ class FileManagerController extends FileController
         return $this->attempt(fn () => ['hits' => AgentClient::for($site->host)->search($site->site_id, $d['q'])]);
     }
 
+    /** grep -r for cic.sh: a literal or RE2 pattern, in a folder, by file name. */
+    public function grep(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate([
+            'pattern' => ['required', 'string', 'max:200'],
+            'regex' => ['sometimes', 'boolean'], 'icase' => ['sometimes', 'boolean'], 'word' => ['sometimes', 'boolean'],
+            'under' => ['sometimes', 'string', 'max:1024'],
+            'include' => ['sometimes', 'array', 'max:10'], 'include.*' => ['string', 'max:100'],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:500'],
+        ]);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->grep($site->site_id, [
+            'pattern' => $d['pattern'], 'regex' => $request->boolean('regex'), 'icase' => $request->boolean('icase'),
+            'word' => $request->boolean('word'), 'under' => $d['under'] ?? null, 'include' => $d['include'] ?? [],
+            'limit' => $d['limit'] ?? null,
+        ]));
+    }
+
+    /** find for cic.sh (and ls -R, tree, du): what is where, how big, how new. */
+    public function find(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate([
+            'under' => ['sometimes', 'string', 'max:1024'],
+            'name' => ['sometimes', 'string', 'max:100'], 'icase' => ['sometimes', 'boolean'],
+            'type' => ['sometimes', 'in:f,d'],
+            'newer' => ['sometimes', 'integer', 'min:0'],
+            'maxdepth' => ['sometimes', 'integer', 'min:1', 'max:50'],
+            'all' => ['sometimes', 'boolean'],
+            'limit' => ['sometimes', 'integer', 'min:1', 'max:5000'],
+        ]);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->find($site->site_id, [
+            'under' => $d['under'] ?? null, 'name' => $d['name'] ?? null, 'icase' => $request->boolean('icase'),
+            'type' => $d['type'] ?? null, 'newer' => $d['newer'] ?? null, 'maxdepth' => $d['maxdepth'] ?? null,
+            'all' => $request->boolean('all'), 'limit' => $d['limit'] ?? null,
+        ]));
+    }
+
     /** Every file path, for Quick Open (⌘P). */
     public function paths(Request $request, Site $site): JsonResponse
     {
