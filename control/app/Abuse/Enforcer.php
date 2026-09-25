@@ -52,9 +52,16 @@ class Enforcer
         // named for the owner to judge, never banned automatically.
         $related = $user->signup_net ? User::where('signup_net', $user->signup_net)->whereKeyNot($user->getKey())
             ->where('created_at', '>=', now()->subDays(90))->limit(10)->pluck('email')->all() : [];
+        // And from the same browser (App\Auth\Device), by either hash.
+        $sameBrowser = [];
+        foreach (array_filter([$user->signup_device, $user->last_device]) as $device) {
+            $sameBrowser = array_merge($sameBrowser, \App\Auth\Device::sameBrowser($device)->whereKeyNot($user->getKey())->limit(10)->pluck('email')->all());
+        }
+        $sameBrowser = array_values(array_unique($sameBrowser));
         if ($first && ! $isTest) {
             $this->tellOwner("Account banned: {$user->email}", "Account: {$user->email}\nSites taken down: ".(implode(', ', $down) ?: 'none')."\n\n$reason\n\n"
                 .($related ? 'Accounts signed up from the same network in the last 90 days: '.implode(', ', $related)."\n\n" : '')
+                .($sameBrowser ? 'Accounts made or used in the same browser: '.implode(', ', $sameBrowser)."\n\n" : '')
                 ."Nothing was deleted. To reverse this: php artisan abuse:unban {$user->email}");
         }
     }

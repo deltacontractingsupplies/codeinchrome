@@ -32,6 +32,13 @@ class AppServiceProvider extends ServiceProvider
         // Every scheduled job's outcome feeds monitoring (App\Fleet\Monitoring::recordJob).
         // A non-zero exit fires Finished and then Failed, an exception only
         // Failed: so success is Finished with exit 0, failure is Failed.
+        // Every sign-in, by any route (password, Google, Apple, a passkey),
+        // records the browser it came from (App\Auth\Device, audit A19).
+        Event::listen(\Illuminate\Auth\Events\Login::class, function ($e) {
+            if ($e->user instanceof \App\Models\User && app()->bound('request')) {
+                $e->user->forceFill(['last_device' => \App\Auth\Device::signal(request())])->saveQuietly();
+            }
+        });
         Event::listen(\Illuminate\Console\Events\ScheduledTaskFinished::class, function ($e) {
             if ((int) $e->task->exitCode === 0) {
                 app(\App\Fleet\Monitoring::class)->recordJob($e->task, true, 'last run succeeded in '.$e->runtime.' s');
