@@ -436,6 +436,22 @@ for cidr in $CF;    do ufw allow proto tcp from "$cidr" to any port 80,443 comme
 for ip   in $FLEET; do ufw allow proto tcp from "$ip"   to any port 443    comment fleet      >/dev/null; done
 ufw delete allow 80/tcp  >/dev/null 2>&1 || true
 ufw delete allow 443/tcp >/dev/null 2>&1 || true
+# An old egress unit restored a pre-lockdown iptables snapshot at every boot
+# (iptables-restore --noflush /etc/iptables/rules.v4), putting "80/443 from
+# anywhere" back into the live ruleset under ufw's feet - found by the audit
+# on 2026-09-25, with this host answering the whole internet. The customer
+# hosts lost it in bootstrap.sh; the control host, which runs no customer
+# containers, needs no egress unit at all. Kept aside, not deleted: evidence.
+if [[ -e /etc/systemd/system/cic-egress.service ]]; then
+  systemctl disable --now cic-egress.service >/dev/null 2>&1 || true
+  rm -f /etc/systemd/system/cic-egress.service
+  systemctl daemon-reload
+fi
+if [[ -e /etc/iptables/rules.v4 ]]; then
+  mv /etc/iptables/rules.v4 "/root/rules.v4.stale-$(date +%Y%m%d%H%M%S)"
+fi
+# Rebuild the live chains from ufw's own rules: whatever was injected goes.
+ufw reload >/dev/null
 FW
 ok "80/443 from Cloudflare's $(wc -w <<<"$cf_ranges") ranges and 443 from the fleet's hosts only"
 
@@ -461,6 +477,13 @@ check "the session cookie is __Host- (no sibling subdomain can set it)" "pub -sS
 # from one, as restic sees it.
 bk_host=$(awk '{print $1}' <<<"$CIC_HOSTS"); bk_host=${bk_host##*:}
 check "web ports closed to the world" "ssh root@$ip '! ufw status | grep -qE \"^(80|443)(/tcp)?( \\(v6\\))? +ALLOW( IN)? +Anywhere\"'"
+# ufw status shows ufw's CONFIG; what the kernel enforces is the loaded
+# ruleset, and a restored snapshot once differed from it (see above). So: no
+# unrestricted ACCEPT on 80/443 in the live rules, and - from this machine,
+# which is outside - no answer at all on this host's address.
+check "no rule in the live firewall opens 80/443 to everyone" "ssh root@$ip '! iptables -S | grep -E -- \"--dports? ([0-9,]*,)?(80|443)(,[0-9,]*)? .*-j ACCEPT\\\$\" | grep -qv -- \" -s \"'"
+check "a request straight to this host's address gets no answer" "! curl -s -o /dev/null -m 8 -k --resolve $domain:443:$ip https://$domain/"
+check "no snapshot restores old rules at boot" "ssh root@$ip '[[ ! -e /etc/iptables/rules.v4 && ! -e /etc/systemd/system/cic-egress.service ]]'"
 check "backups endpoint answers the hosts over trusted TLS" "[ \"\$(ssh -n -o BatchMode=yes root@$bk_host 'curl -s -o /dev/null -w %{http_code} --max-time 15 --cacert /opt/codeinchrome/etc/restic-ca.pem https://backups.$zone/')\" = 401 ]"
 check "php-fpm running"        "ssh root@$ip 'systemctl is-active php$PHP_VERSION-fpm'"
 check "caddy can read the docroot" "ssh root@$ip 'sudo -u caddy test -r /srv/control/public/index.php'"
