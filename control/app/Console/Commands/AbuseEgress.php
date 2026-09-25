@@ -7,6 +7,7 @@ use App\Fleet\AgentClient;
 use App\Fleet\Suspension;
 use App\Models\Site;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
@@ -33,6 +34,15 @@ class AbuseEgress extends Command
      */
     public const MAX_REFUSALS = 30;
 
+    /**
+     * Bytes a site may send in ten minutes (about 13 Mbit/s held that long):
+     * past it a free site is paused, a paid one reported. An app answering
+     * its visitors sends that through Caddy, not out of its bridge, so this
+     * is the site pushing data to the internet itself - a flood, or a relay
+     * (the second security audit, 2026-09-25: nothing measured volume).
+     */
+    public const MAX_SENT_10_MIN = 1_000_000_000;
+
     protected $signature = 'abuse:egress';
 
     protected $description = 'Pause a site that reaches out to hundreds of hosts or ports (a scan)';
@@ -52,6 +62,9 @@ class AbuseEgress extends Command
             foreach ($sites as $e) {
                 if (($e['refusals'] ?? 0) >= self::MAX_REFUSALS) {
                     $this->refusals($e);
+                }
+                if (isset($e['sent_bytes'])) {
+                    $this->volume($e, $suspension);
                 }
                 if (($e['distinct_hosts'] ?? 0) < self::MAX_HOSTS && ($e['distinct_ports'] ?? 0) < self::MAX_PORTS) {
                     continue;
@@ -73,6 +86,33 @@ class AbuseEgress extends Command
         }
 
         return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    private function volume(array $e, Suspension $suspension): void
+    {
+        $key = "abuse.sent.{$e['site']}";
+        $now = now()->getTimestamp();
+        // [timestamp, counter] readings of the last ten minutes. A counter that
+        // went down is a recreated bridge: start again from it.
+        $history = array_values(array_filter(Cache::get($key, []), fn ($h) => $h[0] >= $now - 660 && $h[1] <= $e['sent_bytes']));
+        $history[] = [$now, (int) $e['sent_bytes']];
+        Cache::put($key, $history, now()->addMinutes(15));
+        $sent = $e['sent_bytes'] - $history[0][1];
+        if ($sent < self::MAX_SENT_10_MIN || ! Cache::add("abuse.sent.acted.{$e['site']}", true, now()->addHour())) {
+            return;
+        }
+        $site = Site::with('user')->where('site_id', $e['site'])->where('status', 'live')->first();
+        if (! $site) {
+            return;
+        }
+        $what = round($sent / 1e9, 1).' GB sent to the internet in about '.round(($now - $history[0][0]) / 60).' minutes';
+        $paused = ! $site->user?->isPaid() && $suspension->pause($site, 'egress');
+        Audit::record('abuse.volume', $site->user, $site, detail: ['bytes' => $sent, 'paused' => $paused]);
+        $this->error("{$site->site_id}: $what".($paused ? ' - paused' : ' - reported'));
+        if ($paused && $site->user) {
+            app(\App\Abuse\Enforcer::class)->escalateRepeatPause($site->user, "sending $what");
+        }
+        app(\App\Abuse\Enforcer::class)->review($site, "$what".($paused ? ' - the site is paused (php artisan abuse:resume '.$site->site_id.')' : ' (a paid site: not paused)'));
     }
 
     private function refusals(array $e): void
