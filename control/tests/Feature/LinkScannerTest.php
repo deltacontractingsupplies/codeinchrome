@@ -57,6 +57,15 @@ class LinkScannerTest extends TestCase
         }
     }
 
+    public function test_lemon_squeezy_is_allowed_only_at_a_checkout(): void
+    {
+        $this->pages(['https://shopx.codeinchrome.com/' => '<form method="post" action="https://store.lemonsqueezy.com/checkout/buy/abc"><button>Buy</button></form>'
+            .'<meta http-equiv="refresh" content="0; url=https://attacker-store.lemonsqueezy.com/">']);
+        $review = app(LinkScanner::class)->scan($this->site())['review'];
+        $this->assertCount(1, $review, 'the checkout is fine; any other store page under lemonsqueezy.com is not');
+        $this->assertStringContainsString('attacker-store.lemonsqueezy.com', $review[0]);
+    }
+
     public function test_the_command_bans_on_downloads_reports_the_rest_and_gates_explore(): void
     {
         config(['fleet.owner_notify_email' => 'owner@example.com', 'fleet.mail_enabled' => true, 'fleet.tokens' => ['h1' => 't']]);
