@@ -100,4 +100,52 @@ class CpuWatchTest extends TestCase
         $this->artisan('abuse:resume', ['site' => 'hot'])->assertFailed();
         $this->assertSame('suspended', $site->fresh()->status);
     }
+
+    /** Readings every five minutes for $minutes; $share(minute) is "hot"'s share, $started(minute) its container start. */
+    private function feed(int $minutes, callable $share, ?callable $started = null, int $from = 0): void
+    {
+        $watch = app(CpuWatch::class);
+        $start = Carbon::parse('2026-09-25 10:00:00');
+        static $usage = 0;
+        if ($from === 0) {
+            $usage = 0;
+        }
+        for ($m = $from; $m <= $from + $minutes; $m += 5) {
+            $usage += (int) (300 * 1e6 * 0.5 * $share($m));
+            $watch->observe([['site' => 'hot', 'usage_usec' => $usage, 'quota_cpus' => 0.5, 'started' => $started ? $started($m) : 's1']],
+                $start->copy()->addMinutes($m));
+        }
+    }
+
+    public function test_a_miner_throttled_below_the_hot_line_is_alerted_at_two_hours_and_paused_at_six(): void
+    {
+        $this->feed(125, fn () => 0.85);
+        $this->assertSame(['[codeinchrome] Possible crypto mining: hot.codeinchrome.com'], $this->sent);
+        $this->assertSame([], $this->paused);
+
+        $this->feed(245, fn () => 0.85, from: 130);
+        $this->assertSame(['hot'], $this->paused, 'six hours averaging 85% of the limit');
+    }
+
+    public function test_restarting_itself_does_not_reset_a_miners_streak(): void
+    {
+        // A new container start every 50 minutes (a PHP setting change restarts it).
+        $this->feed(125, fn () => 1.0, fn ($m) => 's'.intdiv($m, 50));
+        $this->assertSame(['hot'], $this->paused);
+    }
+
+    public function test_a_real_gap_in_the_readings_does_start_a_new_streak(): void
+    {
+        $this->feed(60, fn () => 1.0);
+        // Host unreachable for 30 minutes, then a different container.
+        $this->feed(70, fn () => 1.0, fn () => 's2', from: 95);
+        $this->assertSame([], $this->paused, 'two separate hot hours are not two hot hours in a row');
+    }
+
+    public function test_a_busy_ordinary_site_is_never_touched(): void
+    {
+        $this->feed(420, fn ($m) => $m % 60 < 30 ? 0.7 : 0.3);
+        $this->assertSame([], $this->sent);
+        $this->assertSame([], $this->paused);
+    }
 }
