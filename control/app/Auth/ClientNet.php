@@ -25,8 +25,10 @@ final class ClientNet
 
     /**
      * The network a sign-up came from, as a keyed hash - never the address
-     * itself: an IPv4 /24 or an IPv6 /48. Wide on purpose: a banned person
-     * returning from the same home or office should match.
+     * itself: the IPv4 address, or the IPv6 /64 (one household or device).
+     * Not wider: a /24 held every account behind the same mobile carrier or
+     * office as one banned person (found 2026-09-25 when it held the test
+     * suite's own accounts after its ban test).
      */
     public static function signal(?string $ip): ?string
     {
@@ -34,7 +36,7 @@ final class ClientNet
         if ($bin === false) {
             return null;
         }
-        $net = strlen($bin) === 4 ? substr($bin, 0, 3) : substr($bin, 0, 6);
+        $net = strlen($bin) === 4 ? $bin : substr($bin, 0, 8);
 
         return hash_hmac('sha256', 'net:'.bin2hex($net), (string) config('app.key'));
     }

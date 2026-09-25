@@ -60,9 +60,11 @@ class Provisioner
         }
         // An account from the network of an account banned in the last 30
         // days waits for a person (App\Auth\ClientNet::signal).
-        if (! $user->isPaid() && $user->signup_net
+        $testSuffix = '@'.strtolower((string) config('signup.test_domain'));
+        $isTest = fn (string $email) => config('signup.test_domain') && str_ends_with(strtolower($email), $testSuffix);
+        if (! $user->isPaid() && $user->signup_net && ! $isTest($user->email)
             && User::where('signup_net', $user->signup_net)->whereKeyNot($user->getKey())
-                ->where('banned_at', '>=', now()->subDays(30))->exists()) {
+                ->where('banned_at', '>=', now()->subDays(30))->get(['email'])->reject(fn ($u) => $isTest($u->email))->isNotEmpty()) {
             if (\Illuminate\Support\Facades\Cache::add("abuse.held.{$user->id}", true, now()->addDay())) {
                 app(\App\Abuse\Enforcer::class)->holdForReview($user, 'signed up from the same network as an account banned in the last 30 days');
             }
