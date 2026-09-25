@@ -2,6 +2,13 @@
 
 return [
 
+    // Cloudflare Turnstile on sign-up, email sign-in and password reset
+    // (App\Auth\Turnstile). Both keys, or it is off.
+    'turnstile' => [
+        'site_key' => env('TURNSTILE_SITE_KEY'),
+        'secret' => env('TURNSTILE_SECRET'),
+    ],
+
     /*
     |--------------------------------------------------------------------------
     | Third Party Services

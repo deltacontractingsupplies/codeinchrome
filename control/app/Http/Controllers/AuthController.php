@@ -36,7 +36,7 @@ class AuthController extends Controller
             // in a breach corpus - the single most effective filter there is,
             // because credential stuffing beats complexity rules.
             'password' => ['required', 'confirmed', Password::min(10)->uncompromised()],
-        ]);
+        ] + \App\Auth\Turnstile::rules($request->input('email')));
 
         $user = User::create([
             'name' => $data['name'],
@@ -90,7 +90,8 @@ class AuthController extends Controller
         $credentials = $request->validate([
             'email' => ['required', 'email'],
             'password' => ['required'],
-        ]);
+        ] + \App\Auth\Turnstile::rules($request->input('email')));
+        unset($credentials['cf-turnstile-response']);
 
         // Validate first, sign in second: an account with two-factor on must
         // not be signed in by the password alone, even for one request.
