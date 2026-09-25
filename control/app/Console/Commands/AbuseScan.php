@@ -37,8 +37,11 @@ class AbuseScan extends Command
             // Unscannable (a password-protected or oversize archive): nothing
             // vouches for it, but it is not evidence of malware - a person
             // looks (the second security audit, 2026-09-25).
-            $findings = array_values(array_filter($scan['findings'], fn ($f) => ($f['kind'] ?? '') !== 'unscannable'));
-            $unscannable = array_values(array_filter($scan['findings'], fn ($f) => ($f['kind'] ?? '') === 'unscannable'));
+            // Banned for: malware and hidden code. Reviewed: what could not be
+            // opened, and what looks like a phishing kit (a Telegram bot can be honest).
+            $review = ['unscannable', 'phishing'];
+            $findings = array_values(array_filter($scan['findings'], fn ($f) => ! in_array($f['kind'] ?? '', $review, true)));
+            $unscannable = array_values(array_filter($scan['findings'], fn ($f) => in_array($f['kind'] ?? '', $review, true)));
             if ($findings !== []) {
                 $flagged++;
                 $this->error("{$site->site_id}: ".count($findings).' finding(s) - account banned');
@@ -55,9 +58,9 @@ class AbuseScan extends Command
             }
             if ($unscannable !== []) {
                 $flagged++;
-                $this->warn("{$site->site_id}: ".count($unscannable).' file(s) ClamAV could not open - for review');
-                $enforcer->review($site, 'files the malware scanner could not open (password-protected or oversize): '
-                    .implode(', ', array_map(fn ($f) => $f['path'].' ('.$f['detail'].')', $unscannable)));
+                $this->warn("{$site->site_id}: ".count($unscannable).' file(s) for review');
+                $enforcer->review($site, 'files for a person to look at: '
+                    .implode(', ', array_map(fn ($f) => $f['path'].' ('.$f['kind'].': '.$f['detail'].')', $unscannable)));
 
                 continue;
             }

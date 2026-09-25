@@ -128,6 +128,43 @@ func escapedCallable(content string) bool {
 	return false
 }
 
+// phishingKit names what in a file looks like a phishing kit, or "": where
+// stolen details are sent, and code that hides the page from the scanners
+// that would report it (the second security audit, 2026-09-25). A review,
+// never a ban: a Telegram or Discord integration can be honest.
+var phishingRules = []struct {
+	name string
+	re   *regexp.Regexp
+}{
+	// The host after "//", a quote or a space - never inside a longer host name.
+	{"sends data to a Telegram bot", regexp.MustCompile(`(?i)(^|[/"'\s])api\.telegram\.org/bot`)},
+	{"sends data to a Discord webhook", regexp.MustCompile(`(?i)(^|[/"'\s])(www\.)?discord(app)?\.com/api/webhooks/`)},
+	{"hides the page from security scanners", regexp.MustCompile(`(?is)(HTTP_USER_AGENT|REMOTE_ADDR|userAgent\(\)|->ip\(\)).{0,400}(phishtank|netcraft|safebrowsing|virustotal|urlscan|google-inspectiontool|codeinchrome)|(phishtank|netcraft|safebrowsing|virustotal|urlscan|google-inspectiontool|codeinchrome).{0,400}(HTTP_USER_AGENT|REMOTE_ADDR|userAgent\(\)|->ip\(\))`)},
+	{"asks for a card number beside a well-known brand", regexp.MustCompile(`(?is)(autocomplete=["']cc-(number|csc)["']|name=["'](cvv|cvc|card_?number|ccnum)["']).{0,1000}\b(paypal|apple ?id|microsoft|netflix|amazon|chase|wells fargo|bank of america|hsbc|barclays)\b|\b(paypal|apple ?id|microsoft|netflix|amazon|chase|wells fargo|bank of america|hsbc|barclays)\b.{0,1000}(autocomplete=["']cc-(number|csc)["']|name=["'](cvv|cvc|card_?number|ccnum)["'])`)},
+}
+
+func phishingKit(content string) string {
+	for _, r := range phishingRules {
+		if r.re.MatchString(content) {
+			return r.name
+		}
+	}
+	return ""
+}
+
+// checkedForPhishing: the customer's own pages and code, never vendor/.
+func checkedForPhishing(rel string) bool {
+	rel = strings.TrimPrefix(filepath.ToSlash(rel), "/")
+	if strings.HasPrefix(rel, "vendor/") || strings.Contains(rel, "node_modules/") {
+		return false
+	}
+	switch strings.ToLower(filepath.Ext(rel)) {
+	case ".php", ".html", ".htm", ".js":
+		return true
+	}
+	return false
+}
+
 // phpObfuscation names the first rule a PHP file breaks, or "". isBlade:
 // a Blade view, whose backticks are JavaScript template strings.
 func phpObfuscation(content string, isBlade ...bool) string {
@@ -295,7 +332,8 @@ func (m *Manager) ScanSite(ctx context.Context, id string) ([]Finding, error) {
 			}
 			return nil
 		}
-		if d.Type()&fs.ModeSymlink != 0 || !checkedForObfuscation(rel) {
+		php, page := checkedForObfuscation(rel), checkedForPhishing(rel)
+		if d.Type()&fs.ModeSymlink != 0 || (!php && !page) {
 			return nil
 		}
 		// Up to the upload limit, as a save or unzip is checked - not only the
@@ -309,8 +347,10 @@ func (m *Manager) ScanSite(ctx context.Context, id string) ([]Finding, error) {
 		if err != nil {
 			return nil
 		}
-		if why := phpObfuscation(string(b), strings.HasSuffix(rel, ".blade.php")); why != "" {
+		if why := phpObfuscation(string(b), strings.HasSuffix(rel, ".blade.php")); php && why != "" {
 			found = append(found, Finding{Path: "/" + rel, Kind: "obfuscated", Detail: why})
+		} else if why := phishingKit(string(b)); page && why != "" {
+			found = append(found, Finding{Path: "/" + rel, Kind: "phishing", Detail: why})
 		}
 		return nil
 	})
