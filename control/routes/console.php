@@ -6,7 +6,8 @@ use Illuminate\Support\Facades\Schedule;
 // withoutOverlapping: a slow or unreachable host must not stack up runs.
 Schedule::command('fleet:sync-usage')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('fleet:apply-limits')->everyFiveMinutes()->withoutOverlapping();
-Schedule::command('fleet:monitor')->everyMinute()->withoutOverlapping();
+// ->after: the outside heartbeat proves the scheduler runs (App\Fleet\Heartbeat).
+Schedule::command('fleet:monitor')->everyMinute()->withoutOverlapping()->after(fn () => \App\Fleet\Heartbeat::ping());
 Schedule::command('trials:expire')->everyTenMinutes()->withoutOverlapping();
 // After the hosts' automatic reboot window (04:30 h1 .. 05:15 the control host,
 // install-agent.sh / deploy-control.sh): a job running while its host reboots
