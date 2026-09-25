@@ -43,6 +43,13 @@ class AbuseEgress extends Command
      */
     public const MAX_SENT_10_MIN = 1_000_000_000;
 
+    /**
+     * Open connections to ONE destination: an ordinary app keeps a handful
+     * to an API; hundreds are a flood or credential stuffing against one
+     * target, which the distinct-host count never saw. Reported, not paused.
+     */
+    public const MAX_TO_ONE_TARGET = 200;
+
     protected $signature = 'abuse:egress';
 
     protected $description = 'Pause a site that reaches out to hundreds of hosts or ports (a scan)';
@@ -65,6 +72,12 @@ class AbuseEgress extends Command
                 }
                 if (isset($e['sent_bytes'])) {
                     $this->volume($e, $suspension);
+                }
+                if (($e['top_target_conns'] ?? 0) >= self::MAX_TO_ONE_TARGET
+                    && Cache::add("abuse.target.{$e['site']}", true, now()->addHour())
+                    && ($site = Site::with('user')->where('site_id', $e['site'])->where('status', 'live')->first())) {
+                    $this->warn("{$site->site_id}: {$e['top_target_conns']} connections to one target - owner told");
+                    app(\App\Abuse\Enforcer::class)->review($site, "{$e['top_target_conns']} open connections to one destination ({$e['top_target']}): a flood or credential stuffing, or an app with a runaway connection pool");
                 }
                 if (($e['distinct_hosts'] ?? 0) < self::MAX_HOSTS && ($e['distinct_ports'] ?? 0) < self::MAX_PORTS) {
                     continue;

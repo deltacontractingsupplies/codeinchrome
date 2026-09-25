@@ -104,4 +104,23 @@ class AbuseEgressTest extends TestCase
         $this->assertSame('live', Site::where('site_id', 'bigpaid')->value('status'), 'a paid site is reported, not paused');
         $this->assertSame('live', Site::where('site_id', 'reset')->value('status'), 'a counter that started again is not a flood');
     }
+
+    public function test_hundreds_of_connections_to_one_target_are_reported_once_an_hour(): void
+    {
+        config(['fleet.owner_notify_email' => 'owner@example.com', 'fleet.mail_enabled' => true, 'fleet.tokens' => ['h1' => 't'],
+            'fleet.hosts' => ['h1' => ['ip' => '10.0.0.1', 'tunnel_port' => 9441, 'capacity' => 10]]]);
+        Site::create(['user_id' => User::factory()->create()->id, 'site_id' => 'stuffer', 'domain' => 'stuffer.codeinchrome.com',
+            'host' => 'h1', 'status' => 'live', 'cpu_limit' => '0.5', 'memory_limit' => '384m', 'port' => 20540]);
+        $sent = [];
+        Event::listen(MessageSent::class, function ($e) use (&$sent) { $sent[] = $e->message->getSubject(); });
+        Http::fake(['127.0.0.1:9441/v1/egress' => Http::response(['ok' => true, 'sites' => [
+            ['site' => 'stuffer', 'connections' => 250, 'distinct_hosts' => 1, 'distinct_ports' => 1, 'refusals' => 0,
+                'top_target' => '203.0.113.9:443', 'top_target_conns' => 250]]]), '*' => Http::response(['ok' => true])]);
+
+        $this->artisan('abuse:egress')->assertSuccessful();
+        $this->artisan('abuse:egress')->assertSuccessful();
+
+        $this->assertSame(['[codeinchrome] For review: stuffer.codeinchrome.com'], $sent);
+        $this->assertSame('live', Site::where('site_id', 'stuffer')->value('status'));
+    }
 }

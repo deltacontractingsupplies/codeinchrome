@@ -85,7 +85,10 @@ class AppServiceProvider extends ServiceProvider
         ]);
         // Hourly and daily too: a free account is a free site, and the minute
         // limit alone allowed thousands a day from one network.
-        RateLimiter::for('register', fn (Request $r) => [
+        // The platform's own end-to-end suite (a signed request, App\Auth\TestSuite)
+        // creates dozens of test accounts a day from one address: exempt, or
+        // the caps below stop it testing sign-up at all (found 2026-09-25).
+        RateLimiter::for('register', fn (Request $r) => \App\Auth\TestSuite::isRequest($r) ? Limit::none() : [
             Limit::perMinute(10)->by($ip($r)), Limit::perHour(20)->by('h:'.$ip($r)), Limit::perDay(50)->by('d:'.$ip($r)),
         ]);
         // Public and unauthenticated: enough for a person, not for a flood.

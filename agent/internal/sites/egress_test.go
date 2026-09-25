@@ -2,6 +2,7 @@ package sites
 
 import (
 	"fmt"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -44,5 +45,17 @@ func TestRefusalsAreCountedPerContainerFromTheKernelLog(t *testing.T) {
 	got := refusalsFrom(log)
 	if got["172.20.0.2"] != 2 || got["172.20.0.18"] != 1 || len(got) != 2 {
 		t.Fatalf("refusals: %v", got)
+	}
+}
+
+func TestTheBusiestSingleTargetIsReported(t *testing.T) {
+	var b strings.Builder
+	for i := 0; i < 5; i++ {
+		b.WriteString("tcp 6 100 ESTABLISHED src=172.20.0.2 dst=203.0.113.9 sport=4000" + strconv.Itoa(i) + " dport=443 src=203.0.113.9 dst=172.20.0.2\n")
+	}
+	b.WriteString("tcp 6 100 ESTABLISHED src=172.20.0.2 dst=198.51.100.7 sport=5000 dport=443 src=198.51.100.7 dst=172.20.0.2\n")
+	got := egressFrom(b.String(), map[string]string{"172.20.0.2": "shop"})
+	if len(got) != 1 || got[0].TopTarget != "203.0.113.9:443" || got[0].TopTargetConns != 5 {
+		t.Fatalf("%+v", got)
 	}
 }

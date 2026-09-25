@@ -30,6 +30,11 @@ type SiteEgress struct {
 	// bridge's received bytes: container egress arrives there). A counter:
 	// the control plane takes the difference between readings (A20).
 	SentBytes uint64 `json:"sent_bytes"`
+	// The destination (address:port) with the most connections, and how many:
+	// a flood or credential stuffing against ONE target is one host and one
+	// port, which the distinct counts never flagged (A14).
+	TopTarget      string `json:"top_target,omitempty"`
+	TopTargetConns int    `json:"top_target_conns"`
 }
 
 // sysClassNet is where interface counters are; a variable for tests.
@@ -163,9 +168,10 @@ func (m *Manager) containerIPs(ctx context.Context) (map[string]string, error) {
 // first src= of an entry is the side that opened it) to public addresses.
 func egressFrom(table string, ips map[string]string) []SiteEgress {
 	type acc struct {
-		conns int
-		hosts map[string]bool
-		ports map[string]bool
+		conns   int
+		hosts   map[string]bool
+		ports   map[string]bool
+		targets map[string]int
 	}
 	per := map[string]*acc{}
 	sc := bufio.NewScanner(strings.NewReader(table))
@@ -192,7 +198,7 @@ func egressFrom(table string, ips map[string]string) []SiteEgress {
 		}
 		a := per[site]
 		if a == nil {
-			a = &acc{hosts: map[string]bool{}, ports: map[string]bool{}}
+			a = &acc{hosts: map[string]bool{}, ports: map[string]bool{}, targets: map[string]int{}}
 			per[site] = a
 		}
 		a.conns++
@@ -200,10 +206,17 @@ func egressFrom(table string, ips map[string]string) []SiteEgress {
 		if dport != "" {
 			a.ports[dport] = true
 		}
+		a.targets[dst+":"+dport]++
 	}
 	res := []SiteEgress{}
 	for site, a := range per {
-		res = append(res, SiteEgress{Site: site, Connections: a.conns, DistinctHosts: len(a.hosts), DistinctPorts: len(a.ports)})
+		top, n := "", 0
+		for t, c := range a.targets {
+			if c > n || (c == n && t < top) {
+				top, n = t, c
+			}
+		}
+		res = append(res, SiteEgress{Site: site, Connections: a.conns, DistinctHosts: len(a.hosts), DistinctPorts: len(a.ports), TopTarget: top, TopTargetConns: n})
 	}
 	return res
 }
