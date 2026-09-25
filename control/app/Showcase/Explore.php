@@ -33,6 +33,9 @@ class Explore
             // link check (abuse:scan, abuse:links), in the last week.
             ->where('scanned_clean_at', '>=', now()->subDays(7))
             ->where('links_clean_at', '>=', now()->subDays(7))
+            // Out of its first week (and its noindex, Provisioner::NOINDEX_DAYS)
+            // first: a fresh phishing kit is not advertised (the audit, 2026-09-25).
+            ->where('created_at', '<=', now()->subDays(\App\Fleet\Provisioner::NOINDEX_DAYS))
             ->whereNotIn('site_id', $demoSites)
             ->whereHas('user', function (Builder $q) {
                 $q->where('plan', 'free');
