@@ -282,6 +282,9 @@ twice is harmless (unique test values, and delete what they create).
   Squeezy checkout, Google, Apple): the platform refuses any other offsite redirect (403),
   and removes `Refresh` headers. Link instead, and keep the visitor on the site.
 - **No Service Workers** on free sites: the worker script request is refused (403).
+- **Only `public/index.php` runs.** Every other `.php` file under `public/` answers 403, and
+  `.htaccess` files are ignored (Laravel's rewrite rules are built in). Put code in
+  controllers and routes, never a script in `public/`.
 - **No program or archive downloads** (exe, apk, dmg, zip, ...) from free sites, and no
   links to them: refused at the edge, and a link to one bans the account.
 - **Nothing runs in the background** on a site without a queue, scheduler or Reverb:

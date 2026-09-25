@@ -145,6 +145,15 @@ RUN set -eux; \
 # port 443 for every generated URL, with no change to the customer's app.
 RUN printf '%s\n' 'SetEnv HTTPS on' > /etc/apache2/conf-available/cic-https.conf && a2enconf cic-https
 
+# Apache's OWN redirects (Laravel's trailing-slash rule, a directory without
+# its slash) are absolute URLs built from Apache's idea of itself: they sent
+# every site's visitors to http://<site>:8080/login, which never loads (found
+# 2026-09-25). The name comes from the visitor's Host header; the scheme and
+# port are the public ones, https on 443.
+# Inside the <VirtualHost *:8080>: set server-wide, the vhost's own port won.
+RUN sed -ri 's!^(<VirtualHost \*:8080>)$!\1\n\tServerName https://localhost:443\n\tUseCanonicalName Off!' /etc/apache2/sites-available/000-default.conf \
+    && grep -q 'ServerName https://localhost:443' /etc/apache2/sites-available/000-default.conf
+
 # APP_DEBUG is forced off by the agent (docker run --env APP_DEBUG=false): a
 # debug page on a public site shows visitors the values around a failure. A
 # real environment variable beats .env in Laravel, but mod_php only puts it in
@@ -164,6 +173,36 @@ RUN printf '%s\n' \
     '  Require all denied' \
     '</FilesMatch>' \
     > /etc/apache2/conf-available/deny-secrets.conf && a2enconf deny-secrets
+
+# Only the front controller runs, and .htaccess is ignored (the second security
+# audit, 2026-09-25). A Laravel app has one entry point, public/index.php; any
+# other PHP file reachable over HTTP - a webshell dropped in public/uploads, a
+# second index.php in a subfolder, public/node_modules/x.php, the /x.php/a.exe
+# path trick - is refused before PHP sees it, whether or not a scanner
+# recognised it. .htaccess could make a .jpg run as PHP (AddType/SetHandler),
+# so AllowOverride is None and Laravel's own public/.htaccess rules live here.
+# Named zz- to load after the base image's docker-php.conf, which sets
+# AllowOverride All on the same directory.
+RUN printf '%s\n' \
+    '<Directory ${APACHE_DOCUMENT_ROOT}>' \
+    '  AllowOverride None' \
+    '  Options -Indexes -MultiViews +FollowSymLinks' \
+    '  RewriteEngine On' \
+    '  RewriteCond %{HTTP:Authorization} .' \
+    '  RewriteRule .* - [E=HTTP_AUTHORIZATION:%{HTTP:Authorization}]' \
+    '  RewriteCond %{HTTP:x-xsrf-token} .' \
+    '  RewriteRule .* - [E=HTTP_X_XSRF_TOKEN:%{HTTP:X-XSRF-Token}]' \
+    '  RewriteCond %{REQUEST_FILENAME} !-d' \
+    '  RewriteCond %{REQUEST_URI} (.+)/$' \
+    '  RewriteRule ^ %1 [L,R=301]' \
+    '  RewriteCond %{REQUEST_FILENAME} !-d' \
+    '  RewriteCond %{REQUEST_FILENAME} !-f' \
+    '  RewriteRule ^ index.php [L]' \
+    '</Directory>' \
+    '<If "%{REQUEST_FILENAME} =~ /\.(php[0-9]?|phtml|pht|phar|phps|inc)$/i && %{REQUEST_FILENAME} != '"'"'${APACHE_DOCUMENT_ROOT}/index.php'"'"'">' \
+    '  Require all denied' \
+    '</If>' \
+    > /etc/apache2/conf-available/zz-cic-exec.conf && a2enconf zz-cic-exec && apache2ctl -t
 
 # Sane production PHP. display_errors off matters: a stack trace on a 500 leaks
 # paths, queries and sometimes credentials to anyone who can trigger it.
