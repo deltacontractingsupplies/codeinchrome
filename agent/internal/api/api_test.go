@@ -161,3 +161,19 @@ func TestGrepAndFindCarryTheirFlags(t *testing.T) {
 		t.Fatalf("newer=yesterday: %d, want 400", res.StatusCode)
 	}
 }
+
+// git clone: a body that is not JSON, or a repository that is not GitHub's,
+// is a 400 and fetches nothing.
+func TestCloneRefusesABadBodyAndANonGitHubRepository(t *testing.T) {
+	srv, app := server(t)
+	if res, _ := call(t, "POST", srv.URL+"/v1/sites/shop/clone", "not json"); res.StatusCode != 400 {
+		t.Fatalf("bad body: %d", res.StatusCode)
+	}
+	res, j := call(t, "POST", srv.URL+"/v1/sites/shop/clone", `{"repository":"https://gitlab.com/a/b","into":"/x"}`)
+	if res.StatusCode != 400 || j["error"] != "cannot_clone" {
+		t.Fatalf("gitlab: %d %v", res.StatusCode, j)
+	}
+	if _, err := os.Stat(filepath.Join(app, "x")); err == nil {
+		t.Fatal("a refused clone made its folder")
+	}
+}

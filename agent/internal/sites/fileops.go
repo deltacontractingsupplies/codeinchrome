@@ -463,42 +463,80 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 	if err != nil {
 		return fmt.Errorf("not a readable zip archive")
 	}
+	if _, err := extractZip(ctx, root, zr, dstRoot, ""); err != nil {
+		return err
+	}
+	m.record(ctx, id, fmt.Sprintf("unzip %s into %s", m.relativeTo(id, src), m.relativeTo(id, dstRoot)))
+	return nil
+}
+
+// extractZip writes an archive's files under dstRoot (inside root), after
+// checking the whole archive first: no entry outside the destination, no
+// symlink, not too many files or bytes, nothing overwritten. prefix is
+// taken off every name (a GitHub archive's "repo-main/"). Every file is then
+// scanned as one batch; if any is malware - or the scan cannot run - none of
+// the archive is kept. It returns how many files were written.
+func extractZip(ctx context.Context, root string, zr *zip.Reader, dstRoot, prefix string) (int, error) {
+	files := make([]*zip.File, 0, len(zr.File))
+	for _, f := range zr.File {
+		if prefix != "" {
+			if !strings.HasPrefix(f.Name, prefix) {
+				return 0, fmt.Errorf("the archive entry %q is outside its top folder", f.Name)
+			}
+			g := *f
+			g.Name = strings.TrimPrefix(f.Name, prefix)
+			if g.Name == "" {
+				continue
+			}
+			f = &g
+		}
+		files = append(files, f)
+	}
 
 	// Check the whole archive before writing anything.
 	var total uint64
-	if len(zr.File) > maxTreeEntries {
-		return fmt.Errorf("too many files in the archive")
+	if len(files) > maxTreeEntries {
+		return 0, fmt.Errorf("too many files in the archive")
 	}
-	for _, f := range zr.File {
+	for _, f := range files {
 		name := filepath.Clean("/" + f.Name)
 		target := filepath.Join(dstRoot, name)
 		if strings.Contains(f.Name, "..") || filepath.IsAbs(f.Name) || !strings.HasPrefix(target, dstRoot+string(os.PathSeparator)) {
-			return fmt.Errorf("%w: the archive entry %q would land outside the destination", errOutside, f.Name)
+			return 0, fmt.Errorf("%w: the archive entry %q would land outside the destination", errOutside, f.Name)
 		}
 		if f.Mode()&fs.ModeSymlink != 0 {
-			return fmt.Errorf("the archive contains a symlink (%q); refused", f.Name)
+			return 0, fmt.Errorf("the archive contains a symlink (%q); refused", f.Name)
 		}
 		if total += f.UncompressedSize64; total > maxTreeBytes {
-			return fmt.Errorf("the archive expands to more than %d MB", maxTreeBytes>>20)
+			return 0, fmt.Errorf("the archive expands to more than %d MB", maxTreeBytes>>20)
 		}
 		if _, err := os.Lstat(target); err == nil && !f.FileInfo().IsDir() {
-			return fmt.Errorf("%s already exists; unzip into an empty folder", strings.TrimPrefix(name, "/"))
+			return 0, fmt.Errorf("%s already exists; unzip into an empty folder", strings.TrimPrefix(name, "/"))
 		}
 	}
 
 	intoRel := strings.TrimPrefix(dstRoot, root)
 	var written []string
-	for _, f := range zr.File {
+	// A failure half way (the disk quota, say) takes back what was written.
+	ok := false
+	defer func() {
+		if !ok {
+			for _, rel := range written {
+				_ = removeBeneath(root, rel)
+			}
+		}
+	}()
+	for _, f := range files {
 		rel := filepath.Join(intoRel, filepath.Clean("/"+f.Name))
 		if f.FileInfo().IsDir() {
 			if err := mkdirBeneath(root, rel); err != nil {
-				return err
+				return 0, err
 			}
 			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
-			return err
+			return 0, err
 		}
 		// Kernel-enforced: no symlink anywhere on the way, nothing replaced.
 		out, err := createBeneath(root, rel, 0o640)
@@ -507,14 +545,14 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 		}
 		if err != nil {
 			rc.Close()
-			return err
+			return 0, err
 		}
 		// Bounded by what the header claimed, so a lying header cannot write more.
 		_, err = io.Copy(out, io.LimitReader(rc, int64(f.UncompressedSize64)+1))
 		rc.Close()
 		out.Close()
 		if err != nil {
-			return err
+			return 0, err
 		}
 	}
 	// Every extracted file scanned as one batch: if any is malware or
@@ -536,13 +574,10 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 		}
 	}
 	if scanErr != nil {
-		for _, rel := range written {
-			_ = removeBeneath(root, rel)
-		}
-		return scanErr
+		return 0, scanErr
 	}
-	m.record(ctx, id, fmt.Sprintf("unzip %s into %s", m.relativeTo(id, src), m.relativeTo(id, dstRoot)))
-	return nil
+	ok = true
+	return len(written), nil
 }
 
 // refuseSecretIntoPublic stops a .env file - the site's keys and database

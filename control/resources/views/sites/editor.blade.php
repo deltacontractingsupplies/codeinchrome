@@ -52,6 +52,7 @@
      data-search="{{ route('files.search', $site) }}"
      data-grep="{{ route('files.grep', $site) }}"
      data-find="{{ route('files.find', $site) }}"
+     data-clone="{{ route('files.clone', $site) }}"
      data-upload="{{ route('files.upload', $site) }}"
      data-download="{{ route('files.download', $site) }}"
      data-skill="{{ route('agent.skill') }}"

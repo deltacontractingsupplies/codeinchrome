@@ -454,6 +454,27 @@ class AgentClient
         return ['entries' => $r['entries'] ?? [], 'files' => (int) ($r['files'] ?? 0), 'bytes' => (int) ($r['bytes'] ?? 0), 'truncated' => (bool) ($r['truncated'] ?? false), 'skipped' => $r['skipped'] ?? []];
     }
 
+    /**
+     * git clone: a public GitHub repository into a new folder of the site.
+     * The host downloads and scans it, so this waits longer than most calls.
+     */
+    public function cloneRepository(string $id, string $repository, ?string $ref, ?string $into): array
+    {
+        try {
+            $response = Http::timeout(200)->acceptJson()->withToken($this->token)
+                ->post($this->baseUrl."/v1/sites/$id/clone", ['repository' => $repository, 'ref' => $ref ?? '', 'into' => $into ?? '']);
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}]. Whether the clone finished is UNKNOWN.", previous: $e);
+        }
+        $json = $response->json() ?? [];
+        if (($json['ok'] ?? false) !== true) {
+            throw new AgentRefused(sprintf('Agent on [%s] refused the clone: %s (%s)', $this->host,
+                $json['error'] ?? 'unknown_error', $json['hint'] ?? 'no hint given'), detail: $json);
+        }
+
+        return ['clone' => $json['clone'] ?? []];
+    }
+
     /** Booleans as 1 (Go reads "1"), unset options left out; a list as repeated keys. */
     private static function flags(array $o): string
     {

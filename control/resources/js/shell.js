@@ -603,11 +603,23 @@ export function runSed(cmds, text, { quiet = false } = {}) {
  *   list(path) read(path) readMany(paths) write(path, content, expect)
  *   writeMany([{ path, content, expect }]) mkdir move copy remove
  *   removeTree(path, confirm) grep(opts) find(opts) history(path)
- *   versionAt(path, rev) command(tool, args, confirm) eval(code)
+ *   versionAt(path, rev) command(tool, args, confirm) eval(code) clone(o)
  *   request(path, opts) query(sql, write) siteUrl
  */
-export function createShell(io, { cwd = '/' } = {}) {
+export function createShell(rawIo, { cwd = '/' } = {}) {
   const state = { cwd };
+  // Listings are remembered within one command line (cp and mv stat the
+  // same folder more than once) and forgotten the moment anything writes.
+  const listed = new Map();
+  const writes = ['write', 'writeMany', 'mkdir', 'move', 'copy', 'remove', 'removeTree', 'clone', 'command', 'eval', 'query'];
+  const io = { ...rawIo };
+  io.list = (p) => {
+    if (!listed.has(p)) listed.set(p, rawIo.list(p));
+    return listed.get(p);
+  };
+  for (const name of writes) {
+    if (rawIo[name]) io[name] = async (...a) => { listed.clear(); try { return await rawIo[name](...a); } finally { listed.clear(); } };
+  }
 
   const fail = (code, err) => ({ code, out: '', err: err.endsWith('\n') ? err : `${err}\n` });
   const ok = (out = '') => ({ code: 0, out, err: '' });
@@ -745,12 +757,21 @@ export function createShell(io, { cwd = '/' } = {}) {
       const visible = (e) => flags.a || flags.A || !e.name.startsWith('.');
       const dirs = [];
       const files = [];
-      for (const t of targets) {
+      // One request per name in the usual case: list it as a folder, and
+      // only if that fails ask whether it is a file. All names at once.
+      const looked = await Promise.all(targets.map(async (t) => {
         const abs = resolvePath(state.cwd, t);
-        const s = await stat(abs);
-        if (!s.ok) { err += `ls: cannot access '${t}': No such file or directory\n`; continue; }
-        if (s.dir && !flags.d) dirs.push({ t, abs });
-        else files.push(fmt(s, t));
+        if (!flags.d) {
+          const l = await io.list(abs);
+          if (l.ok) return { t, abs, dir: true };
+        }
+        return { t, abs, s: await stat(abs) };
+      }));
+      for (const x of looked) {
+        if (x.dir) { dirs.push(x); continue; }
+        if (!x.s.ok) { err += `ls: cannot access '${x.t}': No such file or directory\n`; continue; }
+        if (x.s.dir && !flags.d) dirs.push(x);
+        else files.push(fmt(x.s, x.t));
       }
       if (files.length) out += `${files.join('\n')}\n`;
       const many = targets.length > 1 || flags.R;
@@ -852,15 +873,15 @@ export function createShell(io, { cwd = '/' } = {}) {
       let out = '';
       let err = '';
       let total = 0;
-      for (const t of operands.length ? operands : ['.']) {
+      // One request per name, all at once: find on a file answers its size.
+      const names = operands.length ? operands : ['.'];
+      const found = await Promise.all(names.map((t) => io.find({ under: resolvePath(state.cwd, t), all: true, limit: depth === 0 ? 1 : 5000 })));
+      names.forEach((t, k) => {
         const abs = resolvePath(state.cwd, t);
-        const s = await stat(abs);
-        if (!s.ok) { err += `du: cannot access '${t}': No such file or directory\n`; continue; }
-        if (!s.dir) { out += `${size(s.size)}\t${t}\n`; total += s.size; continue; }
-        const r = await io.find({ under: abs, all: true, limit: depth === 0 ? 1 : 5000 });
-        if (!r.ok) { err += `du: ${t}: ${r.hint}\n`; continue; }
+        const r = found[k];
+        if (!r.ok) { err += /no such/i.test(r.hint ?? '') ? `du: cannot access '${t}': No such file or directory\n` : `du: ${t}: ${r.hint}\n`; return; }
         total += r.bytes;
-        if (depth !== 0) {
+        if (depth !== 0 && r.entries.length) {
           const sums = new Map();
           const levels = depth === undefined ? Infinity : Number(depth);
           for (const e of r.entries) {
@@ -879,7 +900,7 @@ export function createShell(io, { cwd = '/' } = {}) {
           if (r.truncated) err += `du: ${t}: more than 5000 entries: the per-folder lines are partial, the total is whole\n`;
         }
         out += `${size(r.bytes)}\t${t}\n`;
-      }
+      });
       if (flags.c) out += `${size(total)}\ttotal\n`;
       return { code: err ? 1 : 0, out, err };
     },
@@ -1417,9 +1438,13 @@ export function createShell(io, { cwd = '/' } = {}) {
     // Plain files named on the line: read them (in one call) and match here.
     const plain = [];
     const trees = [];
+    const local = invert || filesWithout || before || after;
     for (const s of sites) {
       const abs = resolvePath(state.cwd, s);
       if (!recursive) { plain.push(s); continue; }
+      // The host searches a file or a folder alike: no need to ask which,
+      // unless the answer is built here from whole files.
+      if (!local) { trees.push(s); continue; }
       const st = await stat(abs);
       if (!st.ok) { errors += `grep: ${s}: No such file or directory\n`; continue; }
       (st.dir ? trees : plain).push(s);
@@ -1431,7 +1456,6 @@ export function createShell(io, { cwd = '/' } = {}) {
     }
     // Folders: the host searches (RE2, linear time), unless the answer needs
     // whole files (-v, -L, context lines), then candidates are read here.
-    const local = invert || filesWithout || before || after;
     for (const t of trees) {
       const abs = resolvePath(state.cwd, t);
       const display = (p) => (operands.length ? shown(t, abs, p) : relToCwd(p));
@@ -1451,7 +1475,7 @@ export function createShell(io, { cwd = '/' } = {}) {
         continue;
       }
       const g = await io.grep({ pattern: source, regex: true, icase, word, under: abs, include: includes, limit: 500 });
-      if (!g.ok) { errors += `grep: ${g.hint}\n`; continue; }
+      if (!g.ok) { errors += /no such/i.test(g.hint ?? '') ? `grep: ${t}: No such file or directory\n` : `grep: ${g.hint}\n`; continue; }
       if (g.truncated) errors += 'grep: stopped at 500 matching lines; narrow the pattern or the folder\n';
       const byFile = new Map();
       for (const h of g.hits) {
@@ -1543,12 +1567,11 @@ export function createShell(io, { cwd = '/' } = {}) {
     let err = '';
     for (const p of paths) {
       const abs = resolvePath(state.cwd, p);
-      const s = await stat(abs);
-      if (!s.ok) { err += `find: '${p}': No such file or directory\n`; continue; }
-      const r = await io.find({
+      const [s, r] = await Promise.all([stat(abs), io.find({
         under: abs, name: o.name ?? o.iname ?? undefined, icase: Boolean(o.iname), type: o.type ?? undefined,
         newer: o.newer ? Math.floor(o.newer) : undefined, maxdepth: o.maxdepth ?? undefined,
-      });
+      })]);
+      if (!s.ok) { err += `find: '${p}': No such file or directory\n`; continue; }
       if (!r.ok) { err += `find: '${p}': ${r.hint}\n`; continue; }
       const base = abs === '/' ? 0 : abs.split('/').length - 1;
       // Every test, for an entry the host returned and for the starting
@@ -1638,8 +1661,26 @@ export function createShell(io, { cwd = '/' } = {}) {
       return ok(`Not a git repository: every save is already a version (git log -- FILE).\nChanged in the last hour:\n${changed.length ? changed.join('\n') : '\t(nothing)'}\n`);
     }
     if (sub === 'clone') {
-      if (!io.clone) return fail(128, 'git clone: not available here yet. Bring code in with cic.upload or cic.writeMany, or composer require a package');
-      return io.clone(rest, ctx);
+      // git clone [-b REF] [--depth N] URL [DIR]: the host fetches GitHub's
+      // archive of it (there is no git history to clone: depth is always 1).
+      let ref = '';
+      const ops = [];
+      for (let k = 0; k < rest.length; k++) {
+        const a = rest[k];
+        if (a === '-b' || a === '--branch') ref = rest[++k] ?? '';
+        else if (a.startsWith('--branch=')) ref = a.slice(9);
+        else if (a === '--depth' || a === '-o' || a === '--origin' || a === '-c' || a === '--config') k++;
+        else if (a.startsWith('-')) continue; // --depth=1, -q, --single-branch, --recursive
+        else ops.push(a);
+      }
+      if (!ops.length) return fail(128, 'usage: git clone [-b branch] https://github.com/owner/repo [folder]');
+      const repo = ops[0].replace(/^git@github\.com:/, 'https://github.com/');
+      const into = ops[1] ? resolvePath(state.cwd, ops[1]) : resolvePath(state.cwd, repo.replace(/\.git\/?$/, '').split('/').filter(Boolean).pop() ?? '');
+      const t0 = Date.now();
+      const r = await io.clone({ repository: repo, ref, into });
+      if (!r.ok) return fail(128, `fatal: ${r.hint ?? r.error}`);
+      const c = r.clone ?? {};
+      return { code: 0, out: '', err: `Cloning into '${ops[1] ?? baseName(into)}'...\n${c.files ?? 0} files, ${human(c.bytes ?? 0)}B from ${c.repository}@${c.ref} in ${((c.ms ?? Date.now() - t0) / 1000).toFixed(1)} s (scanned for malware)\n` };
     }
     if (['add', 'commit', 'push', 'pull', 'init', 'checkout', 'branch', 'stash', 'reset', 'restore', 'fetch', 'merge', 'rebase'].includes(sub)) {
       return fail(128, `git ${sub}: there is no repository here: every save is already a version, and the site is live as soon as a file is saved. To undo a file: cic.history(path), then cic.restore(path, commit)`);
@@ -1827,6 +1868,7 @@ export function createShell(io, { cwd = '/' } = {}) {
       return { code: 2, stdout: '', stderr: `cic.sh: ${e.message}\n` };
     }
     const ctx = { confirm };
+    listed.clear();
     let stdout = '';
     let stderr = '';
     let code = 0;

@@ -128,6 +128,19 @@ class FileManagerController extends FileController
         ]));
     }
 
+    /** git clone of a public GitHub repository into a new folder (cic.sh). */
+    public function cloneRepository(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $d = $request->validate([
+            'repository' => ['required', 'string', 'max:200', 'regex:#^(https://github\.com/)?[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}(\.git)?/?$#'],
+            'ref' => ['nullable', 'string', 'max:100', 'regex:#^[A-Za-z0-9._/-]+$#', 'not_regex:#\.\.#'],
+            'into' => ['nullable', 'string', 'max:1024'],
+        ]);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->cloneRepository($site->site_id, $d['repository'], $d['ref'] ?? null, $d['into'] ?? null));
+    }
+
     /** Every file path, for Quick Open (⌘P). */
     public function paths(Request $request, Site $site): JsonResponse
     {

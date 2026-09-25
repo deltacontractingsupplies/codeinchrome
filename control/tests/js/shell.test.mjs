@@ -134,6 +134,7 @@ function memorySite(files = {}) {
       const start = o.under ?? '/';
       if (!nodes.has(start)) return { ok: false, hint: 'no such file or folder' };
       const inSkip = start !== '/' && SKIP.some((s) => start.slice(1) === s || start.slice(1).startsWith(`${s}/`));
+      if (!nodes.get(start).dir) return { ok: true, entries: [], files: 1, bytes: nodes.get(start).content.length, truncated: false, skipped: [] };
       const entries = [];
       const skippedDirs = [];
       let files = 0;
@@ -170,6 +171,12 @@ function memorySite(files = {}) {
       calls.push(['request', path, opts]);
       if (path === '/missing') return { ok: true, status: 404, headers: { 'content-type': 'text/html' }, body: 'Not Found' };
       return { ok: true, status: 200, headers: { 'content-type': 'text/html' }, body: `${opts.method} ${path}${opts.body ? ` ${opts.body}` : ''}${opts.json ? ` ${JSON.stringify(opts.json)}` : ''}`, ms: 12 };
+    },
+    async clone(o) {
+      calls.push(['clone', o]);
+      if (nodes.has(o.into)) return { ok: false, hint: `destination path '${o.into}' already exists` };
+      put(`${o.into}/composer.json`, '{}');
+      return { ok: true, clone: { repository: 'acme/demo', ref: o.ref || 'HEAD', into: o.into, files: 1, bytes: 2048, ms: 900 } };
     },
     async query(sql, write) {
       calls.push(['query', sql, write]);
@@ -430,4 +437,40 @@ test('php, composer, mysql and curl reach the live site', async () => {
   r = await sh(io, 'curl https://evil.example.com/');
   assert.equal(r.code, 6);
   assert.match(r.stderr, /only this site/);
+});
+
+test('git clone brings a public repository in through the host', async () => {
+  const io = site();
+  let r = await sh(io, 'git clone --depth 1 -b v2 https://github.com/acme/demo.git && ls demo');
+  assert.equal(r.code, 0, r.stderr);
+  assert.deepEqual(io.calls.find((c) => c[0] === 'clone')[1], { repository: 'https://github.com/acme/demo.git', ref: 'v2', into: '/demo' });
+  assert.match(r.stderr, /^Cloning into 'demo'\.\.\.\n1 files, 2\.0KB from acme\/demo@v2 in 0\.9 s/);
+  assert.equal(r.stdout, 'composer.json\n');
+  await sh(io, 'cd app && git clone git@github.com:acme/demo.git src/demo');
+  assert.equal(io.calls.filter((c) => c[0] === 'clone').at(-1)[1].into, '/app/src/demo');
+  r = await sh(io, 'cd / && git clone acme/demo demo');
+  assert.equal(r.code, 128);
+  assert.match(r.stderr, /^fatal: destination path/);
+  assert.match((await sh(io, 'git clone')).stderr, /usage: git clone/);
+});
+
+test('the everyday commands take one request to the site, not several', async () => {
+  const io = site();
+  const count = async (line) => {
+    io.calls.length = 0;
+    const r = await sh(io, line);
+    assert.equal(r.code, 0, `${line}: ${r.stderr}`);
+    return io.calls.length;
+  };
+  assert.equal(await count('ls app'), 1);
+  assert.equal(await count('grep -rn Cart app'), 1);
+  assert.equal(await count('grep -rn Route routes/web.php'), 1);
+  assert.equal(await count('cat routes/web.php app/Models/Cart.php | wc -l'), 1);
+  assert.equal(await count('du -sh app resources notes.txt'), 3); // at once, not one after another
+  assert.equal((await sh(io, 'du -sb notes.txt')).stdout, '12\tnotes.txt\n');
+  assert.match((await sh(io, 'du -s nowhere')).stderr, /cannot access 'nowhere'/);
+  // Listings are reused within a line, and forgotten after a write.
+  assert.equal(await count('ls app && ls app'), 1);
+  await sh(io, 'ls app && touch app/new.txt && ls app');
+  assert.match((await sh(io, 'ls app')).stdout, /new\.txt/);
 });
