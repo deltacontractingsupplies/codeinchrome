@@ -408,6 +408,16 @@ caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || { echo 'Caddyfil
 systemctl reload caddy"
 ok "vhost written and caddy reloaded"
 
+say "automatic reboots for kernel updates"
+# After the customer hosts (install-agent.sh: from 04:30 UTC, 10 minutes apart):
+# the owner's decision, 2026-09-25.
+ssh_ "cat > /etc/apt/apt.conf.d/52cic-reboot" <<'APT'
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+Unattended-Upgrade::Automatic-Reboot-Time "05:15";
+APT
+ok "an update that needs a reboot is applied at 05:15 UTC"
+
 say "web ports: Cloudflare and the fleet only"
 # The control plane is served through Cloudflare, and the backups endpoint
 # answers the fleet's hosts only (restic, direct: larger than the proxy takes).

@@ -136,6 +136,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     // separately and much harder than a page view.
     Route::post('/sites', [SiteController::class, 'store'])->middleware(['throttle:provision', VerifiedWhenMailEnabled::class])->name('sites.store');
     Route::delete('/sites/{site}', [SiteController::class, 'destroy'])->name('sites.destroy');
+    Route::post('/sites/{site}/wake', [SiteController::class, 'wake'])->middleware('throttle:provision')->name('sites.wake');
 
     // The panel's file operations. Session-authenticated like the rest of the
     // dashboard, so the browser needs no second credential and there is no

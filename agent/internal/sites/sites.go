@@ -87,6 +87,12 @@ type Site struct {
 	Reverb    bool `json:"reverb,omitempty"`
 	WSPort    int  `json:"wsPort,omitempty"`
 
+	// NoIndex asks search engines not to index the site (X-Robots-Tag at the
+	// edge). The control plane sets it on a new free site for its first week:
+	// the owner's decision (2026-09-25), taking away most of what a phishing
+	// page gains from being found.
+	NoIndex bool `json:"noIndex,omitempty"`
+
 	// PHP settings the owner chose (php.go). Zero values mean the image's
 	// defaults; anything set is written to an ini file the container mounts
 	// read-only, so the site's own code cannot change or widen it.

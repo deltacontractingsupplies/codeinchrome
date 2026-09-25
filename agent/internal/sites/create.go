@@ -601,13 +601,13 @@ func caddyConfig(cfg Config, s Site, port string) string {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "SAMEORIGIN"
-		Referrer-Policy "strict-origin-when-cross-origin"
+		Referrer-Policy "strict-origin-when-cross-origin"%s
 	}
 	log {
 		output file /var/log/caddy/%s.log
 		format json
 	}
-`, s.ID)
+`, robotsHeader(s), s.ID)
 
 	out := fmt.Sprintf("# codeinchrome site %s - generated, do not edit by hand\n", s.ID)
 	if len(platform) > 0 {
@@ -1109,6 +1109,35 @@ func appProxy(port, indent string) string {
 	w(1, "}")
 	w(0, "}")
 	return b.String()
+}
+
+// robotsHeader keeps search engines away from a site marked NoIndex.
+func robotsHeader(s Site) string {
+	if !s.NoIndex {
+		return ""
+	}
+	return "\n\t\tX-Robots-Tag \"noindex, nofollow\""
+}
+
+// SetNoIndex marks a site as not to be indexed (or no longer), and applies it.
+func (m *Manager) SetNoIndex(ctx context.Context, id string, noIndex bool) error {
+	if err := ValidID(id); err != nil {
+		return err
+	}
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	site, err := m.load(id)
+	if err != nil {
+		return fmt.Errorf("no such site %q", id)
+	}
+	if site.NoIndex == noIndex {
+		return nil
+	}
+	site.NoIndex = noIndex
+	if err := m.save(site); err != nil {
+		return err
+	}
+	return m.writeCaddy(ctx, site)
 }
 
 func guardSecrets(route string) string {

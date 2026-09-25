@@ -117,7 +117,13 @@
                     @endif
                 </div>
                 <div class="flex items-center gap-2">
-                @if ($site->status === 'suspended')
+                @if ($site->status === 'suspended' && $site->paused_reason === 'idle')
+                    <span class="text-sm text-neutral-400" title="No visitors and no edits for 30 days">Paused: inactive</span>
+                    <form method="POST" action="{{ route('sites.wake', $site) }}">
+                        @csrf
+                        <button type="submit" class="rounded-md bg-teal-500 px-3 py-1.5 text-sm font-medium text-neutral-950 hover:bg-teal-400">Bring back</button>
+                    </form>
+                @elseif ($site->status === 'suspended')
                     <span class="text-sm text-neutral-400">Paused</span>
                     <a href="{{ route('db.export', $site) }}"
                        class="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-300 hover:border-neutral-500">Download database</a>

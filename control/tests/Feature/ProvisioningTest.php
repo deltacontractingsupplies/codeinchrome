@@ -87,7 +87,10 @@ class ProvisioningTest extends TestCase
         $this->createStatus = 201;
         $this->agentVersion = config('fleet.min_agent_version');
 
-        Http::fake(array_merge([
+        // Overrides go FIRST (the + operator keeps the left side's order and
+        // values): the first matching stub wins, so an override appended after
+        // the catch-all "/v1/sites*" would never be reached.
+        Http::fake($overrides + [
             // STATEFUL on purpose. A stateless fake whose GET always returned
             // an empty list made delete() correctly find nothing and no-op,
             // so a test asserting "the DNS record is withdrawn on failure"
@@ -138,7 +141,7 @@ class ProvisioningTest extends TestCase
                     $this->createStatus,
                 );
             },
-        ], $overrides));
+        ]);
     }
 
     public function test_it_provisions_a_site_and_records_what_the_agent_reported(): void
@@ -152,6 +155,33 @@ class ProvisioningTest extends TestCase
         $this->assertSame('shop.codeinchrome.com', $site->domain);
         $this->assertSame(20000, $site->port, 'The port must come from the agent, not be assumed.');
         $this->assertNotNull($site->provisioned_at);
+    }
+
+    public function test_a_new_free_site_is_kept_out_of_search_engines_for_a_week_and_a_paid_one_is_not(): void
+    {
+        $this->fakeAgent();
+        // Frozen, not travelled: a jump in time would make the fleet's capacity
+        // figures look stale, and a free site is only sold into known room.
+        $now = $this->freezeSecond();
+
+        $free = Provisioner::make()->provision(User::factory()->create(['plan' => 'free']), 'fresh-cafe');
+        $this->assertEquals($now->copy()->addDays(7), $free->fresh()->noindex_until);
+        Http::assertSent(fn ($r) => $r->method() === 'PUT'
+            && str_ends_with($r->url(), '/v1/sites/fresh-cafe/indexing') && $r['noIndex'] === true);
+
+        $paid = Provisioner::make()->provision(User::factory()->create(['plan' => 'starter']), 'paid-cafe');
+        $this->assertNull($paid->fresh()->noindex_until);
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/v1/sites/paid-cafe/indexing'));
+    }
+
+    public function test_a_host_that_misses_the_noindex_call_does_not_fail_the_site(): void
+    {
+        $this->fakeAgent(['127.0.0.1:944*/v1/sites/*/indexing' => Http::response(['ok' => false], 500)]);
+
+        $site = Provisioner::make()->provision(User::factory()->create(['plan' => 'free']), 'fresh-cafe');
+
+        $this->assertSame('live', $site->status);
+        $this->assertNotNull($site->fresh()->noindex_until, 'sites:indexing retries it on the next hour');
     }
 
     public function test_it_enforces_the_plan_site_limit(): void

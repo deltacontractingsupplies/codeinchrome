@@ -87,14 +87,18 @@ class TrialsExpire extends Command
                 }
                 $user->forceFill(['suspended_at' => now()])->save();
                 Audit::record('trial.ended', $user, detail: ['sites' => $live->pluck('site_id')->all()]);
-                if ($live->isNotEmpty()) {
+                // A site already paused for inactivity (sites:idle) is now paused
+                // for the trial: its one-click way back is gone, and it is
+                // deleted with the rest - so its owner must hear about it too.
+                $idle = $user->sites()->where('status', 'suspended')->where('paused_reason', 'idle')->update(['paused_reason' => 'trial']);
+                if ($live->isNotEmpty() || $idle > 0) {
                     // A former customer is told why in billing terms, not trial terms.
                     $user->notify(new PlanNotice($user->subscriptions()->exists() ? 'downgraded' : 'paused', $user->deletesAt()));
                 }
             }
             foreach ($live as $site) {
                 // One still provisioning is paused on a later run, once it is live.
-                if ($site->status === 'live' && ! $dry && ! $suspension->pause($site)) {
+                if ($site->status === 'live' && ! $dry && ! $suspension->pause($site, 'trial')) {
                     $this->warn("{$site->site_id}: not paused; retrying next run");
                 }
             }

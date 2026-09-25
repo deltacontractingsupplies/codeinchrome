@@ -30,6 +30,7 @@ return Application::configure(basePath: dirname(__DIR__))
         $middleware->append(\App\Http\Middleware\SecurityHeaders::class);
         // After route-model binding (part of the web group), so it sees the Site.
         $middleware->appendToGroup('web', \App\Http\Middleware\PausedSite::class);
+        $middleware->appendToGroup('web', \App\Http\Middleware\SiteActivity::class);
         $middleware->appendToGroup('web', \App\Http\Middleware\BannedAccount::class);
 
         $middleware->validateCsrfTokens(except: [

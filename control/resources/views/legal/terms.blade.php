@@ -40,6 +40,13 @@
     by their address only, once they answer with a page of their own. There is no opt-out on the free plan; sites on a
     paid plan are not listed. A site leaves the list as soon as it is deleted, paused or moved to a paid plan.
 </p>
+<p data-terms-idle>
+    A new site on the free plan asks search engines not to index it for its first {{ \App\Fleet\Provisioner::NOINDEX_DAYS }} days.
+    A free site with no visitors and no edits for {{ \App\Console\Commands\SitesIdle::IDLE_DAYS }} days is paused, so that free room goes to sites people use.
+    We email you at least {{ \App\Console\Commands\SitesIdle::WARN_DAYS }} days before, and visiting or opening the site before then keeps it running.
+    Pausing deletes nothing, and a paused site comes back with one click on your dashboard.
+    Visits by search engines, scanners and our own checks do not count.
+</p>
 
 <h2 id="acceptable-use">Acceptable use</h2>
 <p>You may not use the service to host or do any of the following, on a site or through it:</p>

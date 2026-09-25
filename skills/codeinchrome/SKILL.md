@@ -264,6 +264,11 @@ twice is harmless (unique test values, and delete what they create).
   `pagination::semantic-ui` - there is NO `pagination::default` or `simple-default`. The
   Tailwind ones are unstyled without Tailwind; with plain CSS, write a small pager partial.
 - **`APP_DEBUG` is forced off** whatever `.env` says. Errors are in `cic.logs`.
+- **A paused site answers `423 site_paused`** with a `reason` and a `hint`: `idle` (no visitors and
+  no edits for 30 days - the person brings it back with one click on the dashboard), `trial`, or an
+  abuse check. Tell the person the hint; do not retry.
+- **A new free site is not indexed by search engines for its first week** (`X-Robots-Tag: noindex`).
+  That is the platform, not a bug in the app: do not try to remove the header.
 - **`.env` is never served**, and cannot be moved into `public/`. Secrets go in `.env`.
 - **Destructive artisan commands** (`migrate:fresh`, `migrate:rollback`, `db:seed`) need
   `cic.run('artisan', [...], { confirm: true })` - only with the person's agreement.

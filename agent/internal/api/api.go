@@ -469,6 +469,16 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"sites": eg}))
 	})
+	// When a person last loaded each site (sites/visits.go): control pauses
+	// free sites nobody has visited or edited for 30 days.
+	mux.HandleFunc("GET /v1/visits", func(w http.ResponseWriter, r *http.Request) {
+		v, err := mgr.LastVisits()
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, fail("visits_unreadable", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"sites": v}))
+	})
 	// Every site's CPU counter (sites/cpu.go), for spotting a miner.
 	mux.HandleFunc("GET /v1/cpu", func(w http.ResponseWriter, r *http.Request) {
 		cpu, err := mgr.CPU(r.Context())
@@ -599,6 +609,21 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"applied": applied}))
+	})
+
+	mux.HandleFunc("PUT /v1/sites/{id}/indexing", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			NoIndex bool `json:"noIndex"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {noIndex}"))
+			return
+		}
+		if err := mgr.SetNoIndex(r.Context(), r.PathValue("id"), body.NoIndex); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_apply", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"noIndex": body.NoIndex}))
 	})
 
 	mux.HandleFunc("PUT /v1/sites/{id}/aliases", func(w http.ResponseWriter, r *http.Request) {

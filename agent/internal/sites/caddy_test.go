@@ -223,3 +223,14 @@ func TestOnlyRedirectsToThisSiteOrAPaymentOrSignInProviderPass(t *testing.T) {
 		}
 	}
 }
+
+func TestANewFreeSiteCanBeKeptOutOfSearchEngines(t *testing.T) {
+	cfg := Config{PlatformDomain: "codeinchrome.com", OriginCert: "c", OriginKey: "k"}
+	hidden := caddyConfig(cfg, Site{ID: "fresh", Domain: "fresh.codeinchrome.com", NoIndex: true}, "20001")
+	if !strings.Contains(hidden, `X-Robots-Tag "noindex, nofollow"`) {
+		t.Errorf("a NoIndex site must tell search engines so:\n%s", hidden)
+	}
+	if shown := caddyConfig(cfg, Site{ID: "old", Domain: "old.codeinchrome.com"}, "20001"); strings.Contains(shown, "X-Robots-Tag") {
+		t.Errorf("an ordinary site must be indexable:\n%s", shown)
+	}
+}

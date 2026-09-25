@@ -40,7 +40,7 @@ class Enforcer
 
         $down = [];
         foreach ($user->sites()->where('status', 'live')->get() as $site) {
-            $down[] = $site->domain.($this->suspension->pause($site) ? '' : ' (NOT taken down: host unreachable - retried by abuse:scan)');
+            $down[] = $site->domain.($this->suspension->pause($site, 'abuse') ? '' : ' (NOT taken down: host unreachable - retried by abuse:scan)');
         }
         Audit::record('abuse.banned', $user, actor: null, detail: ['reason' => mb_substr($reason, 0, 500), 'sites' => $down]);
         Log::warning('account banned', ['user' => $user->id, 'sites' => $down]);

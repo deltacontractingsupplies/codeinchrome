@@ -390,6 +390,18 @@ class AgentClient
         return $this->send('get', '/v1/egress');
     }
 
+    /** When a person last loaded each site on this host (agent sites/visits.go): {sites: [{site, last}]}. */
+    public function visits(): array
+    {
+        return $this->send('get', '/v1/visits');
+    }
+
+    /** Keep a site out of search engines (agent: X-Robots-Tag at the edge), or not. */
+    public function setNoIndex(string $id, bool $noIndex): void
+    {
+        $this->send('put', "/v1/sites/$id/indexing", ['noIndex' => $noIndex]);
+    }
+
     /** Every site's CPU counter on this host (agent sites/cpu.go): {sites: [...], at}. */
     public function cpu(): array
     {

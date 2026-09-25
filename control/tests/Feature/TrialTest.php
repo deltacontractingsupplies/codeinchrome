@@ -139,6 +139,19 @@ class TrialTest extends TestCase
         $this->assertSame('suspended', $site->fresh()->status);
     }
 
+    public function test_a_site_already_paused_for_inactivity_is_told_about_and_becomes_a_trial_pause(): void
+    {
+        $user = $this->trialUser('-1 minute');
+        $site = $this->siteFor($user, status: 'suspended');
+        $site->update(['paused_reason' => 'idle']);
+
+        $this->expire();
+
+        $this->assertSame([], $this->calls, 'already stopped: no host call');
+        $this->assertSame('trial', $site->fresh()->paused_reason, 'the one-click idle wake no longer applies');
+        Notification::assertSentTo($user, PlanNotice::class, fn ($n) => $n->kind === 'paused');
+    }
+
     public function test_after_the_grace_period_the_sites_are_deleted_and_the_account_stays(): void
     {
         $user = $this->trialUser('-1 minute');
