@@ -635,6 +635,18 @@ fixed, deployed and verified (above). These remain - each needs the owner:
 - [ ] **Stronger sandbox** (gVisor, or user-namespace remapping): containers
       share the host kernel under plain runc. A real hardening, with a
       compatibility and performance cost to test first.
+      **gVisor measured, 2026-09-25** (runsc release-20260921.0, on one host,
+      a copy of a real site under the free plan's limits - 0.5 CPU, 384 MB -
+      beside the same copy under runc; the host restored afterwards):
+      compatible (Laravel, MySQL, artisan, file writes all worked), but
+      start 1.0 s -> 2.3 s, p50 9 -> 17 ms, p95 21 -> 69 ms, throughput at
+      10 concurrent 51-54 -> 13-14 req/s (about 4x less for the same CPU),
+      `artisan route:list` 0.32 -> 1.0 s, and 55 -> 175-182 MiB of the
+      site's 384 MiB memory (the same with `--overlay2=none`). At today's
+      plan sizes it would need roughly double the CPU and memory per site.
+      User-namespace remapping has no such runtime cost but is daemon-wide:
+      every site disk and the MySQL container re-owned, every container
+      recreated. Owner: which, if either - the measurements are here.
 - [x] **Disk I/O limits per site** (2026-09-25): 400/200 MB/s read/write,
       10,000/5,000 IOPS, set on the host's physical disk - measured: the
       kernel charges a site's I/O through its loop device to the site's
