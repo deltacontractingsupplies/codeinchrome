@@ -166,6 +166,10 @@ check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else printf '\033[33m  !!\
 host_restic() { src "set -a; . /opt/codeinchrome/etc/backup.env; set +a; $*"; }
 
 check "host can reach and read its repository" "host_restic 'restic cat config'"
+# Through the tool itself, with ITS environment: a check that exported the
+# whole settings file passed while every nightly run failed TLS, because the
+# tool exports a named list and RESTIC_CACERT was not on it (2026-09-25).
+check "the backup tool itself reaches the repository" "src '/opt/codeinchrome/bin/cic-backup ping'"
 check "timer is scheduled"                     "src 'systemctl is-active cic-backup.timer'"
 # Positive control first: the host CAN add a snapshot...
 check "host can ADD a snapshot" \
