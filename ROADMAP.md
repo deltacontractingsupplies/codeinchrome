@@ -602,6 +602,42 @@ be hard to abuse. Every item is verified live, never assumed.
       gaps (SECURITY.md, private reporting already on).
       DONE: pull requests #1-#5 on the recreated public repository, every one through the leak checks, CI, CodeQL and the contributor-agreement check.
 
+### Security audit findings that need the owner's decision (2026-09-25)
+
+Everything from the audit that could be fixed without a business decision is
+fixed, deployed and verified (above). These remain - each needs the owner:
+
+- [ ] **Customer sites on their own domain** (the audit's one critical item):
+      sites share codeinchrome.com with the dashboard, so a phishing report
+      that gets the domain listed by Safe Browsing takes the dashboard down
+      with it. The fix every platform uses (vercel.app, netlify.app): a
+      separate domain for customer sites, submitted to the Public Suffix
+      List. Owner: buy the domain; the move is then scripted.
+- [ ] **Bot protection on sign-up and login** (Cloudflare Turnstile, Bot Fight
+      Mode): our Cloudflare token has no permission for either. Owner: turn on
+      Bot Fight Mode, and create a Turnstile widget (or give the token
+      Turnstile:Edit) - the forms are then wired to it.
+- [ ] **Free sites: how long, and how public**: free accounts and their
+      sites live forever while paid plans are closed, and a new site is
+      public at once (it reaches Explore only after passing both scans).
+      Options: an inactivity expiry for free sites; noindex until a site is
+      a week old. A product decision.
+- [ ] **Stronger sandbox** (gVisor, or user-namespace remapping): containers
+      share the host kernel under plain runc. A real hardening, with a
+      compatibility and performance cost to test first.
+- [ ] **Disk I/O limits per site**: needs each container recreated; to be
+      scheduled.
+- [ ] **One provider for everything** (Hetzner): the control plane, every
+      host, the backups and their replica. A second provider for the backup
+      replica removes the single point of failure.
+- [ ] **Operator identity and an abuse-response process** (legal name on the
+      terms, a response-time commitment to Hetzner and Cloudflare reports).
+- [ ] **Platform mail from its own IP** (the control host): a mail provider
+      (Postmark, Resend) instead keeps the host's address out of every mail
+      header and SPF record.
+- [ ] **Automatic reboots for kernel updates**: now alerted after 3 days;
+      automatic reboots mean a minute of downtime - the owner's call.
+
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):
       the privacy policy said Cloudflare did DNS only - every site and the app
