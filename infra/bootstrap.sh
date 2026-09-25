@@ -228,7 +228,17 @@ done
 e -p tcp -m multiport --dports 25,465,587,2525,3333,4444,5555,7777,8333,14444,45700 -j CIC-REJECT
 e -p udp -m multiport --dports 25,465,587,2525,3333,4444,5555,7777,8333,14444,45700 -j CIC-REJECT
 e -p tcp -m multiport --dports 23,445,1433,3389,5900 -j CIC-REJECT
-e -p udp --dport 53  -m hashlimit --hashlimit-upto 50/sec --hashlimit-burst 100 --hashlimit-mode srcip --hashlimit-name cic-dns  -j RETURN
+# DNS goes through Docker's resolver, which forwards from the HOST's side
+# (measured 2026-09-26 on h4: a container's lookup crossed this chain 0
+# times, a direct "nslookup x 8.8.8.8" twice). So a container talking DNS to
+# an outside resolver itself - plain (53), over TLS (853), or over HTTPS to
+# the public resolvers' addresses, which serve nothing else - is tunnelling
+# or hiding lookups, not resolving names: refused (audit A21).
+e -p udp --dport 53 -j CIC-REJECT
+e -p tcp -m multiport --dports 53,853 -j CIC-REJECT
+for doh in 1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112 208.67.222.222 208.67.220.220 94.140.14.14 94.140.15.15; do
+  e -d "$doh" -j CIC-REJECT
+done
 e -p udp --dport 443 -m hashlimit --hashlimit-upto 20/sec --hashlimit-burst 40  --hashlimit-mode srcip --hashlimit-name cic-quic -j RETURN
 e -p udp -j CIC-REJECT
 e -p icmp -m hashlimit --hashlimit-upto 5/sec --hashlimit-burst 10 --hashlimit-mode srcip --hashlimit-name cic-icmp -j RETURN
@@ -280,7 +290,7 @@ chmod 0750 /opt/codeinchrome/bin/cic-egress
 /opt/codeinchrome/bin/cic-egress
 # The old snapshot must not linger where something might restore it.
 rm -f /etc/iptables/rules.v4
-ok "container egress: private ranges, mail and pool ports refused; UDP, new-connection rate and open connections limited"
+ok "container egress: private ranges, mail and pool ports, and direct DNS refused; UDP, new-connection rate and open connections limited"
 
 # Survive reboot: re-applied after docker creates its chains.
 cat > /etc/systemd/system/cic-egress.service <<'UNIT'
@@ -504,6 +514,30 @@ check "Docker and Caddy updated automatically" 'apt-config dump | grep -q "origi
 check "swap active"              '[[ -n "$(swapon --show)" ]]'
 check "host id present"          'test -s /opt/codeinchrome/etc/host.id'
 check "customer root private"    '[[ "$(stat -c %a /srv/customers)" == "750" ]]'
+# DNS (audit A21), proven with a throwaway container on a throwaway network:
+# names still resolve through Docker's resolver, and a direct query to an
+# outside resolver is refused. The test image is the site image already on
+# the host, so nothing is pulled; everything made here is removed.
+dns_probe() {
+  local net=cic-dnsprobe out
+  docker network rm "$net" >/dev/null 2>&1 || true
+  docker network create "$net" >/dev/null || return 1
+  out=$(docker run --rm --network "$net" --entrypoint php codeinchrome/laravel:8.3 -r '
+    $ok = gethostbyname("example.com") !== "example.com";
+    $s = @fsockopen("udp://8.8.8.8", 53, $e, $m, 3); $direct = false;
+    if ($s) { stream_set_timeout($s, 3); fwrite($s, hex2bin("abcd01000001000000000000076578616d706c6503636f6d0000010001")); $direct = strlen((string) fread($s, 512)) > 0; }
+    echo ($ok ? "resolves" : "no-resolve"), " ", ($direct ? "direct-answered" : "direct-refused");' 2>/dev/null)
+  docker network rm "$net" >/dev/null 2>&1 || true
+  echo "$out"
+}
+if docker image inspect codeinchrome/laravel:8.3 >/dev/null 2>&1; then
+  # shellcheck disable=SC2034 # read by the eval'd checks below
+  dns_result=$(dns_probe)
+  check "containers resolve names through Docker's resolver" '[[ $dns_result == resolves* ]]'
+  check "containers cannot query an outside resolver directly" '[[ $dns_result == *direct-refused ]]'
+else
+  ok "DNS egress not proven yet: the site image is built later in a first deploy"
+fi
 
 if (( fails )); then
   die "$fails post-condition(s) failed - this host is NOT ready"
