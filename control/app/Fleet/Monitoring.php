@@ -90,6 +90,9 @@ class Monitoring
      */
     public const BACKUP_MAX_AGE_HOURS = 30;
 
+    /** How long an installed update may wait for a reboot before it is an incident. */
+    public const REBOOT_GRACE_DAYS = 3;
+
     private function checkBackups(): array
     {
         $out = [];
@@ -142,6 +145,17 @@ class Monitoring
 
         $out = ["host:$host" => [$label, true, sprintf('load %.2f on %d CPUs, %d%% memory available',
             $s['load1'], $s['cpus'], $s['memTotalBytes'] ? 100 * $s['memAvailableBytes'] / $s['memTotalBytes'] : 0), $ms]];
+
+        // An installed update (a kernel, usually) waiting for a reboot to take
+        // effect: fine for a few days, not forever (the audit found two hosts
+        // running a kernel days older than the one installed).
+        if (! empty($s['rebootRequiredSince'])) {
+            $since = \Illuminate\Support\Carbon::parse($s['rebootRequiredSince']);
+            $out["host:$host:reboot"] = ["$label reboot", $since->greaterThan(now()->subDays(self::REBOOT_GRACE_DAYS)),
+                'an update has waited '.$since->diffForHumans(null, true).' for a reboot to take effect', null];
+        } else {
+            $out["host:$host:reboot"] = ["$label reboot", true, 'no update is waiting for a reboot', null];
+        }
 
         $free = $s['diskTotalBytes'] ? $s['diskFreeBytes'] / $s['diskTotalBytes'] : 0;
         $out["host:$host:disk"] = ["$label disk", $free >= self::DISK_FREE_MIN,

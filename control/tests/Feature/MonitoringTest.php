@@ -40,7 +40,7 @@ class MonitoringTest extends TestCase
                     'diskFreeBytes' => (int) (100e9 * $this->diskFree), 'diskTotalBytes' => (int) 100e9,
                     'memAvailableBytes' => 8e9, 'memTotalBytes' => 16e9, 'load1' => 0.4, 'cpus' => 4,
                     'mysqlUp' => true, 'caddyUp' => true, 'sitesNotRunning' => [], 'disksUnmounted' => [],
-                ]]);
+                ] + ($this->rebootSince ? ['rebootRequiredSince' => $this->rebootSince] : [])]);
             },
             'shop.codeinchrome.com*' => function () {
                 if ($this->siteDown) {
@@ -238,6 +238,22 @@ class MonitoringTest extends TestCase
         } finally {
             @unlink($stamp);
         }
+    }
+
+    private ?string $rebootSince = null;
+
+    public function test_an_update_waiting_days_for_a_reboot_is_an_incident_a_fresh_one_is_not(): void
+    {
+        $monitor = app(\App\Fleet\Monitoring::class);
+        $this->assertTrue($monitor->run()['host:h1:reboot'][1], 'no update waiting');
+
+        $this->rebootSince = now()->subHours(20)->toIso8601String();
+        $this->assertTrue($monitor->run()['host:h1:reboot'][1], 'a day-old update is normal: they install nightly');
+
+        $this->rebootSince = now()->subDays(5)->toIso8601String();
+        $check = $monitor->run()['host:h1:reboot'];
+        $this->assertFalse($check[1]);
+        $this->assertStringContainsString('5 days', $check[2]);
     }
 
     public function test_a_site_whose_backups_stopped_is_alerted_once(): void
