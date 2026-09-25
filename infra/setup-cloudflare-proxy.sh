@@ -93,6 +93,11 @@ setting min_tls_version 1.2
 # the showcase login read "[email protected]" to every visitor.
 setting email_obfuscation off
 setting tls_1_3 on
+# "Respect existing headers": a site's own Cache-Control decides how long a
+# browser keeps a file. Cloudflare's 4-hour default kept a customer's edited
+# CSS stale for hours (the second security audit, 2026-09-25); the agent now
+# sends no-cache for static files and a year for hashed build files.
+cf PATCH "/zones/$CLOUDFLARE_ZONE_ID/settings/browser_cache_ttl" '{"value":0}' | python3 -c 'import json,sys; assert json.load(sys.stdin)["success"]'
 ok "zone: SSL Full (strict), HTTPS always, TLS 1.2 minimum, TLS 1.3 on"
 
 [[ ${1:-} == --dns ]] || { echo "certificate and settings ready; run deploy-host.sh / deploy-control.sh, then: $0 --dns"; exit 0; }

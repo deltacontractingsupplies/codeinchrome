@@ -67,13 +67,13 @@ before it is ticked.
 - [ ] **A22 [medium]** Abuse reports trigger no automatic scan or pause; no abuse@ contact exists, which risks Cloudflare's 24-hour response rule
 - [ ] **A23 [medium]** Rename, Copy, eval, artisan and composer commands, and the app's own writes are not scanned when they happen, so detection waits for the 6-hourly scan; editor saves never run ClamAV
 - [x] **A24 [medium]** A false positive from the hex-escape rule bans the account and takes down all its sites, even on a refused save - FIXED 2026-09-25: the hex rule decodes and flags only dangerous names (a PNG signature or zero-width stripping no longer matches). Obfuscated code still bans, by the owner's decision.
-- [ ] **A25 [medium]** Customer static files (public/css, js, images) have no Cache-Control at the origin; Cloudflare adds max-age=14400 and caches them, so edits reach visitors up to 4 hours late
-- [ ] **A26 [medium]** Once an agent runs optimize, route:cache or config:cache (all allowed), later editor edits to routes/config/.env/listeners silently have no effect
+- [x] **A25 [medium]** Customer static files (public/css, js, images) have no Cache-Control at the origin; Cloudflare adds max-age=14400 and caches them, so edits reach visitors up to 4 hours late - FIXED 2026-09-25: static files get Cache-Control public, no-cache (only when the app set none), Vite's hashed /build/assets a year immutable (agent 0.30.7), and Cloudflare's browser cache TTL respects origin headers (setup-cloudflare-proxy.sh); verified live: REVALIDATED, not a 4-hour HIT.
+- [x] **A26 [medium]** Once an agent runs optimize, route:cache or config:cache (all allowed), later editor edits to routes/config/.env/listeners silently have no effect - FIXED 2026-09-25: after any change the agent makes, a route/config/event cache older than its sources is deleted (bootcache.go); verified live: route:cache, then a save of routes/web.php, and the stale cache was gone.
 - [ ] **A27 [medium]** A site paused for CPU or egress abuse can be deleted and a new one created at once; deleting the account also defeats a later ban by email
 - [x] **A28 [medium]** Automatic bans can be triggered by harmless content (external .apk/.dmg/.deb links, copy buttons next to install commands), including content posted by strangers - FIXED 2026-09-25: a program link elsewhere and a copy button alone go to review; a ban needs a program on the site itself, or the full ClickFix (clipboard command AND Win+R/paste).
 - [ ] **A29 [medium]** Per-IP limiters use the full IPv6 address, register has no hourly or daily cap, Turnstile is off in production, and /report has no challenge
 - [ ] **A30 [medium]** Ban evasion: only the canonical email links a banned person to a new account, and Google/Apple sign-up skips the Gmail-only domain rule
-- [ ] **A31 [medium]** The site-name impersonation filter misses common phishing names
+- [x] **A31 [medium]** The site-name impersonation filter misses common phishing names - FIXED 2026-09-25: names normalised (hyphens, look-alike digits) and more brands; short brands refused beside a lure word; every audit example refused, foodbank-online and purchase-online still allowed (tested).
 - [x] **A32 [medium]** Customer apps see every visitor as the Docker gateway address, so per-IP limits and bans cannot tell visitors apart - FIXED 2026-09-25: Caddy sends X-Real-IP {client_ip} (agent 0.30.4) and the image's mod_remoteip trusts it from the Docker networks only; verified live through Cloudflare: my real address logged, a forged X-Real-IP ignored.
 - [ ] **A33 [medium]** Authenticated Origin Pulls are off: the Cloudflare-ranges allowlist admits any Cloudflare customer's proxy or Worker, and h2's IP is published in DNS
 - [ ] **A34 [medium]** Docker CE, containerd.io (which includes runc), Caddy and the ondrej PHP packages are never auto-updated
@@ -83,10 +83,10 @@ before it is ticked.
 - [ ] **A38 [low]** Scans read only the first 2 MiB (scheduled) or 32 MiB (unzip) of a PHP file, and clamd reports content past 100 MB as clean
 - [ ] **A39 [low]** A clamd failure skips the rules walk in ScanSite, and repeated scan failures alert nobody
 - [ ] **A40 [low]** Password-protected archives pass ClamAV as clean (AlertEncrypted not set)
-- [ ] **A41 [low]** Site image loads no php.ini, so compiled-in defaults apply (zend.assertions=1, zend.exception_ignore_args=0)
+- [x] **A41 [low]** Site image loads no php.ini, so compiled-in defaults apply (zend.assertions=1, zend.exception_ignore_args=0) - FIXED 2026-09-25: the image sets zend.assertions=-1, zend.exception_ignore_args=On, display_startup_errors=Off; verified in a live container.
 - [ ] **A42 [low]** Control plane: Vite hashed assets not marked immutable (Cloudflare applies max-age=14400), and /theme.js is unversioned
 - [ ] **A43 [low]** The e2e test sign-up domain is enabled in production and will skip Turnstile once it is on
-- [ ] **A44 [low]** The first-week noindex is lifted on schedule even when the link check has open review findings
+- [x] **A44 [low]** The first-week noindex is lifted on schedule even when the link check has open review findings - FIXED 2026-09-25: noindex is lifted only when both checks passed within the week (tested).
 - [ ] **A45 [low]** fail2ban runs only the default sshd jail (10-minute bans, no recidive), and sshd keeps defaults while SSH is open to the world
 - [ ] **A46 [low]** The control host's tunnel key (cictunnel) can open remote (-R) and unix-socket forwards on every customer host
 - [ ] **A47 [low]** The control host still runs an unused root cic-agent, the Docker daemon and old DOCKER-USER rules

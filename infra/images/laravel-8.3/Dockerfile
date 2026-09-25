@@ -225,6 +225,9 @@ RUN { \
       echo 'opcache.enable=1'; \
       echo 'opcache.validate_timestamps=1'; \
       echo 'opcache.revalidate_freq=2'; \
+      echo 'zend.assertions=-1'; \
+      echo 'zend.exception_ignore_args=On'; \
+      echo 'display_startup_errors=Off'; \
     } > /usr/local/etc/php/conf.d/zz-codeinchrome.ini
 
 # The rootfs is mounted read-only at runtime; Apache still needs these.

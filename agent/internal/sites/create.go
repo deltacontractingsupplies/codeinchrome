@@ -625,6 +625,18 @@ func caddyConfig(cfg Config, s Site, port string) string {
 		route = suspendedBody
 	}
 	body := guardSecrets(route) + fmt.Sprintf(`	encode gzip zstd
+	# Static files are revalidated, so an edit reaches visitors at once:
+	# without a Cache-Control of their own, Cloudflare kept them 4 hours
+	# (the second security audit, 2026-09-25). Vite's hashed build files
+	# change name when they change, so they are kept a year. "?": only when
+	# the app did not set one itself.
+	@cic_hashed path_regexp cic_hashed ^/build/assets/.+-[A-Za-z0-9_-]{8,}\.[a-z0-9]+$
+	header @cic_hashed Cache-Control "public, max-age=31536000, immutable"
+	@cic_static {
+		path_regexp cic_static (?i)\.(css|js|mjs|map|png|jpe?g|gif|svg|webp|avif|ico|woff2?|ttf|otf|txt|xml|json)$
+		not path_regexp ^/build/assets/
+	}
+	header @cic_static ?Cache-Control "public, no-cache"
 	header {
 		-Server
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
