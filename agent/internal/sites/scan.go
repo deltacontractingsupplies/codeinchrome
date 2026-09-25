@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -65,17 +66,106 @@ var obfuscationRules = []struct {
 	{"request input run as code", regexp.MustCompile(`(?i)\b(eval|assert|create_function)\s*\(\s*(@\s*)?\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)\b`)},
 	{"request input handed to a shell", regexp.MustCompile(`(?i)\b(system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec)\s*\(\s*(@\s*)?\$_(GET|POST|REQUEST|COOKIE|SERVER)\b`)},
 	{"preg_replace /e (runs its replacement as code)", regexp.MustCompile(`(?i)\bpreg_replace\s*\(\s*['"][/#~!@|%][^'"]*[/#~!@|%][a-z]*e[a-z]*['"]`)},
-	{"function names spelled in hex escapes", regexp.MustCompile(`(\\x[0-9a-fA-F]{2}){6,}`)},
 	{"a commercial PHP encoder (ionCube, SourceGuardian, Zend Guard)", regexp.MustCompile(`(?i)(ionCube Loader|extension_loaded\(\s*['"]ionCube|\bsg_load\s*\(|@Zend;|Zend Optimizer|<\?php //00[0-9a-f]{2})`)},
 	{"a large encoded blob run as code", regexp.MustCompile(`(?s)\b(eval|assert)\s*\(.{0,200}['"][A-Za-z0-9+/=]{1000,}['"]`)},
+	{"create_function (removed from PHP 8; used to hide code)", regexp.MustCompile(`(?i)\bcreate_function\s*\(`)},
+	{"request input called as a function", regexp.MustCompile(`(?i)@?\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)\s*\[[^\]]*\]\s*\(`)},
+	{"request input included as code", regexp.MustCompile(`(?i)\b(include|require)(_once)?\b\s*\(?\s*@?\$_(GET|POST|REQUEST|COOKIE|SERVER)`)},
+	{"request input handed to a callback runner", regexp.MustCompile(`(?i)\b(call_user_func(_array)?|array_map|array_filter|array_walk|usort|uasort|uksort|register_shutdown_function|register_tick_function|forward_static_call(_array)?|iterator_apply)\s*\(\s*@?\$_(GET|POST|REQUEST|COOKIE|SERVER)`)},
+	{"a function name built from chr()", regexp.MustCompile(`(?i)(\bchr\s*\(\s*\d+\s*\)\s*\.\s*){3,}`)},
+	{"a PHP file written from request input or decoded data", regexp.MustCompile(`(?is)\bfile_put_contents\s*\([^;]{0,200}\.ph(p[0-9]?|tml|ar)\b[^;]{0,300}(base64_decode|gzinflate|str_rot13|hex2bin|\$_(GET|POST|REQUEST|COOKIE|FILES))`)},
 }
 
-// phpObfuscation names the first rule a PHP file breaks, or "".
-func phpObfuscation(content string) string {
+// Names a webshell hides behind an escape sequence, a string concatenation
+// or a variable. None is ever spelled that way in ordinary code.
+var dangerousCallable = regexp.MustCompile(`(?i)^(system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec|assert|eval|create_function|base64_decode|gzinflate|gzuncompress|gzdecode|str_rot13|hex2bin|convert_uudecode|call_user_func|call_user_func_array|file_put_contents|move_uploaded_file|curl_exec|fsockopen|preg_replace)$`)
+
+var (
+	dqString     = regexp.MustCompile(`"((?:[^"\\]|\\.)*)"`)
+	phpEscape    = regexp.MustCompile(`\\(x[0-9a-fA-F]{1,2}|[0-7]{1,3})`)
+	concatQuotes = regexp.MustCompile(`(['"])\s*\.\s*(['"])`)
+	taintedVar   = regexp.MustCompile(`(?i)\$(\w+)\s*=\s*\(?\s*@?\$_(GET|POST|REQUEST|COOKIE|SERVER|FILES)\b`)
+	namedVar     = regexp.MustCompile(`\$(\w+)\s*=\s*['"]([A-Za-z_][A-Za-z0-9_]*)['"]\s*;`)
+	backtickVar  = regexp.MustCompile("`[^`\n]*\\$[^`\n]*`")
+	evalCall     = regexp.MustCompile(`(?i)\beval\s*(/\*.*?\*/\s*)?\(`)
+	notEvalCall  = regexp.MustCompile(`(?i)(->|::|\$|\bfunction\s+)\s*$`)
+	// Comments cannot run: they are dropped before any rule looks (a "//"
+	// right after ":" is a URL, and "#[" an attribute, so those stay).
+	blockComment = regexp.MustCompile(`(?s)/\*.*?\*/`)
+	lineComment  = regexp.MustCompile(`(?m)(^|[^:\\])//[^\n]*`)
+	hashComment  = regexp.MustCompile(`(?m)^[ \t]*#([^\[\n][^\n]*)?$`)
+	sqString     = regexp.MustCompile(`'(?:[^'\\]|\\.)*'`)
+)
+
+// escapedCallable: a double-quoted string that spells a dangerous function
+// only once its escapes are decoded ("\x73ystem", "\163\171\163..."). Any
+// number of escapes, mixed with plain letters: the old rule wanted six in a
+// row, and so banned a PNG signature check while "sy\x73tem" passed (the
+// second security audit, 2026-09-25).
+func escapedCallable(content string) bool {
+	for _, m := range dqString.FindAllStringSubmatch(content, -1) {
+		lit := m[1]
+		if !phpEscape.MatchString(lit) {
+			continue
+		}
+		decoded := phpEscape.ReplaceAllStringFunc(lit, func(e string) string {
+			var n uint64
+			var err error
+			if e[1] == 'x' {
+				n, err = strconv.ParseUint(e[2:], 16, 8)
+			} else {
+				n, err = strconv.ParseUint(e[1:], 8, 8)
+			}
+			if err != nil {
+				return e
+			}
+			return string(rune(n))
+		})
+		if dangerousCallable.MatchString(strings.TrimSpace(decoded)) {
+			return true
+		}
+	}
+	return false
+}
+
+// phpObfuscation names the first rule a PHP file breaks, or "". isBlade:
+// a Blade view, whose backticks are JavaScript template strings.
+func phpObfuscation(content string, isBlade ...bool) string {
+	content = hashComment.ReplaceAllString(lineComment.ReplaceAllString(blockComment.ReplaceAllString(content, ""), "$1"), "")
 	for _, r := range obfuscationRules {
 		if r.re.MatchString(content) {
 			return r.name
 		}
+	}
+	// eval( anywhere, except a method or a function definition named eval.
+	for _, loc := range evalCall.FindAllStringIndex(content, -1) {
+		if !notEvalCall.MatchString(content[max(0, loc[0]-40):loc[0]]) {
+			return "eval (no Laravel app runs strings as code)"
+		}
+	}
+	if escapedCallable(content) {
+		return "function names spelled in escape sequences"
+	}
+	// 'ba'.'se64_decode' is 'base64_decode': join literal concatenations first.
+	joined := concatQuotes.ReplaceAllString(content, "")
+	for _, m := range namedVar.FindAllStringSubmatch(joined, -1) {
+		if dangerousCallable.MatchString(m[2]) {
+			return "a dangerous function's name kept in a variable"
+		}
+	}
+	for _, m := range taintedVar.FindAllStringSubmatch(content, -1) {
+		v := regexp.QuoteMeta(m[1])
+		if regexp.MustCompile(`(^|[^\w>:])@?\$` + v + `\s*\(`).MatchString(content) {
+			return "request input called as a function"
+		}
+		if regexp.MustCompile(`(?i)\b(system|exec|shell_exec|passthru|popen|proc_open|pcntl_exec|eval|assert|include|require)(_once)?\b\s*\(?\s*@?\$` + v + `\b`).MatchString(content) {
+			return "request input handed to a shell or run as code"
+		}
+	}
+	// Backticks outside strings are PHP's shell operator; inside a string
+	// ("check `systemctl status {$unit}`") they are just text.
+	if !(len(isBlade) > 0 && isBlade[0]) && backtickVar.MatchString(sqString.ReplaceAllString(dqString.ReplaceAllString(content, `""`), "''")) {
+		return "a shell command in backticks"
 	}
 	return ""
 }
@@ -179,7 +269,7 @@ func (m *Manager) ScanSite(ctx context.Context, id string) ([]Finding, error) {
 		if err != nil {
 			return nil
 		}
-		if why := phpObfuscation(string(b)); why != "" {
+		if why := phpObfuscation(string(b), strings.HasSuffix(rel, ".blade.php")); why != "" {
 			found = append(found, Finding{Path: "/" + rel, Kind: "obfuscated", Detail: why})
 		}
 		return nil
@@ -195,7 +285,7 @@ func (m *Manager) ScanSite(ctx context.Context, id string) ([]Finding, error) {
 // down), and known malware by ClamAV on the written file.
 func scanContent(rel, content string) *ErrMalware {
 	if checkedForObfuscation(rel) {
-		if why := phpObfuscation(content); why != "" {
+		if why := phpObfuscation(content, strings.HasSuffix(rel, ".blade.php")); why != "" {
 			return &ErrMalware{Findings: []Finding{{Path: "/" + strings.TrimPrefix(rel, "/"), Kind: "obfuscated", Detail: why}}}
 		}
 	}

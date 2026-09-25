@@ -83,8 +83,15 @@ class LinkScanner
                     && count($queue) + count($seen) < self::MAX_PAGES * 3) {
                     $queue[] = $target;
                 }
-                if (preg_match(self::EXECUTABLE, $path)) {
-                    $ban[] = "links to a program download: $target (on $url)";
+                // A program on this site is refused at the edge anyway, so a
+                // link to one is the owner's doing; a link elsewhere can be a
+                // visitor's comment, so it goes to a person (the second
+                // security audit, 2026-09-25: harmless GitHub release links
+                // banned accounts).
+                if (preg_match(self::EXECUTABLE, $path) && $internal) {
+                    $ban[] = "links to a program download on the site itself: $target (on $url)";
+                } elseif (preg_match(self::EXECUTABLE, $path)) {
+                    $review[] = "links to a program download elsewhere: $target (on $url)";
                 } elseif (preg_match(self::ARCHIVE, $path) && ! $internal) {
                     $review[] = "links to an archive elsewhere: $target (on $url)";
                 }
@@ -104,10 +111,17 @@ class LinkScanner
             // "ClickFix" fake CAPTCHA pages (Trend Micro, 2025-26, on Lovable,
             // Netlify and Vercel): the page's script puts a command on the
             // clipboard and tells the visitor to press Win+R and paste it.
-            if (preg_match('/(clipboard\.writeText|execCommand\(\s*["\']copy)[\s\S]{0,600}(powershell|mshta|cmd(\.exe)?\s*\/c|curl[^|<]{0,200}\|\s*(ba)?sh|iex\b|Invoke-WebRequest|-enc(odedcommand)?\b)/i', $html)) {
-                $ban[] = "puts a command (PowerShell, mshta or a shell) on the visitor's clipboard: a ClickFix malware page (on $url)";
-            } elseif (preg_match('/\b(win(dows)?(\s*key)?\s*\+\s*r|⊞\s*\+\s*r)\b/iu', strip_tags($html))
-                && preg_match('/(ctrl\s*\+\s*v|paste|verify|human|captcha)/i', strip_tags($html))) {
+            // Both halves make the attack: a command put on the clipboard AND
+            // the visitor told to press Win+R and paste it. Either alone is
+            // also a documentation page's "copy the install command" button.
+            $clipboardCommand = preg_match('/(clipboard\.writeText|execCommand\(\s*["\']copy)[\s\S]{0,600}(powershell|mshta|cmd(\.exe)?\s*\/c|curl[^|<]{0,200}\|\s*(ba)?sh|iex\b|Invoke-WebRequest|-enc(odedcommand)?\b)/i', $html) === 1;
+            $winR = preg_match('/\b(win(dows)?(\s*key)?\s*\+\s*r|⊞\s*\+\s*r)\b/iu', strip_tags($html)) === 1
+                && preg_match('/(ctrl\s*\+\s*v|paste|verify|human|captcha)/i', strip_tags($html)) === 1;
+            if ($clipboardCommand && $winR) {
+                $ban[] = "puts a command on the visitor's clipboard and tells them to press Win+R and paste it: a ClickFix malware page (on $url)";
+            } elseif ($clipboardCommand) {
+                $review[] = "puts a command (PowerShell, mshta or a shell) on the visitor's clipboard (on $url)";
+            } elseif ($winR) {
                 $review[] = "tells visitors to press Win+R and paste something: possible ClickFix fake CAPTCHA (on $url)";
             }
             if (preg_match('/<input[^>]+type\s*=\s*["\']?password/i', $html)) {
