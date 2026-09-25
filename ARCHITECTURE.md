@@ -74,9 +74,19 @@ names cryptocurrency mining as prohibited, and the account holder is liable for
 everything third parties do.
 
 - Container per customer: separate mount, PID and network namespaces
-- `cgroup` CPU and memory ceilings — mining becomes arithmetic, not policing
-- Outbound SMTP (25/465/587) blocked; mining pools and Tor unreachable
-- No inbound ports but 80/443, everything through the proxy
+- `cgroup` CPU and memory ceilings, and a watch that pauses a site held at its
+  limit for hours (`abuse:cpu`)
+- Outbound: mail ports, common mining-pool and brute-force ports refused;
+  private, reserved and metadata ranges refused; UDP only DNS/QUIC; open and
+  new connections capped per container; a site reaching hundreds of hosts is
+  paused (`abuse:egress`). Not a list of every pool or Tor relay - those run
+  on ordinary ports too - which is why the CPU and scan watches exist
+- Site disks mounted `noexec`; eval and commands bounded inside the container;
+  left-behind processes reaped on sites without background processes
+- Malware and obfuscated PHP refused on write and scanned (ClamAV); a finding
+  bans the account
+- Inbound 80/443 from Cloudflare only (and the backups endpoint from the
+  fleet); SSH for the operator, not reachable from containers
 - `.env` is never a file an agent can read: `cic.setSecret()` writes,
   `cic.readSecret()` always refuses
 - Document root cannot be set above `/public` — the panel does not offer it

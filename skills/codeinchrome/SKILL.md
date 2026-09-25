@@ -270,6 +270,18 @@ twice is harmless (unique test values, and delete what they create).
 - **Composer**: `cic.run('composer', ['require', 'vendor/package'])`.
 - **Undo**: every save is a version: `cic.history(path)`, `cic.restore(path, commit)`.
 - **Uploads that grow** belong in Cloudflare R2 or S3 (`cic.help()` shows the settings).
+- **Email goes through an API, never SMTP.** Mail ports are closed to sites. Use a
+  provider's HTTPS API with Laravel's own driver (Resend: `MAIL_MAILER=resend` with
+  `resend/resend-php`; Postmark: `MAIL_MAILER=postmark`), its key in `.env`.
+- **No redirect to another site** except payment and sign-in (Stripe, PayPal, Lemon
+  Squeezy, Google, Apple): the platform refuses any other offsite redirect (403). Link
+  instead, and keep the visitor on the site.
+- **No program or archive downloads** (exe, apk, dmg, zip, ...) from free sites, and no
+  links to them: refused at the edge, and a link to one bans the account.
+- **Nothing runs in the background** on a site without a queue, scheduler or Reverb:
+  a process left running is stopped. Code that hides what it does (base64 then eval,
+  encoders) is refused on save and bans the account.
+- **Names that imitate a brand** (paypal-login, apple-id...) cannot be used for a site.
 
 ## Before you say "done": check EVERY page (1-2 calls)
 
