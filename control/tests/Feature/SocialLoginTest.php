@@ -49,6 +49,7 @@ class SocialLoginTest extends TestCase
         $user = User::where('email', 'pat@example.com')->first();
         $this->assertNotNull($user);
         $this->assertTrue($user->hasVerifiedEmail(), 'The provider verified the address, so we need not ask again.');
+        $this->assertNotNull($user->signup_net, 'the sign-up network signal is kept for social sign-ups too (App\\Auth\\ClientNet)');
         $this->assertAuthenticatedAs($user);
         $this->assertTrue(SocialAccount::where(['provider' => 'google', 'provider_user_id' => 'g-1', 'user_id' => $user->id])->exists());
     }
