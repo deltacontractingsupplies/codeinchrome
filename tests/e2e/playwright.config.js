@@ -1,5 +1,6 @@
 import { defineConfig, devices } from '@playwright/test';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, readFileSync } from 'node:fs';
+import { createHmac } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
 /*
@@ -14,6 +15,22 @@ import { fileURLToPath } from 'node:url';
  * covers the runner and everything it spawns, however the suite is started.
  * CIC_E2E_TMP overrides the location.
  */
+// The suite's reserved sign-up domain is accepted only on its own requests:
+// today's HMAC (UTC) of CIC_SIGNUP_TEST_SECRET, which the control host holds
+// too (App\Auth\TestSuite). Read from the environment or the repository's
+// local .env (never committed).
+function e2eHeader() {
+  let secret = process.env.CIC_SIGNUP_TEST_SECRET || '';
+  if (!secret) {
+    try {
+      const env = readFileSync(fileURLToPath(new URL('../../.env', import.meta.url)), 'utf8');
+      secret = (env.match(/^CIC_SIGNUP_TEST_SECRET=(.*)$/m) || [])[1]?.trim() || '';
+    } catch { /* no local .env: no header, and test sign-ups are refused */ }
+  }
+  if (!secret) return {};
+  return { 'X-CIC-E2E': createHmac('sha256', secret).update(new Date().toISOString().slice(0, 10)).digest('hex') };
+}
+
 const localTmp = process.env.CIC_E2E_TMP || fileURLToPath(new URL('./.tmp', import.meta.url));
 mkdirSync(localTmp, { recursive: true });
 process.env.TMPDIR = localTmp;
@@ -42,6 +59,7 @@ export default defineConfig({
   reporter: [['list'], ['html', { outputFolder: 'report', open: 'never' }]],
   use: {
     baseURL: process.env.CIC_BASE_URL || 'http://127.0.0.1:8123',
+    extraHTTPHeaders: e2eHeader(),
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',

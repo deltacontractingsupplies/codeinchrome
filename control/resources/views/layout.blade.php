@@ -10,7 +10,7 @@
     <title>@yield('title', 'codeinchrome')</title>
     <meta name="description" content="Laravel hosting where the AI does the work and the code stays yours.">
     {{-- Blocking on purpose: sets the theme before the first paint. --}}
-    <script src="/theme.js"></script>
+    <script src="/theme.js?v={{ filemtime(public_path('theme.js')) }}"></script>
     @vite(['resources/css/app.css', 'resources/js/app.js'])
     @stack('head')
 </head>

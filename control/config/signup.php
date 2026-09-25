@@ -22,4 +22,6 @@ return [
     // stays unverified - able to do nothing - unless an operator marks it
     // verified from the server (tests/e2e/helpers/fixtures.js markVerified).
     'test_domain' => env('CIC_SIGNUP_TEST_DOMAIN'),
+    // ...accepted only with this secret's daily HMAC in X-CIC-E2E (App\Auth\TestSuite).
+    'test_secret' => env('CIC_SIGNUP_TEST_SECRET'),
 ];

@@ -7,7 +7,7 @@
     {{-- For the code editor's own <style> elements only; see csp-nonce.js. --}}
     <meta name="csp-nonce" content="{{ $cspNonce }}">
     <title>{{ $site->site_id }} — codeinchrome</title>
-    <script src="/theme.js"></script>
+    <script src="/theme.js?v={{ filemtime(public_path('theme.js')) }}"></script>
     @vite(['resources/css/editor.css', 'resources/js/editor.js'])
 </head>
 <body>

@@ -392,6 +392,11 @@ $domain {
 		env REMOTE_ADDR {client_ip}
 	}
 	file_server
+	# Vite's build files are named by their content: kept a year. (Cloudflare
+	# held them 4 hours, the second security audit found; /theme.js carries
+	# its version in the URL.)
+	@build path /build/assets/*
+	header @build Cache-Control \"public, max-age=31536000, immutable\"
 	header {
 		-Server
 		Strict-Transport-Security \"max-age=31536000; includeSubDomains\"
@@ -471,6 +476,35 @@ Unattended-Upgrade::Origins-Pattern {
         "origin=cloudsmith/caddy/stable";
 };
 CONF
+# Kernel settings (as bootstrap.sh) Ubuntu leaves at their defaults (the second security audit,
+# 2026-09-25). Not ip_forward: Docker needs it. Not log_martians: with the
+# Docker bridges it fills the kernel log.
+cat > /etc/sysctl.d/60-cic.conf <<'CONF'
+net.core.bpf_jit_harden = 2
+kernel.kexec_load_disabled = 1
+dev.tty.ldisc_autoload = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+kernel.sysrq = 0
+fs.suid_dumpable = 0
+CONF
+sysctl -q --system >/dev/null
+# auditd: every write to the configuration that controls this host is
+# recorded (who, when, what), in a bounded log.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq auditd >/dev/null
+sed -ri 's/^max_log_file *=.*/max_log_file = 50/; s/^num_logs *=.*/num_logs = 4/' /etc/audit/auditd.conf
+cat > /etc/audit/rules.d/cic.rules <<'CONF'
+-w /opt/codeinchrome/etc -p wa -k cic-config
+-w /etc/ssh -p wa -k ssh-config
+-w /etc/ufw -p wa -k firewall
+-w /etc/docker -p wa -k docker-config
+-w /etc/caddy -p wa -k caddy-config
+-w /etc/sudoers -p wa -k sudoers
+-w /etc/sudoers.d -p wa -k sudoers
+-w /root/.ssh -p wa -k root-ssh
+CONF
+systemctl enable --now auditd >/dev/null 2>&1
+augenrules --load >/dev/null 2>&1 || true
 for unit in cic-agent docker.socket docker containerd; do
   systemctl disable --now "$unit" >/dev/null 2>&1 || true
 done
@@ -544,6 +578,7 @@ check "no rule in the live firewall opens 80/443 to everyone" "ssh root@$ip '! i
 check "a request straight to this host's address gets no answer" "! curl -s -o /dev/null -m 8 -k --resolve $domain:443:$ip https://$domain/"
 check "ssh: keys only, no forwarding extras" "ssh root@$ip 'sshd -T | grep -qx \"x11forwarding no\" && sshd -T | grep -qx \"passwordauthentication no\"'"
 check "fail2ban recidive jail" "ssh root@$ip 'fail2ban-client status recidive'"
+check "kernel hardened, auditd on" "ssh root@$ip '[[ \$(sysctl -n kernel.sysrq) == 0 ]] && auditctl -l | grep -q cic-config'"
 check "no agent or Docker on the control host" "ssh root@$ip '! systemctl is-active --quiet cic-agent && ! systemctl is-active --quiet docker'"
 check "no snapshot restores old rules at boot" "ssh root@$ip '[[ ! -e /etc/iptables/rules.v4 && ! -e /etc/systemd/system/cic-egress.service ]]'"
 check "backups endpoint answers the hosts over trusted TLS" "[ \"\$(ssh -n -o BatchMode=yes root@$bk_host 'curl -s -o /dev/null -w %{http_code} --max-time 15 --cacert /opt/codeinchrome/etc/restic-ca.pem https://backups.$zone/')\" = 401 ]"

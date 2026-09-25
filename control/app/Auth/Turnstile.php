@@ -33,8 +33,7 @@ class Turnstile
      */
     public static function rules(?string $email = null): array
     {
-        $test = config('signup.test_domain');
-        if ($test && $email !== null && str_ends_with(strtolower($email), '@'.strtolower($test))) {
+        if (TestSuite::address($email)) {
             return [];
         }
 

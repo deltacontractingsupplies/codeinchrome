@@ -298,7 +298,14 @@ func (m *Manager) ScanSite(ctx context.Context, id string) ([]Finding, error) {
 		if d.Type()&fs.ModeSymlink != 0 || !checkedForObfuscation(rel) {
 			return nil
 		}
-		b, err := readBeneath(root, p, MaxFileSize)
+		// Up to the upload limit, as a save or unzip is checked - not only the
+		// first 2 MiB (the second security audit, 2026-09-25). Bigger PHP is
+		// not something a site's own code needs: a person looks.
+		if info, ierr := d.Info(); ierr == nil && info.Size() > MaxUploadSize {
+			found = append(found, Finding{Path: "/" + rel, Kind: "unscannable", Detail: "a PHP file larger than the checks read"})
+			return nil
+		}
+		b, err := readBeneath(root, p, MaxUploadSize)
 		if err != nil {
 			return nil
 		}
