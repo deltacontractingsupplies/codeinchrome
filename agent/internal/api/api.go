@@ -1045,7 +1045,40 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 				"GET|PUT|DELETE /v1/sites/{id}/files, GET /v1/sites/{id}/db, POST /v1/sites/{id}/db/query, POST /v1/reconcile"))
 	})
 
-	return mux
+	return clearStaleCaches(mgr, mux)
+}
+
+// clearStaleCaches runs after every successful change to a site's files or
+// commands (anything but GET under /v1/sites/{id}/): Laravel caches built
+// before the change are dropped (sites/bootcache.go).
+func clearStaleCaches(mgr *sites.Manager, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		rec := &statusRecorder{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rec, r)
+		if r.Method == http.MethodGet || rec.status >= 400 || !strings.HasPrefix(r.URL.Path, "/v1/sites/") {
+			return
+		}
+		if parts := strings.SplitN(strings.TrimPrefix(r.URL.Path, "/v1/sites/"), "/", 2); len(parts) == 2 && parts[1] != "" {
+			mgr.ClearStaleBootstrapCaches(parts[0])
+		}
+	})
+}
+
+type statusRecorder struct {
+	http.ResponseWriter
+	status int
+}
+
+func (s *statusRecorder) WriteHeader(code int) {
+	s.status = code
+	s.ResponseWriter.WriteHeader(code)
+}
+
+// Flush keeps streaming responses streaming through the recorder.
+func (s *statusRecorder) Flush() {
+	if f, ok := s.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
 }
 
 // be0 names the file a batch error is about, or "".

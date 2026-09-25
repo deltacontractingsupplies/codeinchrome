@@ -100,7 +100,19 @@ class Site extends Model
     public const IMPERSONATED_ANYWHERE = ['paypal', 'icloud', 'microsoft', 'office365', 'outlook', 'hotmail', 'gmail',
         'facebook', 'instagram', 'whatsapp', 'netflix', 'amazon', 'coinbase', 'binance', 'metamask', 'trustwallet',
         'wellsfargo', 'barclays', 'citibank', 'santander', 'revolut', 'mastercard', 'fedex', 'docusign', 'dropbox',
-        'onedrive', 'sharepoint', 'linkedin', 'telegram', 'codeinchrome', 'cloudflare', 'hetzner'];
+        'onedrive', 'sharepoint', 'linkedin', 'telegram', 'codeinchrome', 'cloudflare', 'hetzner',
+        // Added after the second security audit (2026-09-25) got each through.
+        'bankofamerica', 'chasebank', 'hsbc', 'americanexpress', 'venmo', 'cashapp', 'zelle', 'steamcommunity',
+        'steampowered', 'walletconnect', 'adobe', 'wetransfer', 'yahoo', 'verizon', 'trezor', 'microsoft365'];
+
+    /**
+     * Short brands, refused inside a name only beside a word phishing kits
+     * use (appleidverify, googledocs-share). Not "bank" or "chase": they are
+     * inside foodbank-online and purchase-online.
+     */
+    public const IMPERSONATED_WITH_LURE = ['apple', 'appleid', 'google', 'dhl', 'usps', 'roblox'];
+
+    public const LURE_WORDS = '/(login|signin|logon|verify|verification|secure|account|wallet|support|auth|update|confirm|billing|recover|unlock|docs|drive|share|mail)/';
 
     // Not "ups", "visa", "wallet" or "steam": each is also an ordinary
     // business word (a cafe, a visa consultancy, a leather shop, a laundry).
@@ -109,8 +121,17 @@ class Site extends Model
 
     public static function impersonates(string $id): ?string
     {
+        // pay-pal, paypa1, micros0ft: hyphens dropped and look-alike digits
+        // folded before matching.
+        $folded = str_replace(['vv', 'rn'], ['w', 'm'],
+            strtr(str_replace('-', '', $id), ['0' => 'o', '1' => 'l', '3' => 'e', '4' => 'a', '5' => 's', '7' => 't']));
         foreach (self::IMPERSONATED_ANYWHERE as $brand) {
-            if (str_contains($id, $brand)) {
+            if (str_contains($id, $brand) || str_contains(str_replace('-', '', $id), $brand) || str_contains($folded, $brand)) {
+                return $brand;
+            }
+        }
+        foreach (self::IMPERSONATED_WITH_LURE as $brand) {
+            if (str_contains($folded, $brand) && preg_match(self::LURE_WORDS, str_replace($brand, '', $folded))) {
                 return $brand;
             }
         }

@@ -10,6 +10,19 @@ use Tests\TestCase;
 
 class AbuseNamesAndMailTest extends TestCase
 {
+    public function test_the_phishing_names_the_audit_got_through_are_refused_and_ordinary_names_are_not(): void
+    {
+        foreach (['bankofamerica-login', 'paypa1-login', 'pay-pal-verify', 'micros0ft-365', 'office-365-signin', 'googledocs-share',
+            'appleidverify', 'chasebank-secure', 'hsbconline', 'wallet-connect', 'steamcommunity-login', 'venmo-verify',
+            'apple-support', 'dhl-tracking-update', 'g00gle-login'] as $id) {
+            $this->assertNotNull(Site::impersonates($id), "$id should be refused");
+        }
+        foreach (['pineapple-shop', 'foodbank-online', 'purchase-online', 'video-guide-hub', 'dental-office-support', 'maple-syrup-farm',
+            'kids-video-club', 'chasers-bar', 'holiday-cafe', 'my-shop-1', 'studio-73'] as $id) {
+            $this->assertNull(Site::impersonates($id), "$id is an ordinary name");
+        }
+    }
+
     public function test_names_phishing_kits_use_are_refused_and_ordinary_ones_are_not(): void
     {
         foreach (['paypal-login', 'secure-paypal', 'apple-id-verify', 'my-microsoft-account', 'netflix-billing',

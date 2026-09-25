@@ -36,7 +36,7 @@ class SitesIndexingTest extends TestCase
     {
         return Site::create(['user_id' => User::factory()->create(['plan' => $plan])->id, 'site_id' => $id,
             'domain' => "$id.codeinchrome.com", 'host' => 'h1', 'cpu_limit' => '0.5', 'memory_limit' => '384m', 'status' => $status, 'port' => 20000 + count($this->sent),
-            'noindex_until' => $until]);
+            'noindex_until' => $until, 'scanned_clean_at' => now()->subHour(), 'links_clean_at' => now()->subHour()]);
     }
 
     public function test_a_week_old_site_is_opened_and_a_younger_one_stays_hidden(): void
@@ -81,6 +81,17 @@ class SitesIndexingTest extends TestCase
         $this->artisan('sites:indexing')->assertSuccessful();
 
         $this->assertSame([], $this->sent);
+        $this->assertNotNull($site->fresh()->noindex_until);
+    }
+
+    public function test_a_site_under_review_stays_hidden_after_its_week(): void
+    {
+        $site = $this->site('flagged', 'free', '2026-09-25 11:00:00');
+        $site->update(['links_clean_at' => null]); // the link check found something for a person to look at
+
+        $this->artisan('sites:indexing')->assertSuccessful();
+
+        $this->assertSame(['flagged' => true], $this->sent, 'kept hidden (and re-sent, in case the host missed it)');
         $this->assertNotNull($site->fresh()->noindex_until);
     }
 }

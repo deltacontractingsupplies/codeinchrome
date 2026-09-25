@@ -22,7 +22,11 @@ class SitesIndexing extends Command
     {
         $failed = 0;
         foreach (Site::with('user')->where('status', 'live')->whereNotNull('noindex_until')->get() as $site) {
-            $lift = $site->noindex_until->isPast() || $site->user?->isPaid();
+            // ...and only once both checks passed this week, the rule Explore
+            // uses: a site under review stays out of search engines (the
+            // second security audit, 2026-09-25). Re-checked every hour.
+            $clean = $site->scanned_clean_at?->gte(now()->subDays(7)) && $site->links_clean_at?->gte(now()->subDays(7));
+            $lift = ($site->noindex_until->isPast() || $site->user?->isPaid()) && $clean;
             try {
                 AgentClient::for($site->host)->setNoIndex($site->site_id, ! $lift);
             } catch (\Throwable $e) {
