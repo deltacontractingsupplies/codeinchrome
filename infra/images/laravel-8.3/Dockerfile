@@ -150,6 +150,14 @@ RUN printf '%s\n' 'SetEnv HTTPS on' > /etc/apache2/conf-available/cic-https.conf
 # every site's visitors to http://<site>:8080/login, which never loads (found
 # 2026-09-25). The name comes from the visitor's Host header; the scheme and
 # port are the public ones, https on 443.
+# The visitor's real address as PHP's REMOTE_ADDR (so Laravel's request()->ip()
+# and per-IP rate limits see visitors, not the Docker gateway): the host's
+# Caddy sends it as X-Real-IP, trusted only from the Docker networks, and the
+# access log records it (%a).
+RUN a2enmod remoteip && printf '%s\n' 'RemoteIPHeader X-Real-IP' 'RemoteIPInternalProxy 127.0.0.1 172.16.0.0/12' \
+    > /etc/apache2/conf-available/cic-remoteip.conf && a2enconf cic-remoteip \
+    && sed -ri 's/^(LogFormat "?)%h /\1%a /' /etc/apache2/apache2.conf && grep -q '^LogFormat "%a ' /etc/apache2/apache2.conf
+
 # Inside the <VirtualHost *:8080>: set server-wide, the vhost's own port won.
 RUN sed -ri 's!^(<VirtualHost \*:8080>)$!\1\n\tServerName https://localhost:443\n\tUseCanonicalName Off!' /etc/apache2/sites-available/000-default.conf \
     && grep -q 'ServerName https://localhost:443' /etc/apache2/sites-available/000-default.conf

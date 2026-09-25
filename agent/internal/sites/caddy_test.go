@@ -180,7 +180,7 @@ func TestEveryAppResponseIsCheckedForDownloadsAndOffsiteRedirects(t *testing.T) 
 		out := caddyConfig(cfg, s, "20001")
 		for _, want := range []string{"@cic_download expression", "@cic_redirect_bad expression", "handle_response {",
 			"handle @cic_download {", "handle @cic_redirect_bad {", "copy_response", "@cic_exec_path path_regexp",
-			"@cic_worker header Service-Worker script", "-Refresh"} {
+			"@cic_worker header Service-Worker script", "-Refresh", "header_up X-Real-IP {client_ip}"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s: missing %q:\n%s", s.ID, want, out)
 			}

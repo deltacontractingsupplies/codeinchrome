@@ -1137,6 +1137,13 @@ func appProxy(port, indent string) string {
 	var b strings.Builder
 	w := func(depth int, line string) { b.WriteString(indent + strings.Repeat("\t", depth) + line + "\n") }
 	w(0, "reverse_proxy 127.0.0.1:"+port+" {")
+	// The visitor's real address, which Caddy knows (Cloudflare's
+	// CF-Connecting-IP, trusted from Cloudflare only): the container's Apache
+	// makes it PHP's REMOTE_ADDR (mod_remoteip), so an app's per-IP limits
+	// and bans tell visitors apart - they all looked like the Docker gateway
+	// (the second security audit, 2026-09-25). Overwrites whatever a visitor
+	// sent under the same name.
+	w(1, "header_up X-Real-IP {client_ip}")
 	w(1, "handle_response {")
 	w(2, "handle @cic_download {")
 	w(3, fmt.Sprintf("respond %q 403", blockedDownloadMsg))

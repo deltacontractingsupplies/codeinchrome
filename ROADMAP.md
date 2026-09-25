@@ -74,7 +74,7 @@ before it is ticked.
 - [ ] **A29 [medium]** Per-IP limiters use the full IPv6 address, register has no hourly or daily cap, Turnstile is off in production, and /report has no challenge
 - [ ] **A30 [medium]** Ban evasion: only the canonical email links a banned person to a new account, and Google/Apple sign-up skips the Gmail-only domain rule
 - [ ] **A31 [medium]** The site-name impersonation filter misses common phishing names
-- [ ] **A32 [medium]** Customer apps see every visitor as the Docker gateway address, so per-IP limits and bans cannot tell visitors apart
+- [x] **A32 [medium]** Customer apps see every visitor as the Docker gateway address, so per-IP limits and bans cannot tell visitors apart - FIXED 2026-09-25: Caddy sends X-Real-IP {client_ip} (agent 0.30.4) and the image's mod_remoteip trusts it from the Docker networks only; verified live through Cloudflare: my real address logged, a forged X-Real-IP ignored.
 - [ ] **A33 [medium]** Authenticated Origin Pulls are off: the Cloudflare-ranges allowlist admits any Cloudflare customer's proxy or Worker, and h2's IP is published in DNS
 - [ ] **A34 [medium]** Docker CE, containerd.io (which includes runc), Caddy and the ondrej PHP packages are never auto-updated
 - [x] **A35 [low]** Wildcard *.lemonsqueezy.com lets any self-made Lemon Squeezy store be a redirect target - FIXED 2026-09-25: Lemon Squeezy only at /checkout/ or /buy/, at the edge and in LinkScanner; verified live.

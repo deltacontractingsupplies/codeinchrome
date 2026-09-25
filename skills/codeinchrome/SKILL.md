@@ -282,6 +282,8 @@ twice is harmless (unique test values, and delete what they create).
   Squeezy checkout, Google, Apple): the platform refuses any other offsite redirect (403),
   and removes `Refresh` headers. Link instead, and keep the visitor on the site.
 - **No Service Workers** on free sites: the worker script request is refused (403).
+- **`request()->ip()` is the visitor's real address** - the platform sets it; do not
+  configure `trustProxies`. Per-IP rate limits (`RateLimiter::for(...)->by($request->ip())`) work.
 - **Only `public/index.php` runs.** Every other `.php` file under `public/` answers 403, and
   `.htaccess` files are ignored (Laravel's rewrite rules are built in). Put code in
   controllers and routes, never a script in `public/`.
