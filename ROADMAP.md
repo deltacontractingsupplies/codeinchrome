@@ -34,6 +34,103 @@ verified on production.
    below), the operator's legal name and an abuse-response commitment for
    the terms, and (deferred: "not now") a separate customer-site domain.
 
+### Security audit, round 2 (2026-09-25): 49 confirmed findings
+
+Six auditors (redirects and downloads, malware and PHP, host hardening,
+performance, other platforms, accounts) each re-checked what was built
+rather than trusting it. A skeptic then re-verified every finding against
+code and production; none was refuted. Full evidence and proposed fixes are
+in the audit's journal; each item below is fixed, tested and verified live
+before it is ticked.
+
+- [ ] **A1 [high]** Offsite redirect passes the edge when the Location contains a TAB ("/<TAB>/evil", "ht<TAB>tps://evil", "\<TAB>\evil")
+- [ ] **A2 [high]** Refresh response header is not checked, so a free site can send visitors to any site
+- [ ] **A3 [high]** The download guard is bypassed by letter case, RFC 5987 filename*, bare attachment with octet-stream, and unlisted executable MIME types
+- [ ] **A4 [high]** Static files in public/ with executable or container extensions not on the list are served (.scr, .iso, .hta, .cab, .gz, .deb, .lnk, .img, .vhd, .msix, .appx, .xapk)
+- [ ] **A5 [high]** Phishing detection can be evaded (only pages linked from the home page, a published User-Agent, server HTML only) and never pauses a site (review email only)
+- [ ] **A6 [high]** No Safe Browsing or threat-feed monitoring of hosted sites, although sites share codeinchrome.com with the dashboard
+- [ ] **A7 [high]** Customer sites are not on a separate Public Suffix List domain (owner-deferred item, re-raised)
+- [ ] **A8 [high]** ClamAV detects no PHP webshells on h1/h3/h4 (only EICAR), yet it is the only check in vendor/, node_modules and non-PHP files
+- [ ] **A9 [high]** The obfuscation regexes are trivially bypassed: 17 of 17 common variant webshell forms I tested pass
+- [ ] **A10 [high]** Rules are chosen by file extension and Apache honours AllowOverride All, so PHP hidden in .txt/.jpg or pulled in by include is never checked
+- [ ] **A11 [high]** vendor/ and any node_modules/ path are exempt from the rules and writable from the editor; public/node_modules/x.php is served directly
+- [ ] **A12 [high]** The CPU (mining) watch resets on any container restart, which the owner can trigger, and on any single 5-minute reading under 90%
+- [ ] **A13 [high]** The stray-process reaper trusts argv: anything named apache2/httpd or containing 'phpactor' (or restarted every <12 minutes) survives on free sites
+- [ ] **A14 [high]** The egress watch counts only distinct hosts and ports in a conntrack snapshot, so SSH brute force, single-target floods or credential stuffing, and RST-answered port scans go unnoticed
+- [ ] **A15 [high]** The phishing/link scanner can be cloaked (fixed User-Agent, control-host source) and never sees unlinked or JS-rendered pages, yet Explore trusts its result
+- [x] **A16 [high]** The control host h2 answers on 80/443 to the whole internet: an old iptables snapshot, restored at boot, undid the Cloudflare-only firewall, and the deploy check still reports the ports as closed - FIXED 2026-09-25 (#21): the snapshot and unit retired, ufw rebuilt, and the deploy now checks the live ruleset and a direct request from outside.
+- [ ] **A17 [medium]** No CSP or Service-Worker restriction at the edge: page scripts can register a Service Worker and make blob: downloads that never pass through Caddy
+- [ ] **A18 [medium]** The link scanner is blind to JS navigation and iframes, uses a self-identifying User-Agent from the control host, only reviews offsite meta refreshes, and checks only the path extension
+- [ ] **A19 [medium]** A banned person can come straight back: no network/device link between accounts, no daily sign-up cap, Turnstile off
+- [ ] **A20 [medium]** No per-site outbound bandwidth cap or byte-volume watch
+- [ ] **A21 [medium]** No domain-level egress visibility: containers can use any DNS resolver, and Telegram exfil and pools on 443 are unrecorded; no restricted tier for new accounts
+- [ ] **A22 [medium]** Abuse reports trigger no automatic scan or pause; no abuse@ contact exists, which risks Cloudflare's 24-hour response rule
+- [ ] **A23 [medium]** Rename, Copy, eval, artisan and composer commands, and the app's own writes are not scanned when they happen, so detection waits for the 6-hourly scan; editor saves never run ClamAV
+- [ ] **A24 [medium]** A false positive from the hex-escape rule bans the account and takes down all its sites, even on a refused save
+- [ ] **A25 [medium]** Customer static files (public/css, js, images) have no Cache-Control at the origin; Cloudflare adds max-age=14400 and caches them, so edits reach visitors up to 4 hours late
+- [ ] **A26 [medium]** Once an agent runs optimize, route:cache or config:cache (all allowed), later editor edits to routes/config/.env/listeners silently have no effect
+- [ ] **A27 [medium]** A site paused for CPU or egress abuse can be deleted and a new one created at once; deleting the account also defeats a later ban by email
+- [ ] **A28 [medium]** Automatic bans can be triggered by harmless content (external .apk/.dmg/.deb links, copy buttons next to install commands), including content posted by strangers
+- [ ] **A29 [medium]** Per-IP limiters use the full IPv6 address, register has no hourly or daily cap, Turnstile is off in production, and /report has no challenge
+- [ ] **A30 [medium]** Ban evasion: only the canonical email links a banned person to a new account, and Google/Apple sign-up skips the Gmail-only domain rule
+- [ ] **A31 [medium]** The site-name impersonation filter misses common phishing names
+- [ ] **A32 [medium]** Customer apps see every visitor as the Docker gateway address, so per-IP limits and bans cannot tell visitors apart
+- [ ] **A33 [medium]** Authenticated Origin Pulls are off: the Cloudflare-ranges allowlist admits any Cloudflare customer's proxy or Worker, and h2's IP is published in DNS
+- [ ] **A34 [medium]** Docker CE, containerd.io (which includes runc), Caddy and the ondrej PHP packages are never auto-updated
+- [ ] **A35 [low]** Wildcard *.lemonsqueezy.com lets any self-made Lemon Squeezy store be a redirect target
+- [ ] **A36 [low]** Several Location headers are joined before the check, so an offsite one after a relative one passes the edge
+- [ ] **A37 [low]** The mining check resets on any 5-minute reading under 90% CPU, so a throttled miner is never paused
+- [ ] **A38 [low]** Scans read only the first 2 MiB (scheduled) or 32 MiB (unzip) of a PHP file, and clamd reports content past 100 MB as clean
+- [ ] **A39 [low]** A clamd failure skips the rules walk in ScanSite, and repeated scan failures alert nobody
+- [ ] **A40 [low]** Password-protected archives pass ClamAV as clean (AlertEncrypted not set)
+- [ ] **A41 [low]** Site image loads no php.ini, so compiled-in defaults apply (zend.assertions=1, zend.exception_ignore_args=0)
+- [ ] **A42 [low]** Control plane: Vite hashed assets not marked immutable (Cloudflare applies max-age=14400), and /theme.js is unversioned
+- [ ] **A43 [low]** The e2e test sign-up domain is enabled in production and will skip Turnstile once it is on
+- [ ] **A44 [low]** The first-week noindex is lifted on schedule even when the link check has open review findings
+- [ ] **A45 [low]** fail2ban runs only the default sshd jail (10-minute bans, no recidive), and sshd keeps defaults while SSH is open to the world
+- [ ] **A46 [low]** The control host's tunnel key (cictunnel) can open remote (-R) and unix-socket forwards on every customer host
+- [ ] **A47 [low]** The control host still runs an unused root cic-agent, the Docker daemon and old DOCKER-USER rules
+- [ ] **A48 [low]** There is no verifiable Cloudflare-side rate limiting or IP reputation, and the API token cannot read or manage it
+- [ ] **A49 [low]** Host auditing and kernel hardening are at Ubuntu defaults: no auditd, and several sysctls are not hardened
+
+### Claude in Chrome: the same power as a terminal (owner, 2026-09-25)
+
+Measured 2026-09-25, building "Lumen Commerce" (a Shopify-style store: a
+catalogue with variants, a cart, checkout with locked stock, an admin with
+products, orders and three themes, 17 tests, app:check) using ONLY the
+Claude in Chrome tools - no terminal, no local files:
+- the editor loaded in 2.2 s; cic.hello and cic.overview answered in under 0.5 s;
+- 16 files + 6 migrations + seed: 3.5 s; 21 files + route:list: 2.1 s;
+  19 views + CSS + 7 page requests: 4.8 s; 5 test files + the test run +
+  app:check: 4.6 s; a 78-page crawl (visitor + admin) + a real purchase: 37 s;
+- the time that matters is the agent composing each batch, not the platform.
+
+Limits found (each one a thing a terminal agent never hits):
+- [ ] Clicking "Create" answers before the page changes: a text read 3 s
+      later still showed "No sites yet" (the site was created). The panel
+      should answer in a way an agent can wait for (a status element, or
+      a page it can poll).
+- [ ] fetch() of the skill from JavaScript is refused by the browser tool as
+      "query string data"; reading it as a page works. The skill says so.
+- [ ] Every result is cut at 1,000 characters; test failures had to be
+      filtered and paged with cic.show. A cic.test() that returns only the
+      failing tests and their first line would save a round trip.
+- [ ] Tools a terminal has that cic lacks or names differently. Plan: one
+      `cic.sh` with the SAME names and flags as the shell, so an agent needs
+      nothing new: ls -la, cat, head/tail -n, grep -rnE (regex, file globs),
+      find -name/-type/-newer, wc, du -sh, tree, mkdir -p, cp -r, mv,
+      rm -rf (confirmed), sed -i (replaceAll), diff, touch, stat, and
+      `git` (status/diff/log over cic.history). Each measured against the
+      same command in a terminal here.
+- [ ] Bring in open-source Laravel apps both ways, and compare: `git clone`
+      / `composer create-project` of a public repository into a site (a
+      server-side clone - the browser cannot run git), timed against the
+      same clone in a terminal here.
+- [ ] A skill-creator style check: the skill tested with a fresh Claude in
+      Chrome session (side panel, no terminal, no prior context) building
+      the same store, timed, and every place it stalls fixed in the skill
+      or the API.
+
 ## Built and verified
 
 - [x] Host bootstrap with verified post-conditions, reboot-safe
