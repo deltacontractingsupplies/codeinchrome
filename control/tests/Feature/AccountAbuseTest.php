@@ -51,8 +51,8 @@ class AccountAbuseTest extends TestCase
         $this->assertSame(ClientNet::key('2a00:1851:1e:df01::1'), ClientNet::key('2a00:1851:1e:df01:ffff::9'));
         $this->assertNotSame(ClientNet::key('2a00:1851:1e:df01::1'), ClientNet::key('2a00:1851:1e:df02::1'));
         $this->assertSame('203.0.113.9', ClientNet::key('203.0.113.9'));
-        $this->assertSame(ClientNet::signal('203.0.113.9'), ClientNet::signal('203.0.113.200'), 'the same /24');
-        $this->assertNotSame(ClientNet::signal('203.0.113.9'), ClientNet::signal('203.0.114.9'));
+        $this->assertNotSame(ClientNet::signal('203.0.113.9'), ClientNet::signal('203.0.113.200'), 'not a whole /24: a carrier or office');
+        $this->assertSame(ClientNet::signal('2a00:1851:1e:df01::1'), ClientNet::signal('2a00:1851:1e:df01:ffff::2'), 'one IPv6 /64');
         $this->assertStringNotContainsString('203', (string) ClientNet::signal('203.0.113.9'), 'never the address itself');
     }
 
@@ -140,5 +140,25 @@ class AccountAbuseTest extends TestCase
         $this->post('/report', ['url' => 'https://verify-human.codeinchrome.com/', 'reason' => 'malware']);
 
         $this->assertNotNull($site->user->fresh()->banned_at);
+    }
+
+    public function test_the_test_suites_own_accounts_neither_cause_nor_suffer_a_hold(): void
+    {
+        config(['signup.test_domain' => 'codeinchrome.test']);
+        $net = ClientNet::signal('198.51.100.20');
+        User::factory()->create(['email' => 'banned-run@codeinchrome.test'])->forceFill(['signup_net' => $net, 'banned_at' => now()])->save();
+        $next = User::factory()->create(['email' => 'next-run@codeinchrome.test']);
+        $next->forceFill(['signup_net' => $net])->save();
+        $person = User::factory()->create(['email' => 'person@gmail.com']);
+        $person->forceFill(['signup_net' => $net])->save();
+
+        foreach ([$next, $person] as $user) {
+            try {
+                Provisioner::make()->provision($user, 'x-'.$user->id);
+            } catch (\RuntimeException $e) {
+                $this->assertStringNotContainsString('being checked', $e->getMessage(), $user->email.' must not be held');
+            }
+        }
+        $this->assertSame([], array_values(array_filter($this->sent, fn ($s) => str_contains($s, 'held for review'))));
     }
 }
