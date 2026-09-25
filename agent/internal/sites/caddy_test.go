@@ -1,6 +1,9 @@
 package sites
 
 import (
+	"bytes"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"testing"
@@ -299,5 +302,35 @@ func TestOriginPullsAreRequiredOnlyWhereCloudflareConnects(t *testing.T) {
 	cfg.OriginClientCA = ""
 	if strings.Contains(caddyConfig(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com"}, "20001"), "client_auth") {
 		t.Fatal("client_auth without a CA pool")
+	}
+}
+
+// A client CA pool that does not fully parse (two certificates joined on one
+// line, as a plain cat of Cloudflare's file made on h1 on 2026-09-26) must
+// never be required: the agent starts without origin pulls instead.
+func TestAnUnparseableClientPoolTurnsOriginPullsOff(t *testing.T) {
+	dir := t.TempDir()
+	ca, err := os.ReadFile("../../../infra/cloudflare-origin-pull-ca.crt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	good := filepath.Join(dir, "good.pem")
+	os.WriteFile(good, append(append([]byte{}, ca...), ca...), 0o600)
+	joined := filepath.Join(dir, "joined.pem")
+	os.WriteFile(joined, append(bytes.TrimRight(ca, "\n"), ca...), 0o600)
+	junk := filepath.Join(dir, "junk.pem")
+	os.WriteFile(junk, append(append([]byte{}, ca...), []byte("stray text\n")...), 0o600)
+
+	for path, want := range map[string]string{good: good, joined: "", junk: "", filepath.Join(dir, "missing.pem"): ""} {
+		m, err := New(Config{Root: t.TempDir(), CaddyDir: t.TempDir(), HostID: "h9", OriginClientCA: path, ProbeCert: "p", ProbeKey: "k"})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if m.cfg.OriginClientCA != want {
+			t.Errorf("%s: OriginClientCA %q, want %q", filepath.Base(path), m.cfg.OriginClientCA, want)
+		}
+		if want == "" && strings.Contains(caddyConfig(m.cfg, Site{ID: "s", Domain: "s.codeinchrome.com"}, "1"), "client_auth") {
+			t.Errorf("%s: client_auth rendered from an unusable pool", filepath.Base(path))
+		}
 	}
 }

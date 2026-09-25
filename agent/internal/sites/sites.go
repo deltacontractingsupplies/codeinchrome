@@ -3,9 +3,13 @@
 package sites
 
 import (
+	"bytes"
 	"context"
+	"crypto/x509"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -141,7 +145,44 @@ func New(cfg Config) (*Manager, error) {
 	if cfg.HostID == "" {
 		return nil, fmt.Errorf("empty host id")
 	}
+	if cfg.OriginClientCA != "" {
+		if err := validClientPool(cfg.OriginClientCA); err != nil {
+			// Requiring a certificate against a pool that does not parse
+			// trusts no one - Cloudflare included - and refuses every visitor
+			// (h1, 2026-09-26). Serve without origin pulls instead, loudly.
+			slog.Error("origin pulls NOT required: the client CA pool is unusable", "pool", cfg.OriginClientCA, "err", err)
+			cfg.OriginClientCA, cfg.ProbeCert, cfg.ProbeKey = "", "", ""
+		}
+	}
 	return &Manager{cfg: cfg, ioDisk: diskUnder(cfg.Root)}, nil
+}
+
+// validClientPool: every PEM block in the file is a certificate, and nothing
+// else is in it - no joined END/BEGIN lines, no stray text.
+func validClientPool(path string) error {
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return err
+	}
+	n := 0
+	for rest := b; len(bytes.TrimSpace(rest)) > 0; {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			return fmt.Errorf("unparseable text after %d certificate(s)", n)
+		}
+		if block.Type != "CERTIFICATE" {
+			return fmt.Errorf("a %s block where only certificates belong", block.Type)
+		}
+		if _, err := x509.ParseCertificate(block.Bytes); err != nil {
+			return fmt.Errorf("certificate %d: %v", n+1, err)
+		}
+		n++
+	}
+	if n == 0 {
+		return fmt.Errorf("no certificate in it")
+	}
+	return nil
 }
 
 func (m *Manager) HostID() string { return m.cfg.HostID }

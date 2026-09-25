@@ -276,11 +276,21 @@ if [[ -s /etc/caddy/origin/cert.pem && -s /etc/caddy/origin/key.pem ]]; then
       rm -f "$probe/client.csr" "$probe/ext"
     fi
     chmod 0600 "$probe"/*.key
-    cat /etc/caddy/origin/cloudflare-origin-pull.pem "$probe/ca.pem" > /etc/caddy/origin/client-ca.pem.new
-    chown root:caddy /etc/caddy/origin/client-ca.pem.new && chmod 0640 /etc/caddy/origin/client-ca.pem.new
-    mv /etc/caddy/origin/client-ca.pem.new /etc/caddy/origin/client-ca.pem
-    origin_flags+=" -origin-client-ca /etc/caddy/origin/client-ca.pem -probe-cert $probe/client.pem -probe-key $probe/client.key"
-    ok "origin pulls authenticated: Cloudflare's certificate (and this host's probe) required"
+    # One certificate after another, each on its own lines: Cloudflare's file
+    # has no final newline, and a plain cat joined the two END/BEGIN lines -
+    # an unparseable pool that trusted NO client, which refused Cloudflare
+    # itself (h1, 2026-09-26: every site 520 for minutes). Built, then proven.
+    { cat /etc/caddy/origin/cloudflare-origin-pull.pem; echo; cat "$probe/ca.pem"; echo; } | sed '/^[[:space:]]*$/d' > /etc/caddy/origin/client-ca.pem.new
+    pool_certs=$(openssl crl2pkcs7 -nocrl -certfile /etc/caddy/origin/client-ca.pem.new 2>/dev/null | openssl pkcs7 -print_certs -noout 2>/dev/null | grep -c '^subject=' || true)
+    if [[ $pool_certs == 2 ]] && openssl verify -CAfile /etc/caddy/origin/client-ca.pem.new "$probe/client.pem" >/dev/null 2>&1; then
+      chown root:caddy /etc/caddy/origin/client-ca.pem.new && chmod 0640 /etc/caddy/origin/client-ca.pem.new
+      mv /etc/caddy/origin/client-ca.pem.new /etc/caddy/origin/client-ca.pem
+      origin_flags+=" -origin-client-ca /etc/caddy/origin/client-ca.pem -probe-cert $probe/client.pem -probe-key $probe/client.key"
+      ok "origin pulls authenticated: Cloudflare's certificate (and this host's probe) required"
+    else
+      rm -f /etc/caddy/origin/client-ca.pem.new
+      warn "origin pulls NOT enabled: the client CA pool did not prove out ($pool_certs certificate(s)); sites stay open to Cloudflare"
+    fi
   else
     ok "origin pulls not authenticated (the zone setting is off)"
   fi
@@ -407,6 +417,24 @@ if compgen -G "$CIC/caddy/sites/*.caddy" >/dev/null; then
     (( any == 0 )) # no sites yet: nothing to prove
   }
   check "a site answers through Cloudflare" 'site_through_cloudflare'
+  # Origin pulls just turned on must leave the sites reachable - by the
+  # probe's certificate AND through Cloudflare with Cloudflare's own. If
+  # either fails, back out at once rather than when a person reads this
+  # (the 2026-09-26 outage lasted until one did): the agent rewrites every
+  # vhost without them as it restarts.
+  if grep -q -- '-origin-client-ca' /etc/systemd/system/cic-agent.service && [[ -n ${aop_site:-} ]]; then
+    aop_good=0
+    for _ in 1 2 3 4; do
+      if (( $(aop_try --cert "$CIC/etc/probe/client.pem" --key "$CIC/etc/probe/client.key") > 0 )) && site_through_cloudflare; then aop_good=1; break; fi
+      sleep 5
+    done
+    if (( ! aop_good )); then
+      sed -i -E 's# -origin-client-ca [^ ]+ -probe-cert [^ ]+ -probe-key [^ ]+##' /etc/systemd/system/cic-agent.service
+      systemctl daemon-reload && systemctl restart cic-agent
+      warn "origin pulls BACKED OUT: a trusted certificate or Cloudflare itself was refused; every vhost rewritten without them"
+      fails=$((fails+1))
+    fi
+  fi
   check "web ports closed to the world" '! ufw status | grep -qE "^(80|443)(/tcp)?( \(v6\))? +ALLOW( IN)? +Anywhere"' 
   check "caddy bound to :443 (vhosts exist)" 'has ":443" ss -ltn'
   check "caddy bound to :80 (vhosts exist)"  'has ":80" ss -ltn'
