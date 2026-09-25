@@ -242,8 +242,14 @@ e -p tcp -m multiport --dports 23,445,1433,3389,5900 -j CIC-REJECT
 # an outside resolver itself - plain (53), over TLS (853), or over HTTPS to
 # the public resolvers' addresses, which serve nothing else - is tunnelling
 # or hiding lookups, not resolving names: refused (audit A21).
-e -p udp --dport 53 -j CIC-REJECT
-e -p tcp -m multiport --dports 53,853 -j CIC-REJECT
+#
+# Site bridges only (br-*): every site network is one, with Docker's
+# resolver. The default bridge (docker0) is where image builds run, and it
+# has NO embedded resolver - its containers ask the host's upstream servers
+# themselves. Refusing that broke apt in a build (found 2026-09-26 on h4,
+# the day it shipped, before the weekly image rebuild ran).
+e -i br-+ -p udp --dport 53 -j CIC-REJECT
+e -i br-+ -p tcp -m multiport --dports 53,853 -j CIC-REJECT
 for doh in 1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112 208.67.222.222 208.67.220.220 94.140.14.14 94.140.15.15; do
   e -d "$doh" -j CIC-REJECT
 done
@@ -544,6 +550,9 @@ if docker image inspect codeinchrome/laravel:8.3 >/dev/null 2>&1; then
   dns_result=$(dns_probe)
   check "containers resolve names through Docker's resolver" '[[ $dns_result == resolves* ]]'
   check "containers cannot query an outside resolver directly" '[[ $dns_result == *direct-refused ]]'
+  # And an image build (the default bridge, no embedded resolver) still
+  # resolves names: the weekly site-image rebuild depends on it.
+  check "image builds resolve names (default bridge)" 'docker run --rm --network bridge --entrypoint php codeinchrome/laravel:8.3 -r "exit(gethostbyname(\"deb.debian.org\") === \"deb.debian.org\" ? 1 : 0);"'
 else
   ok "DNS egress not proven yet: the site image is built later in a first deploy"
 fi
