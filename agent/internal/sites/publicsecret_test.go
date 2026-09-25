@@ -177,6 +177,9 @@ func TestUnpublishSecretsSinceRemovesWhatCodeWrote(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(app, "public/x/leak.txt")); err == nil {
 		t.Fatal("the leaked file is still served")
 	}
+	if got, _ := os.ReadFile(filepath.Join(app, "storage/app/quarantine/public/x/leak.txt")); string(got) != fakeEnv {
+		t.Fatal("the file was not kept in quarantine")
+	}
 	if _, err := os.Stat(filepath.Join(app, "public/fine.txt")); err != nil {
 		t.Fatal("an innocent file was removed")
 	}
@@ -186,5 +189,24 @@ func TestUnpublishSecretsSinceRemovesWhatCodeWrote(t *testing.T) {
 	os.Chtimes(filepath.Join(app, "public/old.txt"), old, old)
 	if err := m.UnpublishSecretsSince(id, time.Now().Add(-time.Minute)); err != nil {
 		t.Fatalf("an older file was blamed on this run: %v", err)
+	}
+}
+
+// The scheduled scan's sweep: any age, reported as a finding for review.
+func TestTheScheduledSweepQuarantinesOldLeaksToo(t *testing.T) {
+	m, id, app := secretSite(t)
+	old := time.Now().Add(-48 * time.Hour)
+	os.WriteFile(filepath.Join(app, "public/debug.txt"), []byte("pw fake-db-password-42"), 0o644)
+	os.Chtimes(filepath.Join(app, "public/debug.txt"), old, old)
+	os.WriteFile(filepath.Join(app, "public/ok.txt"), []byte("fine"), 0o644)
+	found := m.SweepPublishedSecrets(id, time.Time{})
+	if len(found) != 1 || found[0].Kind != "published_secret" || found[0].Path != "/public/debug.txt" || !strings.Contains(found[0].Detail, "DB_PASSWORD") {
+		t.Fatalf("findings %+v", found)
+	}
+	if _, err := os.Stat(filepath.Join(app, "public/ok.txt")); err != nil {
+		t.Fatal("an innocent file was moved")
+	}
+	if len(m.SweepPublishedSecrets(id, time.Time{})) != 0 {
+		t.Fatal("a second sweep found it again")
 	}
 }

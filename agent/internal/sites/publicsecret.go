@@ -131,11 +131,16 @@ func refuseSecretValuesIntoPublic(root, dst string) error {
 	return publishedSecretIn(root, rel, siteSecrets(root))
 }
 
-// UnpublishSecretsSince runs after code the host did not write itself (eval,
-// artisan, composer): a file in public/ changed since t that carries one of
-// the site's secret values is removed, and the refusal returned. `php -r
-// 'file_put_contents("public/x.txt", file_get_contents(".env"))'` is one line.
-func (m *Manager) UnpublishSecretsSince(id string, t time.Time) error {
+// quarantineDir is where a file taken out of public/ goes: kept (the site
+// may have written it at runtime, with no saved version), never served.
+const quarantineDir = "storage/app/quarantine"
+
+// SweepPublishedSecrets moves every file in public/ changed since `since`
+// (the zero time: all of them) that carries one of the site's secret values
+// into storage/app/quarantine/, and says what it moved. Run after code the
+// host did not write itself (eval, artisan, composer) and by the scheduled
+// scan, which catches what the site's own code wrote while serving a request.
+func (m *Manager) SweepPublishedSecrets(id string, since time.Time) []Finding {
 	if ValidID(id) != nil {
 		return nil
 	}
@@ -147,20 +152,65 @@ func (m *Manager) UnpublishSecretsSince(id string, t time.Time) error {
 	if len(secrets) == 0 {
 		return nil
 	}
-	var found error
+	var found []Finding
 	_ = walkBeneath(root, filepath.Join(root, "public"), func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil || d == nil || d.IsDir() || d.Type()&fs.ModeSymlink != 0 {
 			return nil
 		}
-		if info, err := d.Info(); err != nil || info.ModTime().Before(t) {
+		info, err := d.Info()
+		if err != nil || (!since.IsZero() && info.ModTime().Before(since)) || info.Size() > MaxUploadSize {
 			return nil
 		}
 		rel := strings.TrimPrefix(p, root)
-		if err := publishedSecretIn(root, rel, secrets); err != nil {
-			_ = removeBeneath(root, rel)
-			found = fmt.Errorf("%w (%s was removed)", err, strings.TrimPrefix(rel, "/"))
+		b, err := readBeneath(root, p, MaxUploadSize)
+		if err != nil {
+			return nil
+		}
+		for _, s := range secrets {
+			if !bytes.Contains(b, []byte(s.value)) {
+				continue
+			}
+			to := filepath.Join("/", quarantineDir, rel)
+			detail := fmt.Sprintf("carried the value of %s; moved out of public/ to %s", s.name, strings.TrimPrefix(to, "/"))
+			if err := quarantine(root, rel, to, b); err != nil {
+				_ = removeBeneath(root, rel)
+				detail = fmt.Sprintf("carried the value of %s; removed from public/ (%v)", s.name, err)
+			}
+			found = append(found, Finding{Path: rel, Kind: "published_secret", Detail: detail})
+			break
 		}
 		return nil
 	})
 	return found
+}
+
+// quarantine writes b at `to` (a new file, never through a link) and then
+// removes `from`.
+func quarantine(root, from, to string, b []byte) error {
+	if err := mkdirBeneath(root, filepath.Dir(to)); err != nil {
+		return err
+	}
+	_ = removeBeneath(root, to) // an earlier copy of the same path
+	f, err := createBeneath(root, to, 0o640)
+	if err != nil {
+		return err
+	}
+	if _, err := f.Write(b); err != nil {
+		f.Close()
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return removeBeneath(root, from)
+}
+
+// UnpublishSecretsSince is the sweep as a refusal, for eval and commands.
+func (m *Manager) UnpublishSecretsSince(id string, t time.Time) error {
+	found := m.SweepPublishedSecrets(id, t)
+	if len(found) == 0 {
+		return nil
+	}
+	name := strings.TrimPrefix(strings.SplitN(found[0].Detail, ";", 2)[0], "carried the value of ")
+	return fmt.Errorf("%w - %s", &ErrPublishesSecret{name}, found[0].Detail)
 }

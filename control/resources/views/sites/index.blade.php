@@ -28,7 +28,7 @@
     @if (auth()->user()->trialExpired())
         <a href="{{ route('billing') }}" class="rounded-md bg-teal-500 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-teal-400">Upgrade to Starter</a>
     @elseif ($sites->count() < $plan['sites'])
-        <form method="POST" action="{{ route('sites.store') }}" class="flex items-start gap-2">
+        <form method="POST" action="{{ route('sites.store') }}" class="flex flex-wrap items-start gap-2" data-create-site>
             @csrf
             <div>
                 <label for="site_id" class="sr-only">Site name</label>
@@ -40,7 +40,11 @@
                 </div>
                 @error('site_id')<p class="mt-1 text-sm text-red-400">{{ $message }}</p>@enderror
             </div>
-            <button class="rounded-md bg-teal-500 px-4 py-2 font-medium text-neutral-950 hover:bg-teal-400">Create</button>
+            <button class="rounded-md bg-teal-500 px-4 py-2 font-medium text-neutral-950 hover:bg-teal-400 disabled:opacity-60" data-create-button>Create</button>
+            {{-- Said the moment Create is pressed: creating takes seconds (3-17 s
+                 measured), and a page that does not change looks like nothing
+                 happened - to a person, and to an agent reading the page. --}}
+            <p class="basis-full text-sm text-amber-200" role="status" aria-live="polite" data-create-status hidden></p>
         </form>
         @unless (auth()->user()->isPaid())
             {{-- Said BEFORE the site exists: free sites are listed, with no opt-out. --}}
@@ -63,7 +67,7 @@
 @else
     <ul class="mt-8 space-y-3">
         @foreach ($sites as $site)
-            <li class="rounded-lg border border-neutral-800 p-4 flex flex-wrap items-center justify-between gap-4">
+            <li class="rounded-lg border border-neutral-800 p-4 flex flex-wrap items-center justify-between gap-4" data-site-id="{{ $site->site_id }}" data-site-status="{{ $site->status }}">
                 <div>
                     <div class="flex items-center gap-2">
                         @php
