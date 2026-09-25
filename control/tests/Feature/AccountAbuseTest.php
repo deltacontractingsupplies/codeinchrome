@@ -161,4 +161,20 @@ class AccountAbuseTest extends TestCase
         }
         $this->assertSame([], array_values(array_filter($this->sent, fn ($s) => str_contains($s, 'held for review'))));
     }
+
+    public function test_sign_up_is_capped_per_network_but_not_for_the_signed_test_suite(): void
+    {
+        config(['signup.test_domain' => 'codeinchrome.test', 'signup.test_secret' => 'shh']);
+        $form = fn ($n) => ['name' => 'N', 'email' => "cap$n@codeinchrome.test", 'password' => 'correct-horse-battery-9', 'password_confirmation' => 'correct-horse-battery-9'];
+        $codes = [];
+        for ($i = 0; $i < 25; $i++) {
+            \Illuminate\Support\Facades\RateLimiter::clear('198.51.100.9'); // step past the per-minute cap: this is about the hourly one
+            $codes[] = $this->withServerVariables(['REMOTE_ADDR' => '198.51.100.9'])->post('/register', ['name' => 'N', 'email' => "p$i@example.org",
+                'password' => 'correct-horse-battery-9', 'password_confirmation' => 'correct-horse-battery-9'])->status();
+            auth()->logout();
+        }
+        $this->assertContains(429, $codes, 'the hourly cap bites for anyone');
+        $this->withHeader('X-CIC-E2E', \App\Auth\TestSuite::header('shh'))->withServerVariables(['REMOTE_ADDR' => '198.51.100.9'])
+            ->post('/register', $form(1))->assertSessionHasNoErrors()->assertStatus(302);
+    }
 }
