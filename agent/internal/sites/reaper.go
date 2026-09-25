@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -22,20 +23,46 @@ import (
 // are theirs to run.
 const strayAfter = composerTimeout + 2*time.Minute
 
-// strayProcess: may this process, running for secs, be killed?
-func strayProcess(args string, secs int64) bool {
+// strayProcess: may this process, running for secs, be killed? Judged by
+// its real executable (exe: /proc/<pid>/exe), never by its argv, which the
+// process writes itself: cli_set_process_title("apache2 -DFOREGROUND") or an
+// argument "phpactor" kept anything alive (the second security audit,
+// 2026-09-25). Apache stays; the PHP language server stays only while the
+// site has a language-server session open (lspOpen).
+func strayProcess(args string, secs int64, exe string, lspOpen bool) bool {
 	if secs < int64(strayAfter/time.Second) {
 		return false
 	}
-	f := strings.Fields(args)
-	if len(f) == 0 {
+	bin := filepath.Base(strings.TrimSuffix(exe, " (deleted)"))
+	if bin == "apache2" && strings.HasPrefix(exe, "/usr/sbin/") {
 		return false
 	}
-	switch filepath.Base(f[0]) {
-	case "apache2", "httpd":
+	if lspOpen && strings.HasPrefix(bin, "php") && strings.Contains(args, "phpactor") {
 		return false
 	}
-	return !strings.Contains(args, "phpactor")
+	return true
+}
+
+// procExe is where a process's executable really is (a variable for the tests).
+var procExe = func(pid int) string {
+	p, _ := os.Readlink(fmt.Sprintf("/proc/%d/exe", pid))
+	return p
+}
+
+// lspOpen: does the site have a live language-server session?
+func lspOpen(site string) bool {
+	lspMu.Lock()
+	defer lspMu.Unlock()
+	for k, s := range lspSessions {
+		if strings.HasPrefix(k, site+"/") {
+			select {
+			case <-s.done:
+			default:
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // killProcess is a variable so the tests kill nothing.
@@ -58,8 +85,9 @@ func (m *Manager) ReapStrays(ctx context.Context) []string {
 		if err != nil {
 			continue
 		}
+		open := lspOpen(s.ID)
 		for _, p := range parseTop(out) {
-			if strconv.Itoa(p.pid) == strings.TrimSpace(init) || !strayProcess(p.args, p.secs) {
+			if strconv.Itoa(p.pid) == strings.TrimSpace(init) || !strayProcess(p.args, p.secs, procExe(p.pid), open) {
 				continue
 			}
 			if killProcess(p.pid) == nil {
