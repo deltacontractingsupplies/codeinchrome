@@ -75,7 +75,7 @@ before it is ticked.
 - [ ] **A30 [medium]** Ban evasion: only the canonical email links a banned person to a new account, and Google/Apple sign-up skips the Gmail-only domain rule - PART DONE 2026-09-25: network signals as in A19. Google and Apple sign-up without the Gmail-only rule is the owner's decision (any real Google or Apple identity).
 - [x] **A31 [medium]** The site-name impersonation filter misses common phishing names - FIXED 2026-09-25: names normalised (hyphens, look-alike digits) and more brands; short brands refused beside a lure word; every audit example refused, foodbank-online and purchase-online still allowed (tested).
 - [x] **A32 [medium]** Customer apps see every visitor as the Docker gateway address, so per-IP limits and bans cannot tell visitors apart - FIXED 2026-09-25: Caddy sends X-Real-IP {client_ip} (agent 0.30.4) and the image's mod_remoteip trusts it from the Docker networks only; verified live through Cloudflare: my real address logged, a forged X-Real-IP ignored.
-- [ ] **A33 [medium]** Authenticated Origin Pulls are off: the Cloudflare-ranges allowlist admits any Cloudflare customer's proxy or Worker, and h2's IP is published in DNS - BUILT 2026-09-26: the platform names' vhosts (hosts and h2's app, bare domain and www) require Cloudflare's origin-pull certificate (Cloudflare's CA in the repo, valid to 2029); the agent's own edge probe presents a certificate from a per-host probe CA (root-only), so the rollback guard keeps working; custom domains and h2's fleet backups vhost are left as they are. The deploys require it only when the zone setting is ON (checked through the API), so no order of deploys can refuse visitors; turning it off is the reverse order with CIC_ORIGIN_PULLS=off (infra/setup-origin-pulls.sh explains). Verified: the rendered block validates on a host's Caddy 2.11 (require_and_verify).
+- [x] **A33 [medium]** Authenticated Origin Pulls are off: the Cloudflare-ranges allowlist admits any Cloudflare customer's proxy or Worker, and h2's IP is published in DNS - BUILT 2026-09-26: the platform names' vhosts (hosts and h2's app, bare domain and www) require Cloudflare's origin-pull certificate (Cloudflare's CA in the repo, valid to 2029); the agent's own edge probe presents a certificate from a per-host probe CA (root-only), so the rollback guard keeps working; custom domains and h2's fleet backups vhost are left as they are. The deploys require it only when the zone setting is ON (checked through the API), so no order of deploys can refuse visitors; turning it off is the reverse order with CIC_ORIGIN_PULLS=off (infra/setup-origin-pulls.sh explains). Verified: the rendered block validates on a host's Caddy 2.11 (require_and_verify).
       INCIDENT 2026-09-26, first rollout on h1: every h1 site answered 520
       through Cloudflare for several minutes. Cause: Cloudflare's CA file has
       no final newline, and the pool was built with a plain cat, which joined
@@ -91,6 +91,13 @@ before it is ticked.
       install-agent.sh backs origin pulls out by itself if the probe OR
       Cloudflare is refused after enabling. The fixed pool was proven on a
       throwaway Caddy on h1 (probe 200, no certificate refused).
+      ON 2026-09-26 (second rollout, one host at a time with the
+      self-rollback armed): h1, h3, h4 and h2 require Cloudflare's
+      certificate; each host's checks passed (without it refused, the probe's
+      accepted), and every live site answered through Cloudflare exactly as
+      before (200/302 as in the baseline taken first); the production e2e
+      suite then passed (15, 3 skipped as always), creating and serving a
+      brand-new site behind them.
 - [x] **A34 [medium]** Docker CE, containerd.io (which includes runc), Caddy and the ondrej PHP packages are never auto-updated - FIXED 2026-09-25: unattended-upgrades also takes Docker (docker-ce, containerd, runc) and Caddy on every host, and Ondrej's PHP and Caddy on the control host (origins read from apt-cache policy); checked by bootstrap.
 - [x] **A35 [low]** Wildcard *.lemonsqueezy.com lets any self-made Lemon Squeezy store be a redirect target - FIXED 2026-09-25: Lemon Squeezy only at /checkout/ or /buy/, at the edge and in LinkScanner; verified live.
 - [x] **A36 [low]** Several Location headers are joined before the check, so an offsite one after a relative one passes the edge - FIXED 2026-09-25: several joined Location values with an offsite one are refused; verified live.
