@@ -41,7 +41,9 @@ class AbuseScan extends Command
             // opened, and what looks like a phishing kit (a Telegram bot can be honest).
             // A secret the site published: moved out of public/ by the host
             // already; the owner should hear, and nobody is banned for a leak.
-            $review = ['unscannable', 'phishing', 'published_secret'];
+            // And a cloned repository's own file, unchanged, flagged by a
+            // signature added since it was cloned: someone else's code.
+            $review = ['unscannable', 'phishing', 'published_secret', 'malware_in_clone'];
             $findings = array_values(array_filter($scan['findings'], fn ($f) => ! in_array($f['kind'] ?? '', $review, true)));
             $unscannable = array_values(array_filter($scan['findings'], fn ($f) => in_array($f['kind'] ?? '', $review, true)));
             if ($findings !== []) {

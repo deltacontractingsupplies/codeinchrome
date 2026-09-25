@@ -50,6 +50,8 @@ class AbuseEnforcementTest extends TestCase
                     'clam-down-rules-clean' => Http::response(['ok' => true, 'findings' => [], 'clean' => false, 'incomplete' => 'clamd down']),
                     'encrypted' => Http::response(['ok' => true, 'findings' => [['path' => '/backup.zip', 'kind' => 'unscannable', 'detail' => 'Heuristics.Encrypted.Zip']], 'clean' => false]),
                     'phishing' => Http::response(['ok' => true, 'findings' => [['path' => '/public/p.html', 'kind' => 'phishing', 'detail' => 'sends data to a Telegram bot']], 'clean' => false]),
+                    'cloned' => Http::response(['ok' => true, 'findings' => [['path' => '/demo/lib/x.php', 'kind' => 'malware_in_clone', 'detail' => 'Php.Malware.New FOUND (unchanged since it was cloned from a public repository)']], 'clean' => false]),
+                    'leaked' => Http::response(['ok' => true, 'findings' => [['path' => '/public/debug.txt', 'kind' => 'published_secret', 'detail' => 'carried the value of DB_PASSWORD; moved out of public/']], 'clean' => false]),
                 };
             }
 
@@ -154,6 +156,19 @@ class AbuseEnforcementTest extends TestCase
         $this->artisan('abuse:scan')->assertSuccessful();
         $this->assertNull($user->fresh()->banned_at);
         $this->assertNull($site->fresh()->scanned_clean_at);
+    }
+
+    public function test_a_cloned_repositorys_own_file_or_a_published_secret_goes_to_a_person_not_a_ban(): void
+    {
+        foreach (['cloned' => 20108, 'leaked' => 20109] as $answer => $port) {
+            $user = User::factory()->create(['plan' => 'free']);
+            $site = $this->siteFor($user, "site$answer", $port);
+            $this->scanAnswer = $answer;
+            $this->artisan('abuse:scan', ['site' => "site$answer"])->assertSuccessful();
+            $this->assertNull($user->fresh()->banned_at, "$answer banned the customer");
+            $this->assertNull($site->fresh()->scanned_clean_at, "$answer counted as clean");
+            $this->assertDatabaseHas('audit_events', ['action' => 'abuse.review', 'site' => "site$answer"]);
+        }
     }
 
     public function test_two_failed_scans_in_a_row_tell_the_owner(): void

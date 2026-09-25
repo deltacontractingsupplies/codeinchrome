@@ -517,6 +517,14 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		if found == nil {
 			found = []sites.Finding{}
 		}
+		// A file exactly as a cloned repository brought it is someone else's
+		// code: a later signature on it is for review, not a ban (cloned.go).
+		for i, f := range found {
+			if (f.Kind == "malware" || f.Kind == "obfuscated") && mgr.FromCloneUnchanged(r.PathValue("id"), f.Path) {
+				found[i].Kind = "malware_in_clone"
+				found[i].Detail += " (unchanged since it was cloned from a public repository)"
+			}
+		}
 		// A secret the site's own code put in public/ while serving a request
 		// (writes through the panel, eval and commands are refused already).
 		found = append(found, mgr.SweepPublishedSecrets(r.PathValue("id"), time.Time{})...)
