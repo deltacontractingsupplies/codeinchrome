@@ -139,8 +139,32 @@ func TestAScanThatCannotRunNeverCountsAsClean(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(m.appDir(id), "public/ok.txt")); !os.IsNotExist(err) {
 		t.Fatal("an unscanned upload was kept")
 	}
-	if _, err := m.ScanSite(context.Background(), id); err == nil {
+	os.MkdirAll(filepath.Join(m.appDir(id), "public"), 0o755)
+	os.WriteFile(filepath.Join(m.appDir(id), "public/s.php"), []byte(`<?php passthru($_GET['c']);`), 0o640)
+	found, err := m.ScanSite(context.Background(), id)
+	if err == nil {
 		t.Fatal("a site scan that cannot run must be an error, never a clean result")
+	}
+	// ...and the rules, which need no clamd, still ran (the audit, 2026-09-25).
+	if len(found) != 1 || found[0].Kind != "obfuscated" {
+		t.Fatalf("the rule findings must come back with the error: %+v", found)
+	}
+}
+
+func TestAnArchiveClamAVCannotOpenIsRefusedButIsNotMalware(t *testing.T) {
+	enc := refusal([]Finding{{Path: "/x.zip", Kind: "unscannable", Detail: "Heuristics.Encrypted.Zip"}})
+	if enc == nil {
+		t.Fatal("an encrypted archive must be refused: nothing vouches for what is inside")
+	}
+	if _, isMalware := IsMalware(enc); isMalware {
+		t.Fatal("an encrypted archive is not malware: refusing it must not ban anyone")
+	}
+	mixed := refusal([]Finding{{Path: "/x.zip", Kind: "unscannable"}, {Path: "/y.exe", Kind: "malware", Detail: "Win.Trojan.X"}})
+	if m, isMalware := IsMalware(mixed); !isMalware || len(m.Findings) != 1 || m.Findings[0].Path != "/y.exe" {
+		t.Fatalf("malware beside it still counts: %v", mixed)
+	}
+	if !unscannableSig("Heuristics.Encrypted.Zip") || !unscannableSig("Heuristics.Limits.Exceeded.MaxFileSize") || unscannableSig("Win.Test.EICAR_HDB-1") {
+		t.Fatal("signature classes")
 	}
 }
 

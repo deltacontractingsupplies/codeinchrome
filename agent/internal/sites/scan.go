@@ -200,6 +200,36 @@ var clamdscan = func(ctx context.Context, paths ...string) (string, int, error) 
 	return string(out), code, nil
 }
 
+// unscannableSig: ClamAV could not look inside (a password-protected archive
+// or document, or past its size limits - clamd.conf AlertEncrypted*/
+// AlertExceedsMax). Not evidence of malware, so never a ban: the file is
+// refused, or reviewed, because nothing vouches for what it holds (the
+// second security audit, 2026-09-25: an encrypted zip with EICAR inside was
+// reported clean).
+func unscannableSig(sig string) bool {
+	return strings.HasPrefix(sig, "Heuristics.Encrypted") || strings.HasPrefix(sig, "Heuristics.Limits.Exceeded")
+}
+
+// refusal turns what a scan of written files found into the error the write
+// fails with: malware (a ban), or a plain refusal for what could not be read.
+func refusal(found []Finding) error {
+	var bad, unreadable []Finding
+	for _, f := range found {
+		if f.Kind == "unscannable" {
+			unreadable = append(unreadable, f)
+		} else {
+			bad = append(bad, f)
+		}
+	}
+	switch {
+	case len(bad) > 0:
+		return &ErrMalware{Findings: bad}
+	case len(unreadable) > 0:
+		return fmt.Errorf("refused: %s could not be checked for malware (a password-protected or oversize archive); upload it unencrypted, or its files one by one", unreadable[0].Path)
+	}
+	return nil
+}
+
 // clamScan scans paths (files or folders) and returns what it found. Exit 0:
 // clean; 1: found; anything else: the scan itself failed, which is an error -
 // never "clean".
@@ -229,7 +259,11 @@ func clamScan(ctx context.Context, root string, paths ...string) ([]Finding, err
 		}
 		path := strings.TrimPrefix(line[:i], root)
 		sig := strings.TrimSuffix(line[i+2:], " FOUND")
-		found = append(found, Finding{Path: "/" + strings.TrimPrefix(path, "/"), Kind: "malware", Detail: sig})
+		kind := "malware"
+		if unscannableSig(sig) {
+			kind = "unscannable"
+		}
+		found = append(found, Finding{Path: "/" + strings.TrimPrefix(path, "/"), Kind: kind, Detail: sig})
 	}
 	if code == 1 && len(found) == 0 {
 		return nil, fmt.Errorf("malware scan reported a finding it did not name: %s", firstLine(out, nil))
@@ -247,10 +281,9 @@ func (m *Manager) ScanSite(ctx context.Context, id string) ([]Finding, error) {
 	if err != nil {
 		return nil, fmt.Errorf("site %q has no app directory", id)
 	}
-	found, err := clamScan(ctx, root, root)
-	if err != nil {
-		return nil, err
-	}
+	// The rules below need no clamd: a ClamAV failure must not skip them (the
+	// second security audit, 2026-09-25). Both results come back together.
+	found, clamErr := clamScan(ctx, root, root)
 	err = walkBeneath(root, root, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil || ctx.Err() != nil {
 			return nil
@@ -276,6 +309,9 @@ func (m *Manager) ScanSite(ctx context.Context, id string) ([]Finding, error) {
 	})
 	if err != nil {
 		return found, err
+	}
+	if clamErr != nil {
+		return found, clamErr
 	}
 	return found, ctx.Err()
 }
@@ -307,10 +343,7 @@ func scanFile(ctx context.Context, root, rel string) error {
 	if err != nil {
 		return err
 	}
-	if len(found) > 0 {
-		return &ErrMalware{Findings: found}
-	}
-	return nil
+	return refusal(found)
 }
 
 // scanWrittenPHP applies the obfuscation rules to a file already written.

@@ -215,10 +215,24 @@ for entry in $CIC_HOSTS; do
 set -Eeuo pipefail
 id -u cictunnel >/dev/null 2>&1 || useradd -r -m -d /home/cictunnel -s /usr/sbin/nologin cictunnel
 install -d -m 700 -o cictunnel -g cictunnel /home/cictunnel/.ssh
-entry='restrict,port-forwarding,permitopen="127.0.0.1:9440" $control_key'
+# permitlisten="localhost:1": no remote (-R) forward can be opened (port 1 is
+# privileged, and this user is not root); command=nologin: no shell, and the
+# tunnel (ssh -NT) asks for none. Both proved with a throwaway key on a host
+# first: the agent forward works, -R and a shell are refused. ("none" is not
+# a valid value here: sshd rejected the whole key line.)
+entry='restrict,port-forwarding,permitopen="127.0.0.1:9440",permitlisten="localhost:1",command="/usr/sbin/nologin" $control_key'
+keybody=\$(echo "\$entry" | awk '{print \$(NF-1)}')
 touch /home/cictunnel/.ssh/authorized_keys
-grep -qF "\${entry##* }" /home/cictunnel/.ssh/authorized_keys 2>/dev/null \
-  || echo "\$entry" >> /home/cictunnel/.ssh/authorized_keys
+# Replaced, not appended: an older line for the same key keeps its old options.
+{ grep -vF "\$keybody" /home/cictunnel/.ssh/authorized_keys || true; echo "\$entry"; } > /home/cictunnel/.ssh/authorized_keys.new
+mv /home/cictunnel/.ssh/authorized_keys.new /home/cictunnel/.ssh/authorized_keys
+# fail2ban never bans the control host: its tunnels are this host's busiest
+# SSH clients, and when they were refused for a minute (a bad key option,
+# 2026-09-25) aggressive mode banned it on every host - six minutes with no
+# control plane. Written here, where the address is known, not in the repo.
+printf '[DEFAULT]\nignoreip = 127.0.0.1/8 ::1 %s\n' "$ip" > /etc/fail2ban/jail.d/cic-ignore.conf
+fail2ban-client reload >/dev/null 2>&1 || systemctl restart fail2ban
+fail2ban-client set sshd unbanip "$ip" >/dev/null 2>&1 || true
 chown cictunnel:cictunnel /home/cictunnel/.ssh/authorized_keys
 chmod 600 /home/cictunnel/.ssh/authorized_keys
 # A nologin shell still permits port forwarding, which is exactly the amount
@@ -418,6 +432,51 @@ Unattended-Upgrade::Automatic-Reboot-Time "05:15";
 APT
 ok "an update that needs a reboot is applied at 05:15 UTC"
 
+say "host hardening"
+# The same as the customer hosts' (bootstrap.sh), for the host that holds
+# every token: SSH without forwarding extras, fail2ban with growing bans and
+# recidive, security updates for PHP (Ondrej's PPA), Caddy and the OS.
+# And nothing here that this host does not use: an old agent and Docker from
+# when it was set up like a customer host (the second security audit).
+ssh_ 'bash -s' <<'REMOTE'
+set -Eeuo pipefail
+cat > /etc/ssh/sshd_config.d/10-codeinchrome.conf <<'CONF'
+PasswordAuthentication no
+PermitRootLogin prohibit-password
+KbdInteractiveAuthentication no
+MaxAuthTries 3
+LoginGraceTime 30
+X11Forwarding no
+AllowAgentForwarding no
+MaxStartups 10:30:60
+CONF
+sshd -t && systemctl reload ssh
+cat > /etc/fail2ban/jail.d/cic.conf <<'CONF'
+[DEFAULT]
+bantime.increment = true
+bantime.maxtime = 1w
+
+[sshd]
+mode = aggressive
+
+[recidive]
+enabled = true
+bantime = 1w
+findtime = 1d
+CONF
+systemctl restart fail2ban
+cat > /etc/apt/apt.conf.d/51cic-origins <<'CONF'
+Unattended-Upgrade::Origins-Pattern {
+        "origin=LP-PPA-ondrej-php";
+        "origin=cloudsmith/caddy/stable";
+};
+CONF
+for unit in cic-agent docker.socket docker containerd; do
+  systemctl disable --now "$unit" >/dev/null 2>&1 || true
+done
+REMOTE
+ok "ssh, fail2ban (recidive), updates incl. PHP and Caddy; no agent or Docker on this host"
+
 say "web ports: Cloudflare and the fleet only"
 # The control plane is served through Cloudflare, and the backups endpoint
 # answers the fleet's hosts only (restic, direct: larger than the proxy takes).
@@ -483,6 +542,9 @@ check "web ports closed to the world" "ssh root@$ip '! ufw status | grep -qE \"^
 # which is outside - no answer at all on this host's address.
 check "no rule in the live firewall opens 80/443 to everyone" "ssh root@$ip '! iptables -S | grep -E -- \"--dports? ([0-9,]*,)?(80|443)(,[0-9,]*)? .*-j ACCEPT\\\$\" | grep -qv -- \" -s \"'"
 check "a request straight to this host's address gets no answer" "! curl -s -o /dev/null -m 8 -k --resolve $domain:443:$ip https://$domain/"
+check "ssh: keys only, no forwarding extras" "ssh root@$ip 'sshd -T | grep -qx \"x11forwarding no\" && sshd -T | grep -qx \"passwordauthentication no\"'"
+check "fail2ban recidive jail" "ssh root@$ip 'fail2ban-client status recidive'"
+check "no agent or Docker on the control host" "ssh root@$ip '! systemctl is-active --quiet cic-agent && ! systemctl is-active --quiet docker'"
 check "no snapshot restores old rules at boot" "ssh root@$ip '[[ ! -e /etc/iptables/rules.v4 && ! -e /etc/systemd/system/cic-egress.service ]]'"
 check "backups endpoint answers the hosts over trusted TLS" "[ \"\$(ssh -n -o BatchMode=yes root@$bk_host 'curl -s -o /dev/null -w %{http_code} --max-time 15 --cacert /opt/codeinchrome/etc/restic-ca.pem https://backups.$zone/')\" = 401 ]"
 check "php-fpm running"        "ssh root@$ip 'systemctl is-active php$PHP_VERSION-fpm'"

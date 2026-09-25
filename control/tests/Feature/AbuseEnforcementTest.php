@@ -45,6 +45,10 @@ class AbuseEnforcementTest extends TestCase
                     'clean' => Http::response(['ok' => true, 'findings' => [], 'clean' => true]),
                     'infected' => Http::response(['ok' => true, 'findings' => [['path' => '/public/x.exe', 'kind' => 'malware', 'detail' => 'Win.Trojan.Agent']], 'clean' => false]),
                     'broken' => Http::response(['ok' => false, 'error' => 'scan_failed', 'hint' => 'clamd down'], 500),
+                    // ClamAV down, the rules still ran (agent ScanSite, 2026-09-25).
+                    'clam-down-rules-found' => Http::response(['ok' => true, 'findings' => [['path' => '/public/s.php', 'kind' => 'obfuscated', 'detail' => 'eval']], 'clean' => false, 'incomplete' => 'clamd down']),
+                    'clam-down-rules-clean' => Http::response(['ok' => true, 'findings' => [], 'clean' => false, 'incomplete' => 'clamd down']),
+                    'encrypted' => Http::response(['ok' => true, 'findings' => [['path' => '/backup.zip', 'kind' => 'unscannable', 'detail' => 'Heuristics.Encrypted.Zip']], 'clean' => false]),
                 };
             }
 
@@ -109,6 +113,50 @@ class AbuseEnforcementTest extends TestCase
         $this->scanAnswer = 'infected';
         $this->artisan('abuse:scan')->expectsOutputToContain('1 flagged')->assertSuccessful();
         $this->assertStringContainsString('Win.Trojan.Agent', $user->fresh()->banned_reason);
+    }
+
+    public function test_rule_findings_count_when_clamav_is_down_and_nothing_else_is_clean(): void
+    {
+        $user = User::factory()->create(['plan' => 'free']);
+        $site = $this->siteFor($user, 'halfscan', 20104);
+
+        $this->scanAnswer = 'clam-down-rules-clean';
+        $this->artisan('abuse:scan')->assertFailed();
+        $this->assertNull($site->fresh()->scanned_clean_at, 'ClamAV did not run: not clean');
+        $this->assertNull($user->fresh()->banned_at);
+
+        $this->scanAnswer = 'clam-down-rules-found';
+        $this->artisan('abuse:scan')->expectsOutputToContain('1 flagged')->assertSuccessful();
+        $this->assertNotNull($user->fresh()->banned_at, 'the rules found a webshell: that stands without ClamAV');
+    }
+
+    public function test_an_archive_clamav_cannot_open_goes_to_a_person_not_a_ban(): void
+    {
+        $user = User::factory()->create(['plan' => 'free']);
+        $site = $this->siteFor($user, 'enczip', 20105);
+        $sent = [];
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Mail\Events\MessageSent::class, function ($e) use (&$sent) { $sent[] = $e->message->getSubject(); });
+
+        $this->scanAnswer = 'encrypted';
+        $this->artisan('abuse:scan')->assertSuccessful();
+
+        $this->assertNull($user->fresh()->banned_at);
+        $this->assertNull($site->fresh()->scanned_clean_at);
+        $this->assertContains('[codeinchrome] For review: enczip.codeinchrome.com', $sent);
+    }
+
+    public function test_two_failed_scans_in_a_row_tell_the_owner(): void
+    {
+        $user = User::factory()->create(['plan' => 'free']);
+        $this->siteFor($user, 'unscannable', 20106);
+        $sent = [];
+        \Illuminate\Support\Facades\Event::listen(\Illuminate\Mail\Events\MessageSent::class, function ($e) use (&$sent) { $sent[] = $e->message->getSubject(); });
+
+        $this->scanAnswer = 'broken';
+        $this->artisan('abuse:scan');
+        $this->assertSame([], $sent, 'one failure is not news');
+        $this->artisan('abuse:scan');
+        $this->assertSame(['[codeinchrome] For review: unscannable.codeinchrome.com'], $sent);
     }
 
     public function test_the_owner_can_reverse_a_ban_and_the_sites_come_back(): void
