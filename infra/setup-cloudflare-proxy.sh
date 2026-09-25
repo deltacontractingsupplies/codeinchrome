@@ -99,10 +99,11 @@ ok "zone: SSL Full (strict), HTTPS always, TLS 1.2 minimum, TLS 1.3 on"
 
 # ── proxy the records ────────────────────────────────────────────────────────
 # Every direct subdomain that serves HTTP: customer sites, app, the apex and
-# www. NOT the hosts' own names (SSH, agent tunnels) or backups (restic
-# uploads are larger than the proxy accepts) - those stay DNS-only.
+# www, and the hosts' own names (2026-09-25: nothing connects to a host by
+# name - SSH and the agent tunnels use addresses - and a DNS-only name
+# published the host's IP). NOT backups: restic uploads are larger than the
+# proxy accepts, so it stays DNS-only.
 keep_direct=" backups.$zone "
-for h in $CIC_HOSTS $CIC_CONTROL_HOST; do keep_direct+=" ${h%%:*}.$zone "; done
 records=$(cf GET "/zones/$CLOUDFLARE_ZONE_ID/dns_records?type=A&per_page=500")
 flipped=0
 while IFS=$'\t' read -r id name proxied; do
@@ -113,4 +114,4 @@ while IFS=$'\t' read -r id name proxied; do
   cf PATCH "/zones/$CLOUDFLARE_ZONE_ID/dns_records/$id" '{"proxied":true}' >/dev/null
   flipped=$((flipped+1))
 done < <(python3 -c 'import json,sys; [print(r["id"], r["name"], r["proxied"], sep="\t") for r in json.load(sys.stdin)["result"]]' <<<"$records")
-ok "proxied $flipped record(s); host names and backups stay DNS-only"
+ok "proxied $flipped record(s); only backups stays DNS-only"

@@ -30,6 +30,9 @@ class DomainController extends Controller
     {
         $this->authorizeSite($request, $site);
         abort_unless($request->user()->planConfig()['custom_domains'], 403, 'Custom domains need a paid plan.');
+        if (! config('fleet.custom_domains')) {
+            return back()->withInput()->withErrors(['domain' => 'Custom domains are coming soon: they are being moved behind Cloudflare. Your site is live on its codeinchrome.com address meanwhile.']);
+        }
 
         $request->validate(['domain' => ['required', 'string', 'max:255']]);
         [$domain, $error] = SiteDomain::normalise($request->input('domain'));

@@ -37,7 +37,7 @@
                 @elseif (! $paid)
                     <li>The same speed as Starter</li>
                 @endif
-                <li>{{ $plan['custom_domains'] ? 'Your own domains, with HTTPS' : 'A free .codeinchrome.com address' }}</li>
+                <li @if ($plan['custom_domains'] && ! config('fleet.custom_domains')) data-custom-domains="soon" @endif>{{ $plan['custom_domains'] ? 'Your own domains, with HTTPS'.(config('fleet.custom_domains') ? '' : ' (coming soon)') : 'A free .codeinchrome.com address' }}</li>
                 @unless ($paid)
                     <li>Listed on <a href="{{ route('explore') }}" class="underline">Explore</a> by its address</li>
                 @endunless

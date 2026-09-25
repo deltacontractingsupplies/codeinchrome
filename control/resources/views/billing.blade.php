@@ -39,7 +39,7 @@
                 @if ($cap = app(\App\Billing\Capacity::class)->forPlan($key))
                     <li>{{ $plan['sites'] > 1 ? 'Each site' : 'Your site' }}: up to ~{{ number_format($cap['concurrent_visitors']) }} visitors at once</li>
                 @endif
-                <li>{{ $plan['custom_domains'] ? 'Your own domains' : 'A free .codeinchrome.com address' }}</li>
+                <li>{{ $plan['custom_domains'] ? 'Your own domains'.(config('fleet.custom_domains') ? '' : ' (coming soon)') : 'A free .codeinchrome.com address' }}</li>
             </ul>
             <div class="mt-4">
                 @if ($key === $current)

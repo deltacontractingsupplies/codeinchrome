@@ -102,6 +102,23 @@ CADDY
 sed -i "s|__CF_RANGES__|$cf_ranges|" /etc/caddy/Caddyfile
 ok "Caddyfile written (managed; $(wc -w <<<"$cf_ranges") Cloudflare ranges trusted)"
 
+# ── web ports: Cloudflare only ──────────────────────────────────────────────
+# Every site is served through Cloudflare (proxied DNS, origin certificate).
+# A request straight to this host's IP skips its protection, and an abuse
+# report about a site then goes to the hosting company instead of to us. So
+# 80 and 443 are open to Cloudflare's published ranges only (2026-09-25).
+# The new rules go in BEFORE the open ones come out: there is no moment with
+# the web ports shut. Custom domains, which would need direct access, stay
+# off until Cloudflare for SaaS carries them (config fleet.custom_domains).
+n_ranges=$(wc -w <<<"$cf_ranges")
+(( n_ranges >= 15 )) || { echo "only $n_ranges Cloudflare ranges fetched; firewall left as it was" >&2; exit 1; }
+for cidr in $cf_ranges; do
+  ufw allow proto tcp from "$cidr" to any port 80,443 comment cloudflare >/dev/null
+done
+ufw delete allow 80/tcp  >/dev/null 2>&1 || true
+ufw delete allow 443/tcp >/dev/null 2>&1 || true
+ok "80 and 443 open to Cloudflare's $n_ranges ranges only"
+
 # The host's own site, permanently. With it, Caddy's HTTP and HTTPS servers
 # exist even when the host has no customer sites, so a reload always REUSES
 # the listeners on :80 and :443 instead of tearing them down and binding them
@@ -111,9 +128,9 @@ if [[ -n ${CIC_HOST_NAME:-} ]]; then
   cat > "$CIC/caddy/sites/_host.caddy" <<HOSTSITE
 # This host's own address - keeps the proxy's listeners alive. Managed.
 ${CIC_HOST_NAME}.codeinchrome.com {
-	# DNS-only, so it needs a publicly trusted certificate of its own rather
-	# than the Cloudflare origin wildcard that matches it (see the backups vhost).
-	tls force_automate
+	# Behind Cloudflare like every site (2026-09-25): the origin wildcard,
+	# no public certificate - whose renewal needed 80/443 open to the world.
+	tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem
 	respond "codeinchrome host ${CIC_HOST_NAME}" 200
 }
 HOSTSITE
@@ -305,17 +322,32 @@ if compgen -G "$CIC/caddy/sites/*.caddy" >/dev/null; then
   # the first check ran in the seconds before it existed.
   host_site_answers() {
     for _ in $(seq 1 30); do
-      has "codeinchrome host" curl -s --max-time 10 --resolve "${CIC_HOST_NAME:-none}.codeinchrome.com:443:127.0.0.1" \
+      # -k: the origin certificate is trusted by Cloudflare (Full strict), not
+      # by curl; this checks the listener, "a site answers through
+      # Cloudflare" below checks the real path.
+      has "codeinchrome host" curl -sk --max-time 10 --resolve "${CIC_HOST_NAME:-none}.codeinchrome.com:443:127.0.0.1" \
         "https://${CIC_HOST_NAME:-none}.codeinchrome.com/" && return 0
       sleep 3
     done
     # Say why (fd 3: check() silences the rest): a bare "!!" sent a deploy
     # hunting for a cause.
-    curl -sS -o /dev/null --max-time 10 --resolve "${CIC_HOST_NAME:-none}.codeinchrome.com:443:127.0.0.1" \
+    curl -sSk -o /dev/null --max-time 10 --resolve "${CIC_HOST_NAME:-none}.codeinchrome.com:443:127.0.0.1" \
       -w 'host site: HTTP %{http_code}, TLS verify %{ssl_verify_result}\n' "https://${CIC_HOST_NAME:-none}.codeinchrome.com/" >&3 2>&3 || true
     return 1
   }
-  check "host site answers (valid certificate)" 'host_site_answers'
+  check "host site answers" 'host_site_answers'
+  # The real path: out through Cloudflare and back in on its ranges.
+  site_through_cloudflare() {
+    local f name any=0
+    for f in "$CIC"/caddy/sites/*.caddy; do
+      name=$(basename "$f" .caddy); [[ $name == _* ]] && continue
+      any=1
+      [[ $(curl -s -o /dev/null -w '%{http_code}' --max-time 20 "https://$name.${CIC_PLATFORM_DOMAIN:-codeinchrome.com}/") =~ ^[23] ]] && return 0
+    done
+    (( any == 0 )) # no sites yet: nothing to prove
+  }
+  check "a site answers through Cloudflare" 'site_through_cloudflare'
+  check "web ports closed to the world" '! ufw status | grep -E "^(80|443)(/tcp)? +ALLOW IN +Anywhere"' 
   check "caddy bound to :443 (vhosts exist)" 'has ":443" ss -ltn'
   check "caddy bound to :80 (vhosts exist)"  'has ":80" ss -ltn'
 else

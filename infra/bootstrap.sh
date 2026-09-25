@@ -153,12 +153,15 @@ if ! ufw status verbose | grep -q 'Default: deny (incoming), allow (outgoing)'; 
   ufw default deny incoming  >/dev/null
   ufw default allow outgoing >/dev/null
 fi
-for port in 22/tcp 80/tcp 443/tcp; do ufw allow "$port" >/dev/null; done
+# SSH only, to the world. 80 and 443 are opened to Cloudflare's ranges ONLY,
+# by install-agent.sh (which fetches them): the sites are served through
+# Cloudflare, so a request straight to this host's IP is someone bypassing it.
+ufw allow 22/tcp >/dev/null
 ufw status | grep -q '^Status: active' || ufw --force enable >/dev/null
 # Anything else open inbound is drift: said, not silently removed.
-extra=$(ufw status | awk '/ALLOW/ && $1 !~ /^(22|80|443)\/tcp/ && $0 !~ /3306/' || true)
+extra=$(ufw status | awk '/ALLOW/ && $1 !~ /^(22\/tcp|80,443\/tcp)/ && $0 !~ /3306/' || true)
 [[ -z $extra ]] || warn "unexpected inbound rules (not removed): $extra"
-ok "inbound: 22, 80, 443 only"
+ok "inbound: 22 to the world; 80 and 443 from Cloudflare only (install-agent.sh)"
 
 # ─────────────────────────────────────────────────────────────────────────────
 log "egress policy"
@@ -378,7 +381,7 @@ check "docker running"           'docker info'
 check "docker no-new-privileges" 'jq -e ".\"no-new-privileges\" == true" /etc/docker/daemon.json'
 check "caddy installed"          'command -v caddy'
 check "ufw active"               'has "Status: active" ufw status'
-check "only 22/80/443 inbound"   '[[ $(ufw status | grep -c "ALLOW IN") -le 6 ]]'
+check "nothing but SSH open to the world" '! ufw status | grep -E "ALLOW IN +Anywhere" | grep -vE "^22/tcp"'
 check "no iptables snapshot to restore" '[[ ! -e /etc/iptables/rules.v4 ]]'
 # The egress policy, rule by rule (cic-egress). The old checks looked only for
 # four port rules; these cover what the policy is for.

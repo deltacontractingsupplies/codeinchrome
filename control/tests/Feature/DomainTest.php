@@ -171,4 +171,12 @@ class DomainTest extends TestCase
         $this->add('secret.example.com');
         $this->assertArrayNotHasKey('token', SiteDomain::first()->toArray());
     }
+
+    public function test_while_custom_domains_are_off_none_can_be_added_and_the_plans_say_so(): void
+    {
+        config(['fleet.custom_domains' => false]);
+        $this->add('shop.example.com')->assertSessionHasErrors(['domain']);
+        $this->assertSame(0, $this->site->domains()->count(), 'a domain the hosts cannot serve must not be accepted');
+        $this->get('/pricing')->assertOk()->assertSee('Your own domains, with HTTPS (coming soon)')->assertSee('data-custom-domains="soon"', false);
+    }
 }
