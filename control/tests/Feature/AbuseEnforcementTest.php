@@ -49,6 +49,7 @@ class AbuseEnforcementTest extends TestCase
                     'clam-down-rules-found' => Http::response(['ok' => true, 'findings' => [['path' => '/public/s.php', 'kind' => 'obfuscated', 'detail' => 'eval']], 'clean' => false, 'incomplete' => 'clamd down']),
                     'clam-down-rules-clean' => Http::response(['ok' => true, 'findings' => [], 'clean' => false, 'incomplete' => 'clamd down']),
                     'encrypted' => Http::response(['ok' => true, 'findings' => [['path' => '/backup.zip', 'kind' => 'unscannable', 'detail' => 'Heuristics.Encrypted.Zip']], 'clean' => false]),
+                    'phishing' => Http::response(['ok' => true, 'findings' => [['path' => '/public/p.html', 'kind' => 'phishing', 'detail' => 'sends data to a Telegram bot']], 'clean' => false]),
                 };
             }
 
@@ -143,6 +144,16 @@ class AbuseEnforcementTest extends TestCase
         $this->assertNull($user->fresh()->banned_at);
         $this->assertNull($site->fresh()->scanned_clean_at);
         $this->assertContains('[codeinchrome] For review: enczip.codeinchrome.com', $sent);
+    }
+
+    public function test_a_phishing_kit_pattern_goes_to_a_person_not_a_ban(): void
+    {
+        $user = User::factory()->create(['plan' => 'free']);
+        $site = $this->siteFor($user, 'kitsite', 20107);
+        $this->scanAnswer = 'phishing';
+        $this->artisan('abuse:scan')->assertSuccessful();
+        $this->assertNull($user->fresh()->banned_at);
+        $this->assertNull($site->fresh()->scanned_clean_at);
     }
 
     public function test_two_failed_scans_in_a_row_tell_the_owner(): void

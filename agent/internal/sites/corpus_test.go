@@ -29,13 +29,15 @@ func TestTheRulesOverACodebase(t *testing.T) {
 			}
 			return nil
 		}
-		if !checkedForObfuscation(rel) {
+		if !checkedForObfuscation(rel) && !checkedForPhishing(rel) {
 			return nil
 		}
 		b, _ := os.ReadFile(p)
 		n++
-		if why := phpObfuscation(string(b), strings.HasSuffix(rel, ".blade.php")); why != "" {
+		if why := phpObfuscation(string(b), strings.HasSuffix(rel, ".blade.php")); checkedForObfuscation(rel) && why != "" {
 			t.Logf("FLAGGED %s: %s", rel, why)
+		} else if why := phishingKit(string(b)); checkedForPhishing(rel) && why != "" {
+			t.Logf("FLAGGED %s: phishing: %s", rel, why)
 		}
 		return nil
 	})

