@@ -4,6 +4,7 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
@@ -106,8 +107,18 @@ func TestAnObfuscatedSaveIsRefusedAndNothingIsWritten(t *testing.T) {
 	if _, err := os.Stat(filepath.Join(m.appDir(id), "public/shell.php")); !os.IsNotExist(err) {
 		t.Fatal("the refused file was written anyway")
 	}
-	if err := m.WriteFile(context.Background(), id, "/vendor/pkg/Eval.php", `<?php eval(base64_decode($x));`); err != nil {
-		t.Fatalf("vendor/ is left to ClamAV, not refused by the PHP rules: %v", err)
+	// Saved by hand into vendor/: refused as a dependency edit (A11), which
+	// is not a malware finding - no ban - and nothing is written.
+	err = m.WriteFile(context.Background(), id, "/vendor/pkg/Eval.php", `<?php eval(base64_decode($x));`)
+	var dep *ErrDependencyEdit
+	if !errors.As(err, &dep) {
+		t.Fatalf("a hand save into vendor/: want a dependency refusal, got %v", err)
+	}
+	if _, isMalware := IsMalware(err); isMalware {
+		t.Fatal("a vendor/ edit was treated as malware")
+	}
+	if _, err := os.Stat(filepath.Join(m.appDir(id), "vendor/pkg/Eval.php")); !os.IsNotExist(err) {
+		t.Fatal("the refused vendor/ file was written anyway")
 	}
 }
 
@@ -190,11 +201,14 @@ func TestAnArchiveWithMalwareIsNotUnpackedAtAll(t *testing.T) {
 	}
 }
 
-func TestASiteScanNamesMalwareAndObfuscationButNotVendor(t *testing.T) {
+// vendor/ files composer did not install are reported for a person
+// (unverified_dependency), never as a banning finding (A11, 2026-09-26).
+func TestASiteScanNamesMalwareAndObfuscationAndVendorOnlyForReview(t *testing.T) {
 	m, id := historyManager(t)
 	root := m.appDir(id)
 	os.MkdirAll(filepath.Join(root, "public"), 0o755)
 	os.MkdirAll(filepath.Join(root, "vendor/pkg"), 0o755)
+	m.rememberVendor(id) // a composer run, before the file below was planted
 	os.WriteFile(filepath.Join(root, "public/eicar.txt"), []byte(eicar), 0o640)
 	os.WriteFile(filepath.Join(root, "public/s.php"), []byte(`<?php passthru($_GET['c']);`), 0o640)
 	os.WriteFile(filepath.Join(root, "vendor/pkg/Loader.php"), []byte(`<?php eval(base64_decode($x));`), 0o640)
@@ -209,8 +223,8 @@ func TestASiteScanNamesMalwareAndObfuscationButNotVendor(t *testing.T) {
 	if got["/public/eicar.txt"] != "malware" || got["/public/s.php"] != "obfuscated" {
 		t.Errorf("findings: %v", found)
 	}
-	if _, bad := got["/vendor/pkg/Loader.php"]; bad {
-		t.Errorf("vendor/ is ClamAV's, not the PHP rules': %v", found)
+	if got["/vendor/pkg/Loader.php"] != "unverified_dependency" {
+		t.Errorf("a vendor/ file composer never installed: want unverified_dependency (review), got %q: %v", got["/vendor/pkg/Loader.php"], found)
 	}
 }
 

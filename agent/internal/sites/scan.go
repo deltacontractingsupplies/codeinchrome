@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -321,14 +322,37 @@ func (m *Manager) ScanSite(ctx context.Context, id string) ([]Finding, error) {
 	// The rules below need no clamd: a ClamAV failure must not skip them (the
 	// second security audit, 2026-09-25). Both results come back together.
 	found, clamErr := clamScan(ctx, root, root)
+	// A site with no record yet (every site before 2026-09-26, until its next
+	// composer run): its vendor/ as it is now is recorded first - never less
+	// than the blanket exemption it had, and from now on anything planted or
+	// changed there is seen.
+	if _, err := os.Stat(m.vendorRecordFile(id)); errors.Is(err, os.ErrNotExist) {
+		m.rememberVendor(id)
+	}
+	installed := m.installedByComposer(id)
 	err = walkBeneath(root, root, func(p string, d fs.DirEntry, werr error) error {
 		if werr != nil || ctx.Err() != nil {
 			return nil
 		}
 		rel := strings.TrimPrefix(strings.TrimPrefix(p, root), "/")
 		if d.IsDir() {
-			if rel == "vendor" || rel == "node_modules" || strings.HasSuffix(rel, "/node_modules") || rel == "storage/framework" {
+			if rel == "storage/framework" {
 				return fs.SkipDir
+			}
+			return nil
+		}
+		// Dependencies: PHP exactly as composer installed it is exempt;
+		// anything else there gets the rules, and a person looks (A11).
+		if isDependency(rel) {
+			if d.Type()&fs.ModeSymlink != 0 || !isPHPFile(rel) {
+				return nil
+			}
+			b, err := readBeneath(root, p, MaxUploadSize)
+			if err != nil || installed["/"+rel] == sumOf(b) {
+				return nil
+			}
+			if why := phpObfuscation(string(b), false); why != "" {
+				found = append(found, Finding{Path: "/" + rel, Kind: "unverified_dependency", Detail: why + " - in a dependency folder, but not as composer installed it"})
 			}
 			return nil
 		}

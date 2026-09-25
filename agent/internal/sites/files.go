@@ -359,6 +359,10 @@ func (m *Manager) checkWrite(id, rel, content, expect string) (root, relAbs stri
 	if bad := scanContent(rel, content); bad != nil {
 		return "", "", bad
 	}
+	// And PHP saved by hand into vendor/ gets the rules too (dependencies.go).
+	if err := refuseDependencyEdit(rel, content); err != nil {
+		return "", "", err
+	}
 
 	abs, err := m.resolve(id, rel)
 	if err != nil {
