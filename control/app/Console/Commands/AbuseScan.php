@@ -39,7 +39,9 @@ class AbuseScan extends Command
             // looks (the second security audit, 2026-09-25).
             // Banned for: malware and hidden code. Reviewed: what could not be
             // opened, and what looks like a phishing kit (a Telegram bot can be honest).
-            $review = ['unscannable', 'phishing'];
+            // A secret the site published: moved out of public/ by the host
+            // already; the owner should hear, and nobody is banned for a leak.
+            $review = ['unscannable', 'phishing', 'published_secret'];
             $findings = array_values(array_filter($scan['findings'], fn ($f) => ! in_array($f['kind'] ?? '', $review, true)));
             $unscannable = array_values(array_filter($scan['findings'], fn ($f) => in_array($f['kind'] ?? '', $review, true)));
             if ($findings !== []) {

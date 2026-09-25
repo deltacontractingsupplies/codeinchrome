@@ -111,15 +111,19 @@ Claude in Chrome tools - no terminal, no local files:
 - the time that matters is the agent composing each batch, not the platform.
 
 Limits found (each one a thing a terminal agent never hits):
-- [ ] Clicking "Create" answers before the page changes: a text read 3 s
-      later still showed "No sites yet" (the site was created). The panel
-      should answer in a way an agent can wait for (a status element, or
-      a page it can poll).
+- [x] Clicking "Create" answers before the page changes: a text read 3 s
+      later still showed "No sites yet" (the site was created). FIXED
+      2026-09-25: the moment Create is pressed the page says "Creating
+      <name>... usually 5 to 20 seconds" (role=status, data-create-status,
+      data-state="creating"; measured 3-17 s, median 4 over the last 7
+      sites) and the button is disabled; afterwards the flash is a
+      role=status and each site row carries data-site-id and data-site-status.
 - [ ] fetch() of the skill from JavaScript is refused by the browser tool as
       "query string data"; reading it as a page works. The skill says so.
-- [ ] Every result is cut at 1,000 characters; test failures had to be
-      filtered and paged with cic.show. A cic.test() that returns only the
-      failing tests and their first line would save a round trip.
+- [x] Every result is cut at 1,000 characters; test failures had to be
+      filtered and paged with cic.show. DONE by cic.sh, measured live:
+      `cic.sh("php artisan test 2>&1 | grep -E 'FAIL|Tests:|Duration'")`
+      gives only failures and the summary in one call (17 tests, 4.0 s).
 - [x] Tools a terminal has that cic lacks or names differently - DONE
       2026-09-25: `cic.sh(line)` speaks the shell itself (resources/js/shell.js):
       pipes, && || ;, > >> 2>&1, heredocs, globs, cd, and about 45 commands
@@ -207,10 +211,13 @@ frame-ancestors none; no postMessage listener; every route checks the owner.
       or needs_write - not busy or conflict - asks for one; copy, move, mkdir,
       folder delete and download are throttled; the delete loop is bounded;
       a third malware clone in a day bans (no free scanner oracle).
-- [ ] A site's OWN code, serving a web request, can still write a secret
-      into public/ (only eval and commands are swept after). Cover it in the
-      six-hourly scan; and tag cloned folders so a later signature update on
-      them goes to review, not a ban.
+- [x] A site's OWN code, serving a web request, could still write a secret
+      into public/. FIXED: the six-hourly scan sweeps public/ too; a file
+      carrying a secret value is moved to storage/app/quarantine/ (kept, not
+      served - runtime files have no saved version) and reported for review
+      (kind published_secret, no ban). Eval and commands quarantine the same way.
+- [ ] Tag cloned folders so a later ClamAV signature update on them goes
+      to review, not a ban.
 - [ ] Masking is for accidents, not a boundary: `cut -d= -f2 .env` or
       `{ raw: true }` show values. Said in the skill.
 - [ ] php -r / tinker (cic.eval) run any PHP in the site's own container:

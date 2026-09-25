@@ -40,10 +40,10 @@
 
     <main class="flex-1 mx-auto w-full max-w-5xl px-6 py-10">
         @if (session('status'))
-            <div class="mb-6 rounded-md border border-teal-800 bg-teal-950/50 px-4 py-3 text-sm text-teal-200">{{ session('status') }}</div>
+            <div class="mb-6 rounded-md border border-teal-800 bg-teal-950/50 px-4 py-3 text-sm text-teal-200" role="status" data-flash="status">{{ session('status') }}</div>
         @endif
         @if (session('error'))
-            <div class="mb-6 rounded-md border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-200">{{ session('error') }}</div>
+            <div class="mb-6 rounded-md border border-red-900 bg-red-950/50 px-4 py-3 text-sm text-red-200" role="alert" data-flash="error">{{ session('error') }}</div>
         @endif
         @yield('content')
     </main>

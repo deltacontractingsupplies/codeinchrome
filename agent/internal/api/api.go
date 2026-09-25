@@ -517,6 +517,9 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		if found == nil {
 			found = []sites.Finding{}
 		}
+		// A secret the site's own code put in public/ while serving a request
+		// (writes through the panel, eval and commands are refused already).
+		found = append(found, mgr.SweepPublishedSecrets(r.PathValue("id"), time.Time{})...)
 		if err != nil {
 			// What the rules found still counts; the site is not "clean".
 			writeJSON(w, http.StatusOK, ok(resp{"findings": found, "clean": false, "incomplete": err.Error()}))
