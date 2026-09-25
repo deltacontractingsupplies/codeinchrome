@@ -357,3 +357,43 @@ func scanWrittenPHP(root, rel string) *ErrMalware {
 	}
 	return scanContent(rel, string(b))
 }
+
+// ScanChangedSince holds the PHP rules against every customer PHP file
+// changed since t: what an artisan or composer command, or code run with
+// eval, wrote - which no save-time check saw (the second security audit,
+// 2026-09-25). Composer's vendor/ and the framework's caches are left out,
+// as in every other scan.
+func (m *Manager) ScanChangedSince(id string, t time.Time) *ErrMalware {
+	if ValidID(id) != nil {
+		return nil
+	}
+	root, err := m.realRoot(id)
+	if err != nil {
+		return nil
+	}
+	var found *ErrMalware
+	_ = walkBeneath(root, root, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil {
+			return nil
+		}
+		rel := strings.TrimPrefix(strings.TrimPrefix(p, root), "/")
+		if d.IsDir() {
+			if rel == "vendor" || rel == "node_modules" || strings.HasSuffix(rel, "/node_modules") || rel == "storage/framework" || rel == "bootstrap/cache" {
+				return fs.SkipDir
+			}
+			return nil
+		}
+		if d.Type()&fs.ModeSymlink != 0 || !checkedForObfuscation(rel) {
+			return nil
+		}
+		if info, err := d.Info(); err != nil || info.ModTime().Before(t) {
+			return nil
+		}
+		if bad := scanWrittenPHP(root, "/"+rel); bad != nil {
+			found = bad
+			return fs.SkipAll
+		}
+		return nil
+	})
+	return found
+}
