@@ -109,6 +109,14 @@ func main() {
 		}
 	}()
 
+	// Every minute: kill processes left behind in sites that run no background
+	// processes (sites/reaper.go).
+	go func() {
+		for range time.Tick(time.Minute) {
+			mgr.ReapStrays(context.Background())
+		}
+	}()
+
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM)
 	<-stop

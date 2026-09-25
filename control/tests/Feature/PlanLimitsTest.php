@@ -139,4 +139,20 @@ class PlanLimitsTest extends TestCase
         Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/v1/sites') && $r['diskGb'] === config('billing.plans.starter.disk_gb'));
         $this->assertSame(config('billing.plans.starter.disk_gb'), $site->disk_gb);
     }
+
+    public function test_a_site_whose_limits_drifted_from_its_plan_is_brought_back_in_line(): void
+    {
+        // Made under older plan settings: double the free plan (the audit found three).
+        $user = User::factory()->create(['plan' => 'free']);
+        $site = $this->siteFor($user);
+        $site->update(['cpu_limit' => '1.0', 'memory_limit' => '640m', 'limits_pending' => false]);
+
+        $this->assertSame(0, Artisan::call('fleet:apply-limits'));
+        $this->assertSame(config('billing.plans.free.cpu'), $site->fresh()->cpu_limit);
+        $this->assertSame(config('billing.plans.free.memory'), $site->fresh()->memory_limit);
+
+        // In line now: nothing more is asked of the host.
+        $this->assertSame(0, Artisan::call('fleet:apply-limits'));
+        $this->assertStringNotContainsString($site->site_id, Artisan::output());
+    }
 }

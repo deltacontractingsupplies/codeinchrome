@@ -25,10 +25,21 @@ type HostStats struct {
 	// mounted - each a customer who is down right now.
 	SitesNotRunning []string `json:"sitesNotRunning"`
 	DisksUnmounted  []string `json:"disksUnmounted"`
+	// Since when an installed update (a kernel, usually) has waited for a
+	// reboot to take effect; empty when none waits. Security updates install
+	// themselves, but the running kernel stays the old one until a reboot
+	// (the audit found h4 and the control host days behind).
+	RebootRequiredSince string `json:"rebootRequiredSince,omitempty"`
 }
+
+// rebootRequiredFile is Ubuntu's marker; a variable so the tests need no /var/run.
+var rebootRequiredFile = "/var/run/reboot-required"
 
 func (m *Manager) Stats(ctx context.Context) HostStats {
 	var st HostStats
+	if fi, err := os.Stat(rebootRequiredFile); err == nil {
+		st.RebootRequiredSince = fi.ModTime().UTC().Format(time.RFC3339)
+	}
 
 	var fs syscall.Statfs_t
 	if syscall.Statfs(m.cfg.Root, &fs) == nil {

@@ -83,6 +83,41 @@ class Site extends Model
         if (str_contains($id, '--')) {
             return 'Two hyphens in a row are not allowed.';
         }
+        if ($brand = self::impersonates($id)) {
+            return "Names that use \"$brand\" are not available: they are what phishing sites use to look like that company.";
+        }
+
+        return null;
+    }
+
+    /**
+     * The brands phishing kits dress up as (the security audit, 2026-09-25:
+     * paypal-login and apple-id-verify were both allowed). Long names are
+     * matched anywhere in the site id; short or common words only as a whole
+     * word between hyphens, so "pineapple-shop" and "foodbank" stay free.
+     */
+    public const IMPERSONATED_ANYWHERE = ['paypal', 'icloud', 'microsoft', 'office365', 'outlook', 'hotmail', 'gmail',
+        'facebook', 'instagram', 'whatsapp', 'netflix', 'amazon', 'coinbase', 'binance', 'metamask', 'trustwallet',
+        'wellsfargo', 'barclays', 'citibank', 'santander', 'revolut', 'mastercard', 'fedex', 'docusign', 'dropbox',
+        'onedrive', 'sharepoint', 'linkedin', 'telegram', 'codeinchrome', 'cloudflare', 'hetzner'];
+
+    // Not "ups", "visa", "wallet" or "steam": each is also an ordinary
+    // business word (a cafe, a visa consultancy, a leather shop, a laundry).
+    public const IMPERSONATED_WORDS = ['apple', 'appleid', 'google', 'bank', 'chase', 'hsbc', 'dhl', 'usps',
+        'amex', 'roblox', 'irs', 'hmrc'];
+
+    public static function impersonates(string $id): ?string
+    {
+        foreach (self::IMPERSONATED_ANYWHERE as $brand) {
+            if (str_contains($id, $brand)) {
+                return $brand;
+            }
+        }
+        foreach (explode('-', $id) as $word) {
+            if (in_array($word, self::IMPERSONATED_WORDS, true)) {
+                return $word;
+            }
+        }
 
         return null;
     }

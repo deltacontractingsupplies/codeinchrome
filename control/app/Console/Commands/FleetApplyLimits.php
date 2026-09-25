@@ -11,11 +11,20 @@ class FleetApplyLimits extends Command
 {
     protected $signature = 'fleet:apply-limits';
 
-    protected $description = 'Apply plan limits to sites still marked limits_pending';
+    protected $description = 'Apply plan limits to sites still pending, or whose limits are not their plan\'s';
 
     public function handle(PlanLimits $limits): int
     {
-        $pending = Site::with('user')->where('limits_pending', true)->where('status', 'live')->get();
+        // Pending ones, and any live site whose limits are not its owner's plan:
+        // limits were only ever applied on a plan change, so sites made under
+        // older plan settings ran with double the free plan's CPU and memory
+        // (found by the security audit, 2026-09-25).
+        $pending = Site::with('user')->where('status', 'live')->get()->filter(function (Site $site) {
+            $plan = $site->user?->planConfig();
+
+            return $site->limits_pending
+                || ($plan && ((string) $site->cpu_limit !== (string) $plan['cpu'] || (string) $site->memory_limit !== (string) $plan['memory']));
+        });
 
         foreach ($pending as $site) {
             $outcome = $limits->applyToSite($site, $site->user->planConfig());
