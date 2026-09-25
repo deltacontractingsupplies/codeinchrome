@@ -58,15 +58,28 @@ class Provisioner
         if ($user->sites()->where('status', 'suspended')->whereIn('paused_reason', ['cpu', 'egress', 'abuse'])->exists()) {
             throw new RuntimeException('One of your sites is paused by our abuse checks. Write to support before creating another.');
         }
-        // An account from the network of an account banned in the last 30
-        // days waits for a person (App\Auth\ClientNet::signal).
+        // An account from the network or the browser of an account banned in
+        // the last 30 days waits for a person (App\Auth\ClientNet, Device).
         $testSuffix = '@'.strtolower((string) config('signup.test_domain'));
         $isTest = fn (string $email) => config('signup.test_domain') && str_ends_with(strtolower($email), $testSuffix);
-        if (! $user->isPaid() && $user->signup_net && ! $isTest($user->email)
-            && User::where('signup_net', $user->signup_net)->whereKeyNot($user->getKey())
-                ->where('banned_at', '>=', now()->subDays(30))->get(['email'])->reject(fn ($u) => $isTest($u->email))->isNotEmpty()) {
+        $bannedLike = fn ($query) => $query->whereKeyNot($user->getKey())->where('banned_at', '>=', now()->subDays(30))
+            ->get(['email'])->reject(fn ($u) => $isTest($u->email))->isNotEmpty();
+        $why = null;
+        if (! $user->isPaid() && ! $isTest($user->email)) {
+            if ($user->signup_net && $bannedLike(User::where('signup_net', $user->signup_net))) {
+                $why = 'signed up from the same network as an account banned in the last 30 days';
+            } elseif ($devices = array_filter([$user->signup_device, $user->last_device])) {
+                foreach ($devices as $device) {
+                    if ($bannedLike(\App\Auth\Device::sameBrowser($device))) {
+                        $why = 'uses the same browser as an account banned in the last 30 days';
+                        break;
+                    }
+                }
+            }
+        }
+        if ($why) {
             if (\Illuminate\Support\Facades\Cache::add("abuse.held.{$user->id}", true, now()->addDay())) {
-                app(\App\Abuse\Enforcer::class)->holdForReview($user, 'signed up from the same network as an account banned in the last 30 days');
+                app(\App\Abuse\Enforcer::class)->holdForReview($user, $why);
             }
             throw new RuntimeException('Your account is being checked before it can create sites. We will be in touch by email.');
         }

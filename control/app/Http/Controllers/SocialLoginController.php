@@ -104,7 +104,7 @@ class SocialLoginController extends Controller
                     'password' => Str::random(64),
                     'plan' => 'free',
                 ]);
-                $user->forceFill(['signup_net' => \App\Auth\ClientNet::signal(request()->ip())])->save();
+                $user->forceFill(['signup_net' => \App\Auth\ClientNet::signal(request()->ip()), 'signup_device' => \App\Auth\Device::signal(request())])->save();
                 $user->startTrial();
                 Audit::record('account.created', $user, actor: $user, detail: ['via' => $provider]);
             }

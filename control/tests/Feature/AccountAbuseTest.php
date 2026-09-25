@@ -177,4 +177,77 @@ class AccountAbuseTest extends TestCase
         $this->withHeader('X-CIC-E2E', \App\Auth\TestSuite::header('shh'))->withServerVariables(['REMOTE_ADDR' => '198.51.100.9'])
             ->post('/register', $form(1))->assertSessionHasNoErrors()->assertStatus(302);
     }
+
+    private function registerFrom(string $ip, string $email, ?string $deviceId = null, bool $encrypted = true)
+    {
+        auth()->logout();
+        \Illuminate\Support\Facades\RateLimiter::clear($ip);
+        $req = $this->withServerVariables(['REMOTE_ADDR' => $ip]);
+        if ($deviceId !== null) {
+            $req = $encrypted ? $req->withCookie(\App\Auth\Device::COOKIE, $deviceId) : $req->withUnencryptedCookie(\App\Auth\Device::COOKIE, $deviceId);
+        }
+
+        return $req->post('/register', ['name' => 'N', 'email' => $email, 'password' => 'correct-horse-battery-9', 'password_confirmation' => 'correct-horse-battery-9']);
+    }
+
+    private function deviceHash(string $id): string
+    {
+        return hash_hmac('sha256', 'device:'.$id, (string) config('app.key'));
+    }
+
+    public function test_the_browser_is_recorded_at_sign_up_and_at_every_sign_in(): void
+    {
+        $res = $this->registerFrom('198.51.100.30', 'first@example.org');
+        $res->assertStatus(302)->assertCookie(\App\Auth\Device::COOKIE);
+        $user = User::where('email', 'first@example.org')->first();
+        $this->assertNotNull($user->signup_device);
+        $this->assertSame($user->signup_device, $user->last_device, 'the sign-in after sign-up records the same browser');
+        $this->assertArrayNotHasKey('signup_device', $user->toArray(), 'never serialised');
+
+        // A later sign-in from another browser is recorded as the last one.
+        auth()->logout();
+        $id = str_repeat('ab', 20);
+        $this->withCookie(\App\Auth\Device::COOKIE, $id)->post('/login', ['email' => 'first@example.org', 'password' => 'correct-horse-battery-9']);
+        $this->assertSame($this->deviceHash($id), $user->fresh()->last_device);
+    }
+
+    public function test_a_sign_up_from_a_banned_accounts_browser_is_held_even_from_another_network(): void
+    {
+        $id = str_repeat('cd', 20);
+        $banned = User::factory()->create(['email' => 'gone@gmail.com']);
+        $banned->forceFill(['last_device' => $this->deviceHash($id), 'banned_at' => now()->subDays(2)])->save();
+
+        $this->registerFrom('203.0.113.77', 'back@gmail.com', $id)->assertStatus(302);
+        $again = User::where('email', 'back@gmail.com')->first();
+        $this->assertSame($this->deviceHash($id), $again->signup_device);
+        try {
+            Provisioner::make()->provision($again, 'comeback');
+            $this->fail('must be held');
+        } catch (\RuntimeException $e) {
+            $this->assertStringContainsString('being checked', $e->getMessage());
+        }
+        $this->assertContains('[codeinchrome] Account held for review: back@gmail.com', $this->sent);
+    }
+
+    public function test_a_forged_device_cookie_is_ignored(): void
+    {
+        $id = str_repeat('ef', 20);
+        User::factory()->create(['email' => 'gone2@gmail.com'])->forceFill(['signup_device' => $this->deviceHash($id), 'banned_at' => now()->subDay()])->save();
+        // Not encrypted by the app: it cannot be read, so a fresh id is given.
+        $this->registerFrom('203.0.113.78', 'forger@gmail.com', $id, encrypted: false)->assertStatus(302);
+        $this->assertNotSame($this->deviceHash($id), User::where('email', 'forger@gmail.com')->value('signup_device'));
+    }
+
+    public function test_a_ban_names_accounts_from_the_same_browser(): void
+    {
+        $bodies = [];
+        Event::listen(MessageSent::class, function ($e) use (&$bodies) { $bodies[] = (string) $e->message->getTextBody(); });
+        $hash = $this->deviceHash(str_repeat('12', 20));
+        $one = User::factory()->create(['email' => 'one@gmail.com']);
+        $one->forceFill(['signup_device' => $hash])->save();
+        User::factory()->create(['email' => 'two@gmail.com'])->forceFill(['last_device' => $hash])->save();
+        app(\App\Abuse\Enforcer::class)->ban($one, 'test');
+        $this->assertTrue(collect($bodies)->contains(fn ($b) => str_contains($b, 'same browser: two@gmail.com')), implode("\n---\n", $bodies));
+    }
 }
+
