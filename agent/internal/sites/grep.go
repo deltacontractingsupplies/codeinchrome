@@ -121,7 +121,8 @@ func (m *Manager) Grep(ctx context.Context, id string, o GrepOptions) (GrepResul
 			}
 			return nil
 		}
-		if isSecretName(d.Name()) || !includes(o.Include, d.Name()) {
+		// Every name a secrets file goes by (production.env too), never searched.
+		if isSecretName(d.Name()) || isEnvFile(d.Name()) || !includes(o.Include, d.Name()) {
 			return nil
 		}
 		if info, err := d.Info(); err != nil || info.Size() > maxSearchFile {

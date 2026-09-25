@@ -346,3 +346,92 @@ func removeBeneath(root, rel string) error {
 	defer unix.Close(parent)
 	return unix.Unlinkat(parent, name, 0)
 }
+
+// removeAllBeneath deletes rel (a file, a link or a whole folder) under root
+// without ever resolving a path by name. os.RemoveAll opens the PARENT of
+// what it deletes by path, so a site's own code - which owns every folder in
+// its tree - could swap a parent for a symlink between our check and the
+// delete, and the agent (root) would delete wherever it pointed: another
+// site's files (found by the security review of 2026-09-25). Here the parent
+// is reached through openDirBeneath, and every level below is opened
+// relative to the one above with O_NOFOLLOW; a link is only ever unlinked.
+func removeAllBeneath(root, rel string) error {
+	parts := splitRel(rel)
+	if len(parts) == 0 {
+		return fmt.Errorf("refusing to delete the site root")
+	}
+	rootFD, err := unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(rootFD)
+	parent, err := openDirBeneath(rootFD, strings.Join(parts[:len(parts)-1], "/"))
+	if err != nil {
+		return fmt.Errorf("%w: %s", errOutside, rel)
+	}
+	defer unix.Close(parent)
+	return removeAllAt(parent, parts[len(parts)-1], 0)
+}
+
+func removeAllAt(dirFD int, name string, depth int) error {
+	if depth > 256 {
+		return fmt.Errorf("folders nested too deep to delete")
+	}
+	err := unix.Unlinkat(dirFD, name, 0)
+	if err == nil || errors.Is(err, unix.ENOENT) {
+		return nil
+	}
+	if !errors.Is(err, unix.EISDIR) && !errors.Is(err, unix.EPERM) {
+		return err
+	}
+	// A folder: opened relative to its parent, never through a link (a
+	// folder swapped for a link since the unlink above fails here, ELOOP).
+	fd, err := unix.Openat(dirFD, name, unix.O_RDONLY|unix.O_DIRECTORY|unix.O_NOFOLLOW|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	dir := os.NewFile(uintptr(fd), name)
+	defer dir.Close()
+	// Bounded: the site's own code could keep refilling a folder as it goes.
+	for pass := 0; pass < 10000; pass++ {
+		names, rerr := dir.Readdirnames(512)
+		for _, n := range names {
+			if err := removeAllAt(fd, n, depth+1); err != nil {
+				return err
+			}
+		}
+		if rerr != nil || len(names) == 0 {
+			break
+		}
+	}
+	return unix.Unlinkat(dirFD, name, unix.AT_REMOVEDIR)
+}
+
+// removeEmptyDirBeneath is rmdir: the kernel removes the folder only if it
+// is empty at that moment, so nothing added since a check can be lost.
+func removeEmptyDirBeneath(root, rel string) error {
+	parts := splitRel(rel)
+	if len(parts) == 0 {
+		return fmt.Errorf("refusing to delete the site root")
+	}
+	rootFD, err := unix.Open(root, unix.O_PATH|unix.O_DIRECTORY|unix.O_CLOEXEC, 0)
+	if err != nil {
+		return err
+	}
+	defer unix.Close(rootFD)
+	parent, err := openDirBeneath(rootFD, strings.Join(parts[:len(parts)-1], "/"))
+	if err != nil {
+		return fmt.Errorf("%w: %s", errOutside, rel)
+	}
+	defer unix.Close(parent)
+	err = unix.Unlinkat(parent, parts[len(parts)-1], unix.AT_REMOVEDIR)
+	switch {
+	case errors.Is(err, unix.ENOTEMPTY), errors.Is(err, unix.EEXIST):
+		return fmt.Errorf("the folder is not empty")
+	case errors.Is(err, unix.ENOTDIR):
+		return fmt.Errorf("that is not a folder")
+	case errors.Is(err, unix.ENOENT):
+		return fmt.Errorf("no such folder")
+	}
+	return err
+}

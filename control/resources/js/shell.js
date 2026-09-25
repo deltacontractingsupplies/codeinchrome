@@ -278,6 +278,8 @@ export function breToEre(bre) {
 }
 
 const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** A word as sh would need it quoted. */
+export const shQuote = (w) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(w) ? w : `'${String(w).replace(/'/g, "'\\''")}'`);
 
 /** getopt: combined short flags (-rn), values (-n 5, -n5, --include=x). */
 function getopt(args, { bool = '', value = '', long = {}, numeric = false } = {}) {
@@ -611,7 +613,7 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
   // Listings are remembered within one command line (cp and mv stat the
   // same folder more than once) and forgotten the moment anything writes.
   const listed = new Map();
-  const writes = ['write', 'writeMany', 'mkdir', 'move', 'copy', 'remove', 'removeTree', 'clone', 'command', 'eval', 'query'];
+  const writes = ['write', 'writeMany', 'mkdir', 'move', 'copy', 'remove', 'removeTree', 'removeEmptyDir', 'clone', 'command', 'eval', 'query'];
   const io = { ...rawIo };
   io.list = (p) => {
     if (!listed.has(p)) listed.set(p, rawIo.list(p));
@@ -622,6 +624,10 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
   }
 
   const fail = (code, err) => ({ code, out: '', err: err.endsWith('\n') ? err : `${err}\n` });
+  // A refusal that only confirmation lifts, as data - never recognised by
+  // matching text, which the site's own output could imitate. `command` is
+  // exactly what confirming would run: that one command, not the whole line.
+  const gated = (command, why) => ({ code: 1, out: '', err: `${why}\n`, needsConfirm: [command] });
   const ok = (out = '') => ({ code: 0, out, err: '' });
 
   async function stat(abs) {
@@ -949,6 +955,7 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       const { flags, operands } = getopt(args, { bool: 'rRfidv', long: { recursive: 'bool', force: 'bool' } });
       const recursive = flags.r || flags.R || flags.recursive;
       const force = flags.f || flags.force;
+      const gatedHere = [];
       if (!operands.length) return force ? ok() : fail(1, 'rm: missing operand');
       let err = '';
       for (const t of operands) {
@@ -960,27 +967,29 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
           if (!recursive && !flags.d) { err += `rm: cannot remove '${t}': Is a directory\n`; continue; }
           const r = await io.removeTree(abs, ctx.confirm);
           if (!r.ok) {
-            err += r.error === 'needs_confirm' || r.status === 409
-              ? `rm: '${t}' is a folder: deleting it needs cic.sh(command, { confirm: true }). Its files go to the bin and can be restored.\n`
-              : `rm: cannot remove '${t}': ${r.hint}\n`;
+            if (r.error === 'needs_confirm') {
+              // The absolute path: cd may change before it is confirmed.
+              gatedHere.push(`rm -r ${shQuote(abs)}`);
+              err += `rm: '${t}' is a folder: deleting it needs confirmation (its files go to the bin and can be restored)\n`;
+            } else {
+              err += `rm: cannot remove '${t}': ${r.hint}\n`;
+            }
           }
           continue;
         }
         const r = await io.remove(abs);
         if (!r.ok) err += `rm: cannot remove '${t}': ${r.hint}\n`;
       }
-      return { code: err ? 1 : 0, out: '', err };
+      return { code: err ? 1 : 0, out: '', err, ...(gatedHere.length ? { needsConfirm: gatedHere } : {}) };
     },
     async rmdir(args) {
       const { operands } = getopt(args, { bool: 'pv' });
       let err = '';
       for (const t of operands) {
         const abs = resolvePath(state.cwd, t);
-        const r = await io.list(abs);
-        if (!r.ok) { err += `rmdir: failed to remove '${t}': No such file or directory\n`; continue; }
-        if (r.entries.length) { err += `rmdir: failed to remove '${t}': Directory not empty\n`; continue; }
-        const d = await io.removeTree(abs, true);
-        if (!d.ok) err += `rmdir: failed to remove '${t}': ${d.hint}\n`;
+        // The host removes it only if it is empty at that moment.
+        const d = await io.removeEmptyDir(abs);
+        if (!d.ok) err += `rmdir: failed to remove '${t}': ${/not empty/i.test(d.hint ?? '') ? 'Directory not empty' : /no such/i.test(d.hint ?? '') ? 'No such file or directory' : d.hint}\n`;
       }
       return { code: err ? 1 : 0, out: '', err };
     },
@@ -1142,22 +1151,27 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       if (!cmd.length) cmd.push('echo');
       const items = f.I ? splitLines(stdin ?? '') : (stdin ?? '').split(f['0'] ? '\0' : /\s+/).filter(Boolean);
       if (!items.length && f.r) return ok();
+      // Bounded: each run is a request to the site's host.
+      if (items.length > 1000) return fail(1, `xargs: ${items.length} items; at most 1000 - narrow the list first`);
       const batches = [];
       if (f.I) for (const it of items) batches.push(cmd.map((a) => a.split(f.I).join(it)));
       else {
         const n = Number(f.n ?? f.L) || items.length || 1;
         for (let s = 0; s < Math.max(items.length, 1); s += n) batches.push([...cmd, ...items.slice(s, s + n)]);
       }
+      if (batches.length > 100) return fail(1, `xargs: that would run the command ${batches.length} times; at most 100 (use a larger -n, or no -n/-I)`);
       let out = '';
       let err = '';
       let code = 0;
+      const needsConfirm = [];
       for (const argv of batches) {
         const r = await runArgv(argv, null, ctx);
         out += r.out;
         err += r.err;
         if (r.code) code = 123;
+        if (r.needsConfirm) needsConfirm.push(...r.needsConfirm);
       }
-      return { code, out, err };
+      return { code, out, err, ...(needsConfirm.length ? { needsConfirm } : {}) };
     },
     async basename(args) { return args[0] ? ok(`${baseName(args[0]).replace(args[1] && baseName(args[0]).endsWith(args[1]) ? new RegExp(`${escapeRe(args[1])}$`) : /$^/, '')}\n`) : fail(1, 'basename: missing operand'); },
     async dirname(args) { return args[0] ? ok(`${dirName(args[0])}\n`) : fail(1, 'dirname: missing operand'); },
@@ -1461,10 +1475,10 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       const display = (p) => (operands.length ? shown(t, abs, p) : relToCwd(p));
       let files;
       if (local) {
-        const r = await io.find({ under: abs, type: 'f', limit: 400 });
+        const r = await io.find({ under: abs, type: 'f', limit: 200 });
         if (!r.ok) { errors += `grep: ${t}: ${r.hint}\n`; continue; }
         files = r.entries.map((e) => e.path).filter((p) => !excluded(p) && !/(^|\/)\.env(\..*)?$/.test(p));
-        if (r.truncated) errors += `grep: ${t}: only the first 400 files were read for -v/-L/context; name a smaller folder\n`;
+        if (r.truncated) errors += `grep: ${t}: only the first 200 files were read for -v/-L/context; name a smaller folder\n`;
         if (!invert && !filesWithout) {
           const g = await io.grep({ pattern: source, regex: true, icase, word, under: abs, include: includes, limit: 500 });
           const hitFiles = new Set((g.hits ?? []).map((h) => h.path));
@@ -1692,7 +1706,9 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     if (!args.length) return fail(1, `${name}: name a command, e.g. ${name === 'artisan' ? 'php artisan route:list' : 'composer require vendor/package'}`);
     const r = await io.command(name, args, ctx.confirm);
     if (!r.ok && !r.result) {
-      if (r.error === 'needs_confirm' || r.status === 409) return fail(1, `${name} ${args[0]}: this destroys data; run it with cic.sh(command, { confirm: true })`);
+      if (r.error === 'needs_confirm') {
+        return gated(`${name === 'artisan' ? 'php artisan' : name} ${args.map(shQuote).join(' ')}`, `${name} ${args[0]}: this destroys data; it needs confirmation`);
+      }
       return fail(1, `${name}: ${r.hint ?? r.error}`);
     }
     const res = r.result;
@@ -1798,7 +1814,7 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     if (!sql || !String(sql).trim()) return fail(1, 'mysql: pass the SQL with -e "SELECT ..." or pipe it in (this is the site\'s own database; no password needed)');
     const r = await io.query(String(sql), ctx.confirm);
     if (!r.ok) {
-      if (r.error === 'needs_write' || r.status === 409) return fail(1, 'mysql: this statement changes data; run it with cic.sh(command, { confirm: true })');
+      if (r.error === 'needs_write') return gated(`mysql -e ${shQuote(String(sql))}`, 'mysql: this statement changes data; it needs confirmation');
       return fail(1, `ERROR: ${r.hint ?? r.error}`);
     }
     const res = r.result;
@@ -1840,7 +1856,7 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     if (cmd.heredoc) input = cmd.heredoc.body;
     const res = argv.length ? await runArgv(argv, input, ctx) : ok(input ?? '');
     let { out, err } = res;
-    const exit = res.exit;
+    const { exit, needsConfirm } = res;
     let code = res.code;
     for (const r of cmd.redirects) {
       if (r.op === '<') continue;
@@ -1856,7 +1872,7 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       const w = await writeFile(resolvePath(state.cwd, r.target), data, { append: r.op.endsWith('>>') });
       if (!w.ok) { err += `cic.sh: ${r.target}: ${w.hint}\n`; code = 1; } else err += lintNote(w);
     }
-    return { code, out, err, exit };
+    return { code, out, err, exit, needsConfirm };
   }
 
   /** Run a command line -> { code, stdout, stderr }. */
@@ -1868,6 +1884,7 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       return { code: 2, stdout: '', stderr: `cic.sh: ${e.message}\n` };
     }
     const ctx = { confirm };
+    const needsConfirm = [];
     listed.clear();
     let stdout = '';
     let stderr = '';
@@ -1888,10 +1905,17 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
         if (k === pipeline.length - 1) stdout += r.out;
         else input = r.out;
         exited = exited || Boolean(r.exit);
+        if (r.needsConfirm) needsConfirm.push(...r.needsConfirm);
+      }
+      // A refusal that needs confirming stops the line: what follows may
+      // depend on it, and confirming runs only the refused command.
+      if (needsConfirm.length) {
+        stderr += `cic.sh: stopped - nothing after this ran. To go ahead: ${needsConfirm.map((c) => `cic.sh(${JSON.stringify(c)}, { confirm: true })`).join(', then ')}\n`;
+        break;
       }
       if (exited) break;
     }
-    return { code, stdout, stderr };
+    return { code, stdout, stderr, ...(needsConfirm.length ? { needsConfirm } : {}) };
   }
 
   commands.exit = async (args) => ({ code: Number(args[0] ?? 0) || 0, out: '', err: '', exit: true });

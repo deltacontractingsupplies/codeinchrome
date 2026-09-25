@@ -55,6 +55,8 @@ return Application::configure(basePath: dirname(__DIR__))
             // SQL too: whitespace inside a string literal is part of the
             // statement, and a trailing comment needs its newline.
             'sql',
+            // grep's pattern: `grep -r ' foo'` means the space.
+            'pattern',
         ]);
     })
     ->withExceptions(function (Exceptions $exceptions): void {

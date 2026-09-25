@@ -70,10 +70,13 @@ class FileManagerController extends FileController
     public function destroyTree(Request $request, Site $site): JsonResponse
     {
         $this->authorizeSite($request, $site);
-        $d = $request->validate(['path' => self::PATH, 'confirm' => ['nullable', 'boolean']]);
+        $d = $request->validate(['path' => self::PATH, 'confirm' => ['nullable', 'boolean'], 'empty' => ['nullable', 'boolean']]);
 
         return $this->attempt(function () use ($site, $d) {
-            $r = AgentClient::for($site->host)->deleteTree($site->site_id, $d['path'], (bool) ($d['confirm'] ?? false));
+            $client = AgentClient::for($site->host);
+            $r = ($d['empty'] ?? false)
+                ? $client->deleteEmptyDir($site->site_id, $d['path'])
+                : $client->deleteTree($site->site_id, $d['path'], (bool) ($d['confirm'] ?? false));
             Audit::record('folder.deleted', site: $site, detail: ['path' => $d['path']]);
 
             return $r;

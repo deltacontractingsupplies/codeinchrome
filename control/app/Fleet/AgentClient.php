@@ -376,6 +376,12 @@ class AgentClient
         return $this->send('delete', "/v1/sites/$id/tree", query: ['path' => $path, 'confirm' => $confirm ? 1 : 0]);
     }
 
+    /** rmdir: the host removes the folder only if it is empty at that moment. */
+    public function deleteEmptyDir(string $id, string $path): array
+    {
+        return $this->send('delete', "/v1/sites/$id/tree", query: ['path' => $path, 'empty' => 1]);
+    }
+
     /** Every file path in the site for Quick Open: ['paths' => [...], 'truncated' => bool]. */
     public function paths(string $id): array
     {

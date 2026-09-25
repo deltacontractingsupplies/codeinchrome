@@ -155,10 +155,12 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     // us hammer resolvers.
     Route::post('/sites/{site}/domains/{domain}/verify', [DomainController::class, 'verify'])->middleware('throttle:domains')->name('domains.verify');
     Route::delete('/sites/{site}/domains/{domain}', [DomainController::class, 'destroy'])->name('domains.destroy');
-    Route::get('/sites/{site}/files', [FileController::class, 'index'])->name('files.index');
-    Route::put('/sites/{site}/files', [FileController::class, 'store'])->middleware(\App\Http\Middleware\StorageLimit::class)->name('files.store');
-    Route::put('/sites/{site}/files/batch', [FileController::class, 'storeMany'])->middleware(\App\Http\Middleware\StorageLimit::class)->name('files.batch');
-    Route::post('/sites/{site}/files/edit', [FileController::class, 'edit'])->name('files.edit');
+    // Bounded per user: one cic.sh line (xargs, a glob, grep -C) can fan out
+    // into many requests, each forwarded to a host other sites share.
+    Route::get('/sites/{site}/files', [FileController::class, 'index'])->middleware('throttle:files')->name('files.index');
+    Route::put('/sites/{site}/files', [FileController::class, 'store'])->middleware(['throttle:file-writes', \App\Http\Middleware\StorageLimit::class])->name('files.store');
+    Route::put('/sites/{site}/files/batch', [FileController::class, 'storeMany'])->middleware(['throttle:file-writes', \App\Http\Middleware\StorageLimit::class])->name('files.batch');
+    Route::post('/sites/{site}/files/edit', [FileController::class, 'edit'])->middleware('throttle:file-writes')->name('files.edit');
     Route::get('/sites/{site}/exposure', [FileController::class, 'exposure'])->middleware('throttle:exposure')->name('sites.exposure');
     Route::post('/sites/{site}/eval', [FileController::class, 'eval'])->middleware('throttle:eval')->name('sites.eval');
     Route::post('/sites/{site}/login-cookie', [FileController::class, 'loginCookie'])->middleware('throttle:eval')->name('sites.login-cookie');
@@ -166,14 +168,15 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     // A page as one of the site's users sees it, in a real tab (LookController).
     Route::post('/sites/{site}/look', [\App\Http\Controllers\LookController::class, 'create'])->middleware('throttle:site-request')->name('sites.look');
     Route::get('/sites/{site}/look/{token}', [\App\Http\Controllers\LookController::class, 'show'])->whereUuid('token')->middleware('throttle:site-request')->name('sites.look.show');
-    Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->name('files.destroy');
+    Route::delete('/sites/{site}/files', [FileController::class, 'destroy'])->middleware('throttle:file-writes')->name('files.destroy');
     // The rest of the file manager.
-    Route::post('/sites/{site}/files/mkdir', [FileManagerController::class, 'mkdir'])->name('files.mkdir');
-    Route::post('/sites/{site}/files/move', [FileManagerController::class, 'move'])->name('files.move');
-    Route::post('/sites/{site}/files/copy', [FileManagerController::class, 'copy'])->middleware(\App\Http\Middleware\StorageLimit::class)->name('files.copy');
+    Route::post('/sites/{site}/files/mkdir', [FileManagerController::class, 'mkdir'])->middleware('throttle:file-writes')->name('files.mkdir');
+    Route::post('/sites/{site}/files/move', [FileManagerController::class, 'move'])->middleware('throttle:file-writes')->name('files.move');
+    // A folder copy can be 200 MB: bounded like a command.
+    Route::post('/sites/{site}/files/copy', [FileManagerController::class, 'copy'])->middleware(['throttle:command', \App\Http\Middleware\StorageLimit::class])->name('files.copy');
     Route::post('/sites/{site}/files/zip', [FileManagerController::class, 'zip'])->middleware('throttle:command')->name('files.zip');
     Route::post('/sites/{site}/files/unzip', [FileManagerController::class, 'unzip'])->middleware(['throttle:command', \App\Http\Middleware\StorageLimit::class])->name('files.unzip');
-    Route::delete('/sites/{site}/tree', [FileManagerController::class, 'destroyTree'])->name('files.tree.destroy');
+    Route::delete('/sites/{site}/tree', [FileManagerController::class, 'destroyTree'])->middleware('throttle:file-writes')->name('files.tree.destroy');
     Route::get('/sites/{site}/paths', [FileManagerController::class, 'paths'])->middleware('throttle:command')->name('files.paths');
     Route::get('/sites/{site}/search', [FileManagerController::class, 'search'])->middleware('throttle:search')->name('files.search');
     // grep -r and find for cic.sh: read-only walks, capped at 20 s on the host.
@@ -181,7 +184,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::get('/sites/{site}/find', [FileManagerController::class, 'find'])->middleware('throttle:search')->name('files.find');
     Route::post('/sites/{site}/files/clone', [FileManagerController::class, 'cloneRepository'])->middleware(['throttle:clone', \App\Http\Middleware\StorageLimit::class])->name('files.clone');
     Route::post('/sites/{site}/upload', [FileManagerController::class, 'upload'])->middleware(['throttle:command', \App\Http\Middleware\StorageLimit::class])->name('files.upload');
-    Route::get('/sites/{site}/download', [FileManagerController::class, 'download'])->name('files.download');
+    Route::get('/sites/{site}/download', [FileManagerController::class, 'download'])->middleware('throttle:files')->name('files.download');
     // Every version of every file, the bin of deleted ones, and restore.
     Route::get('/sites/{site}/history', [HistoryController::class, 'index'])->name('history.index');
     Route::get('/sites/{site}/bin', [HistoryController::class, 'bin'])->name('history.bin');
