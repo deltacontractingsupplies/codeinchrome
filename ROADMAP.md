@@ -667,6 +667,15 @@ fixed, deployed and verified (above). These remain - each needs the owner:
       replica removes the single point of failure.
 - [ ] **Operator identity and an abuse-response process** (legal name on the
       terms, a response-time commitment to Hetzner and Cloudflare reports).
+- [x] **A failing scheduled job is an incident** (2026-09-25): abuse scans,
+      the image roll, trials, idle pauses and every other scheduled job
+      feed monitoring (`job:<command>`): an hourly or daily job alerts on its
+      first failure, a job every few minutes on its third in a row, once per
+      incident, with recovery. Before, a job failing every run left a log line.
+- [ ] **A dead-man's switch for the scheduler itself**: if cron stopped,
+      monitoring (a scheduled job) would stop with it and say nothing. Needs
+      an outside heartbeat (Healthchecks.io, Better Stack) - owner: an account;
+      the ping is one line in the schedule.
 - [ ] **Platform mail from its own IP** (the control host): a mail provider
       (Postmark, Resend) instead keeps the host's address out of every mail
       header and SPF record.

@@ -29,6 +29,19 @@ class AppServiceProvider extends ServiceProvider
      */
     public function boot(): void
     {
+        // Every scheduled job's outcome feeds monitoring (App\Fleet\Monitoring::recordJob).
+        // A non-zero exit fires Finished and then Failed, an exception only
+        // Failed: so success is Finished with exit 0, failure is Failed.
+        Event::listen(\Illuminate\Console\Events\ScheduledTaskFinished::class, function ($e) {
+            if ((int) $e->task->exitCode === 0) {
+                app(\App\Fleet\Monitoring::class)->recordJob($e->task, true, 'last run succeeded in '.$e->runtime.' s');
+            }
+        });
+        Event::listen(\Illuminate\Console\Events\ScheduledTaskFailed::class, function ($e) {
+            app(\App\Fleet\Monitoring::class)->recordJob($e->task, false,
+                'last run failed: '.mb_substr($e->exception->getMessage(), 0, 300));
+        });
+
         // Sign in with Apple is a SocialiteProviders driver, registered here.
         Event::listen(
             SocialiteWasCalled::class,
