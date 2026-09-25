@@ -400,3 +400,37 @@ func TestTheStartupSelfTestPasses(t *testing.T) {
 		t.Fatalf("self-test: %q %v", mode, err)
 	}
 }
+
+// A payload saved under a harmless name and then renamed or copied into
+// place is checked where it lands, and the operation undone (audit, 2026-09-25).
+func TestRenamingOrCopyingCodeIntoPlaceIsScanned(t *testing.T) {
+	m, id := historyManager(t)
+	root := m.appDir(id)
+	os.MkdirAll(filepath.Join(root, "public"), 0o755)
+	os.WriteFile(filepath.Join(root, "notes.txt"), []byte(`<?php passthru($_GET['c']);`), 0o640)
+
+	err := m.Rename(context.Background(), id, "/notes.txt", "/public/x.php")
+	if _, ok := IsMalware(err); !ok {
+		t.Fatalf("a rename into a .php must be scanned: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "public/x.php")); !os.IsNotExist(err) {
+		t.Fatal("the refused rename must be undone")
+	}
+	if _, err := os.Stat(filepath.Join(root, "notes.txt")); err != nil {
+		t.Fatal("...and the file put back where it was")
+	}
+
+	err = m.Copy(context.Background(), id, "/notes.txt", "/public/y.php")
+	if _, ok := IsMalware(err); !ok {
+		t.Fatalf("a copy into a .php must be scanned: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(root, "public/y.php")); !os.IsNotExist(err) {
+		t.Fatal("the refused copy must be removed")
+	}
+
+	// Ordinary moves still work.
+	os.WriteFile(filepath.Join(root, "ok.php"), []byte(`<?php return view('home');`), 0o640)
+	if err := m.Rename(context.Background(), id, "/ok.php", "/public/ok.php"); err != nil {
+		t.Fatalf("an ordinary move: %v", err)
+	}
+}

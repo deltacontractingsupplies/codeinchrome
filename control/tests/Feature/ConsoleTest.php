@@ -55,6 +55,20 @@ class ConsoleTest extends TestCase
             ->assertStatus(409)->assertJsonPath('error', 'needs_confirm');
     }
 
+    public function test_a_command_that_writes_a_webshell_bans_like_saving_one(): void
+    {
+        $this->agentBody = ['ok' => false, 'error' => 'malware', 'hint' => 'refused: /app/Shell.php holds code written to hide what it does',
+            'findings' => [['path' => '/app/Shell.php', 'kind' => 'obfuscated', 'detail' => 'request input handed to a shell']]];
+        $this->agentStatus = 422;
+        Http::fake(['127.0.0.1:944*/v1/sites/*/suspended' => Http::response(['ok' => true, 'applied' => []])]);
+
+        $this->actingAs($this->owner)->postJson(route('console.run', $this->site), ['tool' => 'artisan', 'args' => ['app:setup']])
+            ->assertStatus(403)->assertJsonPath('error', 'malware');
+
+        $this->assertNotNull($this->owner->fresh()->banned_at);
+        $this->assertStringContainsString('/app/Shell.php', $this->owner->fresh()->banned_reason);
+    }
+
     public function test_only_artisan_and_composer_and_only_the_owner(): void
     {
         $this->actingAs($this->owner)->postJson(route('console.run', $this->site), ['tool' => 'bash', 'args' => ['-c', 'id']])

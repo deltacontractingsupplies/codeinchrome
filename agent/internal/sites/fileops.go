@@ -98,6 +98,10 @@ func (m *Manager) Rename(ctx context.Context, id, from, to string) error {
 		}
 		return fmt.Errorf("cannot move that")
 	}
+	if bad := scanMoved(ctx, root, dst); bad != nil {
+		_ = renameBeneath(root, strings.TrimPrefix(dst, root), strings.TrimPrefix(src, root))
+		return bad
+	}
 	m.record(ctx, id, fmt.Sprintf("move %s to %s", m.relativeTo(id, src), m.relativeTo(id, dst)))
 	return nil
 }
@@ -163,9 +167,13 @@ func (m *Manager) Copy(ctx context.Context, id, from, to string) error {
 	})
 	if err != nil {
 		if created {
-			m.removeBeneath(root, dst)
+			m.removeCopied(root, dst)
 		}
 		return fmt.Errorf("copy failed: %v", err)
+	}
+	if bad := scanMoved(ctx, root, dst); bad != nil {
+		m.removeCopied(root, dst)
+		return bad
 	}
 	m.record(ctx, id, fmt.Sprintf("copy %s to %s", m.relativeTo(id, src), m.relativeTo(id, dst)))
 	return nil
@@ -213,6 +221,16 @@ func (m *Manager) removeBeneath(root, abs string) {
 	if info, err := os.Lstat(abs); err == nil && info.IsDir() && strings.HasPrefix(abs, root+string(os.PathSeparator)) {
 		_ = os.RemoveAll(abs)
 	}
+}
+
+// removeCopied undoes a copy: a folder as removeBeneath does, a single file
+// through the no-follow removal (a refused copy of one file was left behind).
+func (m *Manager) removeCopied(root, abs string) {
+	if info, err := os.Lstat(abs); err == nil && info.Mode().IsRegular() {
+		_ = removeBeneath(root, strings.TrimPrefix(abs, root))
+		return
+	}
+	m.removeBeneath(root, abs)
 }
 
 // Upload writes any file - binary included - up to MaxUploadSize. Written to
@@ -656,4 +674,42 @@ func (m *Manager) Paths(_ context.Context, id string) ([]string, bool, error) {
 		err = nil
 	}
 	return out, truncated, err
+}
+
+// scanMoved checks what a move or copy put at dst. Saving code as notes.txt
+// and renaming it to public/x.php skipped every check until the six-hourly
+// scan (the second security audit, 2026-09-25). The PHP rules always run;
+// ClamAV too when the tree is small enough to keep a move quick (the
+// scheduled scan covers the rest). A ClamAV that cannot run does not block
+// the move: the files were already on the site.
+func scanMoved(ctx context.Context, root, dst string) error {
+	var paths []string
+	var bytes int64
+	var found *ErrMalware
+	_ = walkBeneath(root, dst, func(p string, d fs.DirEntry, werr error) error {
+		if werr != nil || d.IsDir() || d.Type()&fs.ModeSymlink != 0 {
+			return nil
+		}
+		rel := strings.TrimPrefix(p, root)
+		if bad := scanWrittenPHP(root, rel); bad != nil {
+			found = bad
+			return fs.SkipAll
+		}
+		if info, err := d.Info(); err == nil {
+			bytes += info.Size()
+		}
+		paths = append(paths, p)
+		return nil
+	})
+	if found != nil {
+		return found
+	}
+	if len(paths) == 0 || len(paths) > 200 || bytes > 64<<20 {
+		return nil
+	}
+	hits, err := clamScan(ctx, root, paths...)
+	if err != nil {
+		return nil
+	}
+	return refusal(hits)
 }

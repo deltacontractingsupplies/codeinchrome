@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 const eicar = `X5O!P%@AP[4\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*`
@@ -244,5 +245,25 @@ func TestTheAuditsWebshellVariantsAreAllCaught(t *testing.T) {
 	// JavaScript template strings in a Blade view are not shell commands.
 	if got := phpObfuscation("<script>const u = `/items/${id}`;</script>", true); got != "" {
 		t.Errorf("a Blade view's JavaScript was flagged: %s", got)
+	}
+}
+
+func TestWhatACommandWroteIsHeldToTheRules(t *testing.T) {
+	m, id := historyManager(t)
+	root := m.appDir(id)
+	os.MkdirAll(filepath.Join(root, "app"), 0o755)
+	os.MkdirAll(filepath.Join(root, "vendor/pkg"), 0o755)
+	before := time.Now().Add(-time.Hour)
+	old := filepath.Join(root, "app/Old.php")
+	os.WriteFile(old, []byte(`<?php eval($x);`), 0o640) // there before: the scheduled scan's job
+	os.Chtimes(old, before, before)
+	since := time.Now().Add(-time.Second)
+	os.WriteFile(filepath.Join(root, "vendor/pkg/Lib.php"), []byte(`<?php eval($x);`), 0o640)
+	if bad := m.ScanChangedSince(id, since); bad != nil {
+		t.Fatalf("vendor/ and files older than the command are not this check's: %v", bad)
+	}
+	os.WriteFile(filepath.Join(root, "app/Shell.php"), []byte(`<?php system($_GET['c']);`), 0o640)
+	if bad := m.ScanChangedSince(id, since); bad == nil || bad.Findings[0].Path != "/app/Shell.php" {
+		t.Fatalf("a file the command wrote must be caught: %v", bad)
 	}
 }

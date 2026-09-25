@@ -333,7 +333,14 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {code}"))
 			return
 		}
+		started := time.Now().Add(-time.Second)
 		res, err := mgr.Eval(r.Context(), r.PathValue("id"), body.Code)
+		if err == nil {
+			if bad := mgr.ScanChangedSince(r.PathValue("id"), started); bad != nil {
+				refusedMalware(w, bad)
+				return
+			}
+		}
 		if errors.Is(err, sites.ErrBusy) {
 			writeJSON(w, http.StatusConflict, fail("busy", "Another command is running on this site; try again in a moment."))
 			return
@@ -677,7 +684,15 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {tool: artisan|composer, args: [...], confirm?}"))
 			return
 		}
+		started := time.Now().Add(-time.Second)
 		res, err := mgr.RunCommand(r.Context(), r.PathValue("id"), body.Tool, body.Args, body.Confirm)
+		if err == nil {
+			// What the command wrote is held to the same rules as a save.
+			if bad := mgr.ScanChangedSince(r.PathValue("id"), started); bad != nil {
+				refusedMalware(w, bad)
+				return
+			}
+		}
 		switch {
 		case errors.Is(err, sites.ErrNeedsConfirm):
 			writeJSON(w, http.StatusConflict, fail("needs_confirm",

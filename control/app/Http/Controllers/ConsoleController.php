@@ -34,6 +34,14 @@ class ConsoleController extends Controller
             return response()->json($result);
         } catch (AgentRefused $e) {
             $error = $e->detail['error'] ?? 'refused';
+            if ($error === 'malware') {
+                // The command wrote PHP the rules refuse (agent ScanChangedSince):
+                // the same as saving it (the second security audit, 2026-09-25).
+                app(\App\Abuse\Enforcer::class)->malware($site, $e->detail['findings'] ?? [], 'written by a command');
+
+                return response()->json(['ok' => false, 'error' => 'malware',
+                    'hint' => ($e->detail['hint'] ?? 'Malware refused.').' '.\App\Http\Middleware\BannedAccount::MESSAGE], 403);
+            }
 
             return response()->json(['ok' => false, 'error' => $error, 'hint' => $e->detail['hint'] ?? $e->getMessage()],
                 in_array($error, ['needs_confirm', 'busy'], true) ? 409 : 422);
