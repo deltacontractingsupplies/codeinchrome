@@ -50,10 +50,10 @@ before it is ticked.
 - [ ] **A5 [high]** Phishing detection can be evaded (only pages linked from the home page, a published User-Agent, server HTML only) and never pauses a site (review email only)
 - [ ] **A6 [high]** No Safe Browsing or threat-feed monitoring of hosted sites, although sites share codeinchrome.com with the dashboard
 - [ ] **A7 [high]** Customer sites are not on a separate Public Suffix List domain (owner-deferred item, re-raised)
-- [ ] **A8 [high]** ClamAV detects no PHP webshells on h1/h3/h4 (only EICAR), yet it is the only check in vendor/, node_modules and non-PHP files
-- [ ] **A9 [high]** The obfuscation regexes are trivially bypassed: 17 of 17 common variant webshell forms I tested pass
-- [ ] **A10 [high]** Rules are chosen by file extension and Apache honours AllowOverride All, so PHP hidden in .txt/.jpg or pulled in by include is never checked
-- [ ] **A11 [high]** vendor/ and any node_modules/ path are exempt from the rules and writable from the editor; public/node_modules/x.php is served directly
+- [ ] **A8 [high]** ClamAV detects no PHP webshells on h1/h3/h4 (only EICAR), yet it is the only check in vendor/, node_modules and non-PHP files - MITIGATED 2026-09-25: a webshell anywhere under public/ can no longer run (only index.php executes); detection itself still to improve.
+- [ ] **A9 [high]** The obfuscation regexes are trivially bypassed: 17 of 17 common variant webshell forms I tested pass - MITIGATED 2026-09-25: see A8 - an undetected shell in public/ cannot execute; the rules still to harden.
+- [x] **A10 [high]** Rules are chosen by file extension and Apache honours AllowOverride All, so PHP hidden in .txt/.jpg or pulled in by include is never checked - FIXED 2026-09-25: AllowOverride None (Laravel's rewrite rules built into the image) and only public/index.php executes; verified live: a .jpg beside an AddType .htaccess is served as text, a dropped .php and /x.php/y answer 403.
+- [ ] **A11 [high]** vendor/ and any node_modules/ path are exempt from the rules and writable from the editor; public/node_modules/x.php is served directly - MITIGATED 2026-09-25: public/node_modules/x.php and any other PHP in public/ answer 403; vendor/ scanning still open.
 - [ ] **A12 [high]** The CPU (mining) watch resets on any container restart, which the owner can trigger, and on any single 5-minute reading under 90%
 - [ ] **A13 [high]** The stray-process reaper trusts argv: anything named apache2/httpd or containing 'phpactor' (or restarted every <12 minutes) survives on free sites
 - [ ] **A14 [high]** The egress watch counts only distinct hosts and ports in a conntrack snapshot, so SSH brute force, single-target floods or credential stuffing, and RST-answered port scans go unnoticed
@@ -92,6 +92,11 @@ before it is ticked.
 - [ ] **A47 [low]** The control host still runs an unused root cic-agent, the Docker daemon and old DOCKER-USER rules
 - [ ] **A48 [low]** There is no verifiable Cloudflare-side rate limiting or IP reputation, and the API token cannot read or manage it
 - [ ] **A49 [low]** Host auditing and kernel hardening are at Ubuntu defaults: no auditd, and several sysctls are not hardened
+
+- [x] **Every site's trailing-slash and directory redirects went to
+      http://<site>:8080/...** (found 2026-09-25 while testing the image):
+      Apache built them from its internal port. The vhost now names its public
+      face (https, 443, the visitor's host); verified live: /login/ -> https://<site>/login.
 
 ### Claude in Chrome: the same power as a terminal (owner, 2026-09-25)
 
