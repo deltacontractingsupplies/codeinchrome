@@ -1687,9 +1687,11 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
         else if (a.startsWith('-')) continue; // --depth=1, -q, --single-branch, --recursive
         else ops.push(a);
       }
-      if (!ops.length) return fail(128, 'usage: git clone [-b branch] https://github.com/owner/repo [folder]');
+      if (rest.includes('--status')) return operationStatus();
+      if (!ops.length) return fail(128, 'usage: git clone [-b branch] https://github.com/owner/repo [folder]  (folder / replaces the whole site)');
       const repo = ops[0].replace(/^git@github\.com:/, 'https://github.com/');
       const into = ops[1] ? resolvePath(state.cwd, ops[1]) : resolvePath(state.cwd, repo.replace(/\.git\/?$/, '').split('/').filter(Boolean).pop() ?? '');
+      if (into === '/') return replaceSite(repo, ref, ctx);
       const t0 = Date.now();
       const r = await io.clone({ repository: repo, ref, into });
       if (!r.ok) return fail(128, `fatal: ${r.hint ?? r.error}`);
@@ -1700,6 +1702,38 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       return fail(128, `git ${sub}: there is no repository here: every save is already a version, and the site is live as soon as a file is saved. To undo a file: cic.history(path), then cic.restore(path, commit)`);
     }
     return fail(1, 'git: log, diff, show and status read the saved versions; clone brings a public repository in');
+  }
+
+  // git clone URL / : the site itself becomes the repository. Checked and
+  // scanned first, then backed up and swapped by the host in the background;
+  // this waits up to 90 s, then says how to follow it.
+  async function replaceSite(repo, ref, ctx) {
+    const r = await io.clone({ repository: repo, ref, replace: true, confirm: ctx.confirm });
+    if (!r.ok) {
+      if (r.error === 'needs_confirm') {
+        return gated(`git clone ${ref ? `-b ${shQuote(ref)} ` : ''}${shQuote(repo)} /`,
+          `git clone: this replaces the whole site with ${repo} - backed up first, and .env and storage/ are kept - it needs confirmation`);
+      }
+      return fail(128, `fatal: ${r.hint ?? r.error}`);
+    }
+    let err = `Replacing the site with ${repo}: checked and scanned; now backing up, then swapping and composer install...\n`;
+    for (let waited = 0; waited < 90000; waited += 3000) {
+      await (io.sleep ?? ((ms) => new Promise((res) => setTimeout(res, ms))))(3000);
+      const s = await io.operation();
+      const op = s.operation;
+      if (op && op.kind === 'clone-replace' && op.state !== 'running') {
+        return { code: op.state === 'done' ? 0 : 1, out: '', err: `${err}${op.state === 'done' ? '' : 'fatal: '}${op.message}\n` };
+      }
+    }
+    return { code: 0, out: '', err: `${err}Still running (backups of a big site take a while). Follow it with: git clone --status\n` };
+  }
+
+  async function operationStatus() {
+    const s = await io.operation();
+    if (!s.ok) return fail(1, `git clone --status: ${s.hint ?? s.error}`);
+    const op = s.operation;
+    if (!op) return ok('nothing running, and nothing has run\n');
+    return { code: op.state === 'failed' ? 1 : 0, out: `${op.kind}: ${op.state} - ${op.message ?? ''}${op.savedAs ? ` (backup ${op.savedAs})` : ''}\n`, err: '' };
   }
 
   async function tool(name, args, ctx) {

@@ -182,6 +182,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     // grep -r and find for cic.sh: read-only walks, capped at 20 s on the host.
     Route::get('/sites/{site}/grep', [FileManagerController::class, 'grep'])->middleware('throttle:search')->name('files.grep');
     Route::get('/sites/{site}/find', [FileManagerController::class, 'find'])->middleware('throttle:search')->name('files.find');
+    Route::get('/sites/{site}/operation', [FileManagerController::class, 'operation'])->middleware('throttle:files')->name('files.operation');
     Route::post('/sites/{site}/files/clone', [FileManagerController::class, 'cloneRepository'])->middleware(['throttle:clone', \App\Http\Middleware\StorageLimit::class])->name('files.clone');
     Route::post('/sites/{site}/upload', [FileManagerController::class, 'upload'])->middleware(['throttle:command', \App\Http\Middleware\StorageLimit::class])->name('files.upload');
     Route::get('/sites/{site}/download', [FileManagerController::class, 'download'])->middleware('throttle:files')->name('files.download');

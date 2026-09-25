@@ -151,8 +151,14 @@ Limits found (each one a thing a terminal agent never hits):
       malware refuses all of it and bans, as for any upload. The rules found
       nothing in BookStack's 1,961 PHP files. Terminal here: `git clone
       --depth 1` of laravel/laravel 1.4 s (65 files), BookStack 2.8 s (2,615
-      files, 5.6 MB archive). LEFT: cloning OVER the running app (keep .env
-      and storage, back up first) so a cloned app can be the site itself.
+      files, 5.6 MB archive).
+- [x] Cloning OVER the running app, so a cloned open-source Laravel app is
+      the site itself: `git clone URL /` (or cic.clone(repo, { replace: true,
+      confirm: true })). Checked and scanned in a staging folder first (in
+      the request: malware counts like any clone), then in the background a
+      backup - no backup, no replace - then the swap, keeping the site's
+      .env and storage/, then composer install; `git clone --status` or
+      cic.operation() follows it. Needs confirm; audited.
 - [x] **The same power as JavaScript calls**, not only as a shell (owner,
       2026-09-25): cic.grep, cic.find, cic.clone and cic.diff return data
       (browser-safe text) through the same endpoints cic.sh uses; every other

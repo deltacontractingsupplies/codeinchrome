@@ -36,6 +36,10 @@ class FileManagerApiTest extends TestCase
                 : Http::response(['ok' => false, 'error' => 'needs_confirm', 'hint' => 'Pass confirm=1.'], 409),
             '127.0.0.1:944*/v1/sites/*/grep*' => Http::response(['ok' => true, 'hits' => [['path' => '/routes/web.php', 'line' => 3, 'text' => "Route::get('/')"]], 'truncated' => false]),
             '127.0.0.1:944*/v1/sites/*/find*' => Http::response(['ok' => true, 'entries' => [['path' => '/app/Models', 'dir' => true, 'size' => 96, 'mtime' => 1]], 'files' => 12, 'bytes' => 4096, 'truncated' => false]),
+            '127.0.0.1:944*/v1/sites/*/clone-replace' => fn ($r) => $r['confirm']
+                ? Http::response(['ok' => true, 'operation' => ['kind' => 'clone-replace', 'state' => 'running']], 202)
+                : Http::response(['ok' => false, 'error' => 'needs_confirm', 'hint' => 'Send confirm: true.'], 409),
+            '127.0.0.1:944*/v1/sites/*/operation' => Http::response(['ok' => true, 'operation' => ['kind' => 'clone-replace', 'state' => 'done', 'message' => 'ok']]),
             '127.0.0.1:944*/v1/sites/*/clone' => fn ($r) => str_contains($r['repository'], 'kit')
                 ? Http::response(['ok' => false, 'error' => 'malware_in_clone', 'hint' => 'refused: shell.php is malware - nothing from acme/kit was kept', 'findings' => [['path' => '/kit/shell.php', 'rule' => 'webshell']]], 422)
                 : Http::response(['ok' => true, 'clone' => ['repository' => 'acme/demo', 'ref' => 'HEAD', 'into' => '/demo', 'files' => 3, 'bytes' => 99, 'ms' => 800]]),
@@ -228,6 +232,20 @@ class FileManagerApiTest extends TestCase
         $this->travel(61)->seconds(); // the clone limit is 3 a minute
         $as->postJson($this->url('files.clone'), ['repository' => 'acme/kit3'])->assertStatus(403)->assertJsonPath('error', 'malware');
         $this->assertNotNull($this->owner->fresh()->banned_at);
+    }
+
+    public function test_replacing_the_site_with_a_clone_needs_confirm_and_is_audited(): void
+    {
+        $as = $this->actingAs($this->owner);
+        $as->postJson($this->url('files.clone'), ['repository' => 'acme/demo', 'replace' => 1])
+            ->assertStatus(409)->assertJsonPath('error', 'needs_confirm');
+        $this->travel(61)->seconds();
+        $as->postJson($this->url('files.clone'), ['repository' => 'acme/demo', 'replace' => 1, 'confirm' => 1])
+            ->assertOk()->assertJsonPath('operation.state', 'running');
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/v1/sites/shop/clone-replace') && $r['confirm'] === true);
+        $this->assertDatabaseHas('audit_events', ['action' => 'site.replaced_with_clone', 'site' => 'shop']);
+        $as->getJson($this->url('files.operation'))->assertOk()->assertJsonPath('operation.state', 'done');
+        $this->actingAs(User::factory()->create())->getJson($this->url('files.operation'))->assertNotFound();
     }
 }
 

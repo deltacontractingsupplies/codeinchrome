@@ -179,8 +179,17 @@ function memorySite(files = {}) {
       if (path === '/missing') return { ok: true, status: 404, headers: { 'content-type': 'text/html' }, body: 'Not Found' };
       return { ok: true, status: 200, headers: { 'content-type': 'text/html' }, body: `${opts.method} ${path}${opts.body ? ` ${opts.body}` : ''}${opts.json ? ` ${JSON.stringify(opts.json)}` : ''}`, ms: 12 };
     },
+    async operation() {
+      return { ok: true, operation: io.op ?? null };
+    },
+    async sleep() {},
     async clone(o) {
       calls.push(['clone', o]);
+      if (o.replace) {
+        if (!o.confirm) return { ok: false, status: 409, error: 'needs_confirm' };
+        io.op = { kind: 'clone-replace', state: 'done', message: 'the site is now acme/demo@HEAD', savedAs: 'a0000001' };
+        return { ok: true, operation: { kind: 'clone-replace', state: 'running' } };
+      }
       if (nodes.has(o.into)) return { ok: false, hint: `destination path '${o.into}' already exists` };
       put(`${o.into}/composer.json`, '{}');
       return { ok: true, clone: { repository: 'acme/demo', ref: o.ref || 'HEAD', into: o.into, files: 1, bytes: 2048, ms: 900 } };
@@ -521,5 +530,19 @@ test('a busy or conflicting host is not mistaken for a request to confirm', asyn
   const r = await sh(io, 'rm -r app');
   assert.equal(r.needsConfirm, undefined);
   assert.match(r.stderr, /Another command is running/);
+});
+
+test('git clone into / replaces the site, only when confirmed', async () => {
+  const io = site();
+  let r = await sh(io, 'git clone https://github.com/acme/demo /');
+  assert.deepEqual(r.needsConfirm, ['git clone https://github.com/acme/demo /']);
+  assert.equal(io.op, undefined);
+  r = await sh(io, 'cd / && git clone -b v2 acme/demo .');
+  assert.deepEqual(r.needsConfirm, ['git clone -b v2 acme/demo /']);
+  r = await sh(io, r.needsConfirm[0], { confirm: true });
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stderr, /the site is now acme\/demo@HEAD/);
+  assert.equal(io.calls.filter((c) => c[0] === 'clone').at(-1)[1].ref, 'v2');
+  assert.match((await sh(io, 'git clone --status')).stdout, /^clone-replace: done - .*\(backup a0000001\)/);
 });
 

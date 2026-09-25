@@ -481,6 +481,33 @@ class AgentClient
         return ['clone' => $json['clone'] ?? []];
     }
 
+    /**
+     * Replace the whole site with a public GitHub repository: checked and
+     * scanned now, then backed up and swapped in the background.
+     */
+    public function cloneReplace(string $id, string $repository, ?string $ref, bool $confirm): array
+    {
+        try {
+            $response = Http::timeout(200)->acceptJson()->withToken($this->token)
+                ->post($this->baseUrl."/v1/sites/$id/clone-replace", ['repository' => $repository, 'ref' => $ref ?? '', 'confirm' => $confirm]);
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}]. Whether the replace started is UNKNOWN.", previous: $e);
+        }
+        $json = $response->json() ?? [];
+        if (($json['ok'] ?? false) !== true) {
+            throw new AgentRefused(sprintf('Agent on [%s] refused the replace: %s (%s)', $this->host,
+                $json['error'] ?? 'unknown_error', $json['hint'] ?? 'no hint given'), detail: $json);
+        }
+
+        return ['operation' => $json['operation'] ?? null];
+    }
+
+    /** The current or last backup, restore or clone-replace. */
+    public function operation(string $id): array
+    {
+        return ['operation' => $this->send('get', "/v1/sites/$id/operation")['operation'] ?? null];
+    }
+
     /** Booleans as 1 (Go reads "1"), unset options left out; a list as repeated keys. */
     private static function flags(array $o): string
     {

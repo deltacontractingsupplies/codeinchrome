@@ -116,48 +116,12 @@ func (m *Manager) Clone(ctx context.Context, id, repository, ref, into string) (
 		return CloneResult{}, fmt.Errorf("destination path '%s' already exists", strings.TrimPrefix(dst, root))
 	}
 
-	// Downloaded to a scratch file first: a zip is read from its end.
-	tmp, err := os.CreateTemp("", "cic-clone-*.zip")
-	if err != nil {
-		return CloneResult{}, fmt.Errorf("no scratch space for the download")
-	}
-	defer os.Remove(tmp.Name())
-	defer tmp.Close()
-	u := fmt.Sprintf("%s/%s/%s/archive/%s.zip", archiveBase, url.PathEscape(owner), url.PathEscape(repo), strings.Join(escapeEach(strings.Split(ref, "/")), "/"))
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	arc, err := fetchArchive(ctx, owner, repo, ref)
 	if err != nil {
 		return CloneResult{}, err
 	}
-	req.Header.Set("User-Agent", "codeinchrome-agent (git clone for a site)")
-	res, err := archiveClient.Do(req)
-	if err != nil {
-		return CloneResult{}, fmt.Errorf("could not reach GitHub: %v", err)
-	}
-	defer res.Body.Close()
-	if res.StatusCode == http.StatusNotFound {
-		return CloneResult{}, fmt.Errorf("repository %s/%s (at %s) not found, or not public", owner, repo, ref)
-	}
-	if res.StatusCode != http.StatusOK {
-		return CloneResult{}, fmt.Errorf("GitHub answered %s", res.Status)
-	}
-	n, err := io.Copy(tmp, io.LimitReader(res.Body, maxCloneDownload+1))
-	if err != nil {
-		return CloneResult{}, fmt.Errorf("the download failed: %v", err)
-	}
-	if n > maxCloneDownload {
-		return CloneResult{}, fmt.Errorf("the repository's archive is larger than %d MB", maxCloneDownload>>20)
-	}
-	zr, err := zip.NewReader(tmp, n)
-	if err != nil {
-		return CloneResult{}, fmt.Errorf("GitHub's archive could not be read")
-	}
-	// GitHub puts everything under one folder, "repo-<ref>/".
-	prefix := ""
-	if len(zr.File) > 0 {
-		if i := strings.Index(zr.File[0].Name, "/"); i > 0 {
-			prefix = zr.File[0].Name[:i+1]
-		}
-	}
+	defer arc.Close()
+	zr, prefix := arc.zr, arc.prefix
 	if err := mkdirBeneath(root, strings.TrimPrefix(dst, root)); err != nil {
 		return CloneResult{}, err
 	}
@@ -178,6 +142,69 @@ func (m *Manager) Clone(ctx context.Context, id, repository, ref, into string) (
 	m.rememberCloned(id, root, written)
 	m.record(ctx, id, fmt.Sprintf("clone %s/%s@%s into %s", owner, repo, ref, m.relativeTo(id, dst)))
 	return CloneResult{Repository: owner + "/" + repo, Ref: ref, Into: strings.TrimPrefix(dst, root), Files: files, Bytes: bytes, Millis: time.Since(start).Milliseconds()}, nil
+}
+
+// archive is a downloaded GitHub archive, open for reading; Close removes it.
+type archive struct {
+	f      *os.File
+	zr     *zip.Reader
+	prefix string // GitHub's top folder, "repo-<ref>/"
+	size   int64
+}
+
+func (a *archive) Close() {
+	a.f.Close()
+	os.Remove(a.f.Name())
+}
+
+// fetchArchive downloads owner/repo at ref from GitHub (HTTPS, github.com
+// and codeload only, at most maxCloneDownload) to a scratch file.
+func fetchArchive(ctx context.Context, owner, repo, ref string) (*archive, error) {
+	// Downloaded to a scratch file first: a zip is read from its end.
+	tmp, err := os.CreateTemp("", "cic-clone-*.zip")
+	if err != nil {
+		return nil, fmt.Errorf("no scratch space for the download")
+	}
+	fail := func(err error) (*archive, error) {
+		tmp.Close()
+		os.Remove(tmp.Name())
+		return nil, err
+	}
+	u := fmt.Sprintf("%s/%s/%s/archive/%s.zip", archiveBase, url.PathEscape(owner), url.PathEscape(repo), strings.Join(escapeEach(strings.Split(ref, "/")), "/"))
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, u, nil)
+	if err != nil {
+		return fail(err)
+	}
+	req.Header.Set("User-Agent", "codeinchrome-agent (git clone for a site)")
+	res, err := archiveClient.Do(req)
+	if err != nil {
+		return fail(fmt.Errorf("could not reach GitHub: %v", err))
+	}
+	defer res.Body.Close()
+	if res.StatusCode == http.StatusNotFound {
+		return fail(fmt.Errorf("repository %s/%s (at %s) not found, or not public", owner, repo, ref))
+	}
+	if res.StatusCode != http.StatusOK {
+		return fail(fmt.Errorf("GitHub answered %s", res.Status))
+	}
+	n, err := io.Copy(tmp, io.LimitReader(res.Body, maxCloneDownload+1))
+	if err != nil {
+		return fail(fmt.Errorf("the download failed: %v", err))
+	}
+	if n > maxCloneDownload {
+		return fail(fmt.Errorf("the repository's archive is larger than %d MB", maxCloneDownload>>20))
+	}
+	zr, err := zip.NewReader(tmp, n)
+	if err != nil {
+		return fail(fmt.Errorf("GitHub's archive could not be read"))
+	}
+	prefix := ""
+	if len(zr.File) > 0 {
+		if i := strings.Index(zr.File[0].Name, "/"); i > 0 {
+			prefix = zr.File[0].Name[:i+1]
+		}
+	}
+	return &archive{f: tmp, zr: zr, prefix: prefix, size: n}, nil
 }
 
 func escapeEach(parts []string) []string {
