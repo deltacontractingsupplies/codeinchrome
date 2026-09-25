@@ -432,6 +432,44 @@ class AgentClient
         return $this->send('get', "/v1/sites/$id/search", query: ['q' => $q, 'limit' => $limit])['hits'] ?? [];
     }
 
+    /**
+     * grep -r: $o is pattern, regex, icase, word, under, include (a list of
+     * name globs) and limit -> ['hits' => [...], 'truncated' => bool].
+     */
+    public function grep(string $id, array $o): array
+    {
+        $r = $this->send('get', "/v1/sites/$id/grep?".self::flags($o));
+
+        return ['hits' => $r['hits'] ?? [], 'truncated' => (bool) ($r['truncated'] ?? false)];
+    }
+
+    /**
+     * find: $o is under, name, icase, type (f|d), newer (Unix seconds),
+     * maxdepth, all and limit -> entries, file count and bytes for du.
+     */
+    public function find(string $id, array $o): array
+    {
+        $r = $this->send('get', "/v1/sites/$id/find?".self::flags($o));
+
+        return ['entries' => $r['entries'] ?? [], 'files' => (int) ($r['files'] ?? 0), 'bytes' => (int) ($r['bytes'] ?? 0), 'truncated' => (bool) ($r['truncated'] ?? false), 'skipped' => $r['skipped'] ?? []];
+    }
+
+    /** Booleans as 1 (Go reads "1"), unset options left out; a list as repeated keys. */
+    private static function flags(array $o): string
+    {
+        $parts = [];
+        foreach ($o as $k => $v) {
+            if ($v === null || $v === false || $v === '') {
+                continue;
+            }
+            foreach ((array) $v as $one) {
+                $parts[] = rawurlencode($k).'='.rawurlencode($one === true ? '1' : (string) $one);
+            }
+        }
+
+        return implode('&', $parts);
+    }
+
     /** Raw bytes to a path in the site; streamed, never held whole in memory. */
     public function upload(string $id, string $path, $stream): array
     {

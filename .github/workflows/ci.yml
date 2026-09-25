@@ -87,6 +87,9 @@ jobs:
         # Every page renders @vite, which needs public/build/manifest.json -
         # built, never committed. Also proves the assets build at all.
         run: npm run build
+      - name: Editor unit tests (cic.sh)
+        working-directory: control
+        run: node --test tests/js/*.test.mjs
       - name: Tests
         working-directory: control
         # PAO_DISABLE=1 is required: laravel/pao replaces the test printer when

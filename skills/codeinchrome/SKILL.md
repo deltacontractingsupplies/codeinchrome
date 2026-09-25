@@ -118,6 +118,43 @@ To ask the app a question, run PHP in it - models, config, the database - with `
 Copying from a view is safe: `cic.edit` and `cic.writeMany` turn `＝` back into `=`.
 `cic.help('request')` prints the help for one call instead of all of it; a long answer comes in pages (`cic.help('request', 2)` for the next).
 
+## A terminal, by its own names: `cic.sh`
+
+If you think in shell commands, use them. `cic.sh(line)` runs a command line against the
+live site - never your computer - and answers the way a terminal does, shaped like
+`cic.view` (safe to show, paged), ending with `[exit N · ms · cwd]`:
+
+```js
+await cic.sh("grep -rn 'Route::' routes | head -20")
+await cic.sh("find app -name '*.php' -newer routes/web.php")
+await cic.sh("sed -i 's/Item/Product/g' app/Models/Item.php app/Http/Controllers/ItemController.php")
+await cic.sh(`mkdir -p app/Services && cat > app/Services/Cart.php <<'EOF'
+<?php
+
+namespace App\\Services;
+
+class Cart {}
+EOF`)
+await cic.sh('php artisan migrate && php artisan test --filter=Cart')
+await cic.sh('curl -s -o /dev/null -w "%{http_code}" /cart')     // this site only
+```
+
+It speaks ls, cat, head, tail, wc, grep (-rniEFwlLcov, -A/-B/-C, --include), find (-name,
+-type, -maxdepth, -newer, -mmin), sed (-n, -i, -E; s///g, ranges, d, p), diff -u, cp -r, mv,
+rm -r, mkdir -p, touch, tree, du, sort, uniq, cut, tr, xargs, tee, test/[ ], pipes, `&&`,
+`||`, `;`, `>`, `>>`, `2>&1`, heredocs and globs; `php artisan ...`, `composer ...`,
+`php -r 'code'` (in the booted app, like tinker), `mysql -e 'SQL'` (the site's own
+database) and `git log/diff/show -- FILE` over the saved versions (there is no git
+repository: every save is already a version). There are no `$VARIABLES` or `$(...)`: a `$`
+is an ordinary character, so PHP in a heredoc arrives exactly as written. `cd` is
+remembered between calls. Deleting a folder, a destructive artisan command and a SQL write
+answer with a refusal that says to resend with `{ confirm: true }` - only with the person's
+agreement. `cic.sh.more(2)` shows the next part of a long answer; `{ raw: true }` returns
+`{ code, stdout, stderr, ms }` unshaped. `cic.sh('help')` lists everything.
+
+Everything else in this skill still holds: `cic.sh` is the same API underneath, so a
+`writeMany` of twenty files is still one call where twenty `cat >` heredocs are twenty.
+
 ## Step 2 - know the app (1 call)
 
 ```js

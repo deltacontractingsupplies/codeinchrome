@@ -2,7 +2,6 @@ package sites
 
 import (
 	"archive/zip"
-	"bufio"
 	"context"
 	"errors"
 	"fmt"
@@ -11,7 +10,6 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
-	"time"
 )
 
 // The rest of a hosting panel's file manager: folders, rename and move, copy,
@@ -348,76 +346,22 @@ func readBeneath(root, abs string, limit int64) ([]byte, error) {
 	return io.ReadAll(io.LimitReader(f, limit))
 }
 
-// Search finds text in the site's files, case-insensitively. Dependencies,
-// caches, secrets, binary and very large files are not searched.
+// Search finds text in the site's files, case-insensitively: the editor's
+// search box. Dependencies, caches, secrets, binary and very large files are
+// not searched.
 func (m *Manager) Search(ctx context.Context, id, query string, limit int) ([]Hit, error) {
-	if err := ValidID(id); err != nil {
-		return nil, err
-	}
-	query = strings.ToLower(strings.TrimSpace(query))
+	query = strings.TrimSpace(query)
 	if len(query) < 2 || len(query) > 200 {
 		return nil, fmt.Errorf("search for 2 to 200 characters")
 	}
-	if limit <= 0 || limit > maxSearchResult {
-		limit = 200
+	res, err := m.Grep(ctx, id, GrepOptions{Pattern: query, IgnoreCase: true, Limit: limit})
+	for i := range res.Hits {
+		res.Hits[i].Text = strings.TrimSpace(res.Hits[i].Text)
+		if len(res.Hits[i].Text) > 200 {
+			res.Hits[i].Text = res.Hits[i].Text[:200]
+		}
 	}
-	root, err := m.realRoot(id)
-	if err != nil {
-		return nil, fmt.Errorf("site %q has no app directory", id)
-	}
-	ctx, cancel := context.WithTimeout(ctx, 20*time.Second)
-	defer cancel()
-
-	hits := []Hit{}
-	scanned := 0
-	errDone := errors.New("done")
-	err = walkBeneath(root, root, func(p string, d fs.DirEntry, werr error) error {
-		if werr != nil || ctx.Err() != nil {
-			return errDone
-		}
-		rel := strings.TrimPrefix(strings.TrimPrefix(p, root), "/")
-		if d.Type()&fs.ModeSymlink != 0 {
-			return nil
-		}
-		if d.IsDir() {
-			if rel != "" && skippedDir(rel) {
-				return fs.SkipDir
-			}
-			return nil
-		}
-		if isSecretName(d.Name()) {
-			return nil
-		}
-		if info, err := d.Info(); err != nil || info.Size() > maxSearchFile {
-			return nil
-		}
-		if scanned++; scanned > maxTreeEntries {
-			return errDone
-		}
-		b, err := readBeneath(root, p, maxSearchFile)
-		if err != nil || IsBinary(b) {
-			return nil
-		}
-		sc := bufio.NewScanner(strings.NewReader(string(b)))
-		sc.Buffer(make([]byte, 0, 64<<10), maxSearchFile)
-		for n := 1; sc.Scan(); n++ {
-			if strings.Contains(strings.ToLower(sc.Text()), query) {
-				text := strings.TrimSpace(sc.Text())
-				if len(text) > 200 {
-					text = text[:200]
-				}
-				hits = append(hits, Hit{Path: "/" + rel, Line: n, Text: text})
-				if len(hits) >= limit {
-					return errDone
-				}
-			}
-		}
-		return nil
-	})
-	if err != nil && !errors.Is(err, errDone) {
-		return hits, err
-	}
-	return hits, nil
+	return res.Hits, err
 }
 
 // Zip archives a file or folder into a .zip inside the site. Secrets and

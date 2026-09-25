@@ -5,6 +5,7 @@ import { installEditingHelp } from './formatting.js';
 import { installTailwind } from './tailwind.js';
 import { installLaravelProviders } from './laravel.js';
 import { renderMarkdown } from './markdown.js';
+import { createShell } from './shell.js';
 import { enabled as extensionOn, setEnabled as setExtension, listExtensions } from './extensions.js';
 
 // Which built-in extensions this editor loaded with (Extensions view): a
@@ -62,6 +63,8 @@ const SITE = {
   unzipUrl: root.dataset.unzip,
   treeUrl: root.dataset.tree,
   searchUrl: root.dataset.search,
+  grepUrl: root.dataset.grep,
+  findUrl: root.dataset.find,
   uploadUrl: root.dataset.upload,
   downloadUrl: root.dataset.download,
   skillUrl: root.dataset.skill,
@@ -2303,10 +2306,14 @@ $('logRefresh').addEventListener('click', () => loadLogs());
 $('logSource').addEventListener('change', () => loadLogs());
 $('termForm').addEventListener('submit', (e) => {
   e.preventDefault();
-  const args = splitArgs($('termArgs').value.trim());
-  if (!args.length) return;
+  const line = $('termArgs').value.trim();
+  if (!line) return;
   $('termArgs').value = '';
-  runCommand($('termTool').value, args);
+  if ($('termTool').value === 'sh') { runShell(line); return; }
+  runCommand($('termTool').value, splitArgs(line));
+});
+$('termTool').addEventListener('change', () => {
+  $('termArgs').placeholder = $('termTool').value === 'sh' ? "grep -rn 'Route::' routes | head" : 'migrate:status';
 });
 document.addEventListener('keydown', (e) => {
   if (e.ctrlKey && e.key === '`') {
@@ -2316,11 +2323,89 @@ document.addEventListener('keydown', (e) => {
   }
 });
 
+/* ───────────────────────── cic.sh ─────────────────────────
+ * The shell's own commands (resources/js/shell.js) over the editor's API:
+ * one shell per tab, so cd is remembered between calls, like a terminal.
+ */
+const shellIo = {
+  siteUrl: SITE.url,
+  list: async (path) => {
+    const r = await api('GET', { path });
+    return r.ok ? { ok: true, entries: r.listing.entries } : r;
+  },
+  read: (path) => cicApi.read(path),
+  readMany: (paths) => cicApi.readMany(paths),
+  write: async (path, content, expect) => {
+    const r = await cicApi.writeMany([{ path, content, expect }]);
+    return r.ok ? { ...r, ok: true } : r;
+  },
+  writeMany: (files) => cicApi.writeMany(files),
+  mkdir: (path) => mkdirAt(path),
+  move: (from, to) => movePath(from, to),
+  copy: (from, to) => copyPath(from, to),
+  remove: (path) => removeFile(path),
+  removeTree: (path, confirm) => deleteFolder(path, { confirm }),
+  grep: (o) => apiAt(SITE.grepUrl, 'GET', shellQuery(o)),
+  find: (o) => apiAt(SITE.findUrl, 'GET', shellQuery(o)),
+  history: (path) => fileHistory(path),
+  versionAt: (path, rev) => versionAt(path, rev),
+  command: (tool, args, confirm) => runCommand(tool, args, { confirm, interactive: false }),
+  eval: (code) => cicApi.eval(code),
+  request: (path, options) => siteRequest(path, options),
+  query: (sql, write) => apiAt(SITE.dbQueryUrl, 'POST', {}, { sql, write }),
+};
+// Unset options left out, booleans as 1, a list as include[]=... (Laravel's form).
+function shellQuery(o) {
+  const q = {};
+  for (const [k, v] of Object.entries(o)) {
+    if (v === undefined || v === null || v === false || v === '' || (Array.isArray(v) && !v.length)) continue;
+    if (Array.isArray(v)) v.forEach((x, i) => { q[`${k}[${i}]`] = x; });
+    else q[k] = v === true ? 1 : v;
+  }
+  return q;
+}
+const shell = createShell(shellIo);
+let lastShellText = '';
+
+// What a browser tool can show whole: the output paged like cic.view, with
+// the exit status and the time it took on the last line.
+function shellAnswer(text, part, footer) {
+  const pages = pageLines(splitLong(agentSafe(text).split('\n')));
+  const n = Math.min(Math.max(1, Math.trunc(Number(part)) || 1), pages.length);
+  const more = n < pages.length ? ` - part ${n} of ${pages.length}, more: cic.sh.more(${n + 1})` : pages.length > 1 ? ` - part ${n} of ${pages.length}, the end` : '';
+  return `${pages[n - 1].join('\n')}${pages[n - 1].length && pages[n - 1].at(-1) !== '' ? '\n' : ''}[${footer}${more}]`;
+}
+let lastShellFooter = '';
+
+async function runShell(line, { confirm = false, interactive = true } = {}) {
+  showPanel('terminal');
+  termLine(`$ ${line}`, 't-cmd');
+  const t0 = performance.now();
+  let r = await shell.run(line, { confirm });
+  // A person is asked, as for a destructive artisan command; an agent gets
+  // the refusal and resends with { confirm: true } itself.
+  if (interactive && !confirm && r.code !== 0 && /confirm: true/.test(r.stderr)) {
+    if (await ask(`"${line}" deletes or changes data. Run it?`, { okLabel: 'Run it' })) {
+      r = await shell.run(line, { confirm: true });
+    }
+  }
+  const ms = Math.round(performance.now() - t0);
+  if (r.stdout) appendAnsi($('termOut'), r.stdout);
+  if (r.stderr) termLine(r.stderr.replace(/\n$/, ''), 't-err');
+  termLine(`exit ${r.code} · ${ms} ms · ${shell.cwd}`, r.code === 0 ? 't-dim' : 't-err');
+  return { ...r, ms };
+}
+
 /* ───────────────────────── agent API ───────────────────────── */
 
 const HELP = `window.cic — build this LIVE Laravel site from code. This page IS the site's editor:
 work here, by running JavaScript in this page. Never write the app on your own computer -
 nothing local reaches the site. Every save is live at once, and every save is a version.
+
+A TERMINAL, BY ITS OWN NAMES: await cic.sh("grep -rn 'Route::' routes | head -20")
+  ls cat head tail wc grep find sed -i diff cp mv rm mkdir touch tree du, pipes, && ||,
+  > >> and heredocs (cat > app/X.php <<'EOF' ... EOF), php artisan, composer, mysql -e,
+  curl /path, git log/diff/show over the saved versions. cic.sh('help') lists them all.
 
 FAST PATH - the fewest calls (each is one round trip; batch everything you can):
   0. await cic.overview()                          what the app already has, in one call
@@ -2444,6 +2529,12 @@ false. Nothing is paraphrased.
                                (images and PDFs open as previews -> { ok, preview, bytes })
   cic.state()                  what is open, which tabs are unsaved or in conflict
 
+  cic.sh(line, { confirm, raw }) the shell's commands, run against the live site (not your
+                               computer): ls cat grep -rn find sed -i cp mv rm, pipes, && ||,
+                               > >> heredocs, php artisan, composer, mysql -e, curl /path, git log.
+                               -> the output, then [exit N · ms · cwd]; cic.sh.more(2) pages on.
+                               cd is remembered. Folder deletes, destructive artisan and SQL
+                               writes need { confirm: true }. cic.sh('help') for the list.
   cic.run(tool, args, { confirm })
                                run ONE allow-listed command in the site's container:
                                tool 'artisan' (migrate, route:list, make:*, cache:clear, ...)
@@ -3314,6 +3405,19 @@ const cicApi = {
   versionAt: (path, rev) => versionAt(path, rev),
   bin: () => apiAt(SITE.binUrl, 'GET'),
   restore: (path, rev) => restoreVersion(path, rev),
+
+  // The shell, by its own names: cic.sh("grep -rn 'Route::' routes | head").
+  // -> the output as a terminal shows it, then [exit N · ms · cwd]. Paged like
+  // cic.view; { raw: true } -> { code, stdout, stderr, ms } unshaped.
+  sh: Object.assign(async (line, options = {}) => {
+    const r = await runShell(fromView(String(line ?? '')), { confirm: options.confirm === true, interactive: false });
+    if (options.raw) return { ok: r.code === 0, code: r.code, stdout: r.stdout, stderr: r.stderr, ms: r.ms };
+    lastShellText = r.stdout + r.stderr;
+    lastShellFooter = `exit ${r.code} · ${r.ms} ms · ${shell.cwd}`;
+    return shellAnswer(lastShellText, 1, lastShellFooter);
+  }, {
+    more: (part = 2) => shellAnswer(lastShellText, part, lastShellFooter),
+  }),
 
   run: (tool, args = [], options = {}) => {
     if (!Array.isArray(args)) args = splitArgs(String(args));

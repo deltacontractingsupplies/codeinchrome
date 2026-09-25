@@ -521,6 +521,44 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"hits": hits}))
 	})
+	// grep -r and find, for cic.sh: the shell's own commands for an agent that
+	// has only a browser.
+	mux.HandleFunc("GET /v1/sites/{id}/grep", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		res, err := mgr.Grep(r.Context(), r.PathValue("id"), sites.GrepOptions{
+			Pattern: q.Get("pattern"), Regex: q.Get("regex") == "1", IgnoreCase: q.Get("icase") == "1",
+			Word: q.Get("word") == "1", Under: q.Get("under"), Include: q["include"], Limit: limit,
+		})
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_search", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"hits": res.Hits, "truncated": res.Truncated}))
+	})
+	mux.HandleFunc("GET /v1/sites/{id}/find", func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		limit, _ := strconv.Atoi(q.Get("limit"))
+		depth, _ := strconv.Atoi(q.Get("maxdepth"))
+		o := sites.FindOptions{
+			Under: q.Get("under"), Name: q.Get("name"), IgnoreCase: q.Get("icase") == "1", Type: q.Get("type"),
+			MaxDepth: depth, All: q.Get("all") == "1", Limit: limit,
+		}
+		if s := q.Get("newer"); s != "" {
+			secs, err := strconv.ParseInt(s, 10, 64)
+			if err != nil {
+				writeJSON(w, http.StatusBadRequest, fail("cannot_list", "newer is a Unix time in seconds"))
+				return
+			}
+			o.NewerThan = time.Unix(secs, 0)
+		}
+		res, err := mgr.Find(r.Context(), r.PathValue("id"), o)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_list", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"entries": res.Entries, "files": res.Files, "bytes": res.Bytes, "truncated": res.Truncated, "skipped": res.Skipped}))
+	})
 	// Raw bytes in and out: uploads and downloads carry binary files (images,
 	// fonts, archives) that JSON strings cannot.
 	mux.HandleFunc("PUT /v1/sites/{id}/upload", func(w http.ResponseWriter, r *http.Request) {
