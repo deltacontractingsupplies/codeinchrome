@@ -26,7 +26,14 @@ class PasswordResetController extends Controller
         $request->merge(['email' => strtolower(trim((string) $request->input('email')))]);
         $request->validate(['email' => ['required', 'email']]);
 
-        Password::sendResetLink($request->only('email'));
+        // At most 3 an hour to one address, whoever asks from wherever: the
+        // per-IP limit alone let someone flood a person's inbox from ours
+        // (the security audit, 2026-09-25). Same answer either way.
+        $key = 'reset-mail:'.sha1($request->input('email'));
+        if (! \Illuminate\Support\Facades\RateLimiter::tooManyAttempts($key, 3)) {
+            \Illuminate\Support\Facades\RateLimiter::hit($key, 3600);
+            Password::sendResetLink($request->only('email'));
+        }
 
         // The same answer whether or not the address has an account; the reset
         // form must not become a way to find out who is a customer.

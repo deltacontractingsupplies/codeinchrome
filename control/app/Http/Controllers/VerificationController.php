@@ -67,7 +67,10 @@ class VerificationController extends Controller
 
     public function send(Request $request): RedirectResponse
     {
-        if (! $request->user()->hasVerifiedEmail()) {
+        // At most 5 an hour to one account's address (per-IP limits aside).
+        $key = 'verify-mail:'.$request->user()->id;
+        if (! $request->user()->hasVerifiedEmail() && ! \Illuminate\Support\Facades\RateLimiter::tooManyAttempts($key, 5)) {
+            \Illuminate\Support\Facades\RateLimiter::hit($key, 3600);
             $request->user()->sendEmailVerificationNotification();
         }
 
