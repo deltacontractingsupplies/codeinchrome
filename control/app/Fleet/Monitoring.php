@@ -235,7 +235,23 @@ class Monitoring
         }
     }
 
-    private function record(string $key, string $label, bool $up, string $detail, ?int $latency): void
+    /**
+     * A scheduled job's outcome (AppServiceProvider listens to the scheduler).
+     * The fleet's safety runs on these - abuse scans, backups sync, the image
+     * roll, trials - and a job failing every run used to leave only a log line.
+     * A job that runs every few minutes alerts on its third failure in a row;
+     * an hourly or daily one on its first, or a day would pass unnoticed.
+     */
+    public function recordJob(\Illuminate\Console\Scheduling\Event $event, bool $ok, string $detail): void
+    {
+        if (! preg_match("/artisan'?\\s+([a-z0-9:-]+)/i", (string) $event->command, $m)) {
+            return; // not an artisan command
+        }
+        $frequent = str_contains(explode(' ', $event->expression)[0], '*');
+        $this->record("job:{$m[1]}", "scheduled job {$m[1]}", $ok, $detail, null, $frequent ? 3 : 1);
+    }
+
+    private function record(string $key, string $label, bool $up, string $detail, ?int $latency, int $threshold = self::FAIL_THRESHOLD): void
     {
         $m = Monitor::firstOrNew(['key' => $key]);
         $m->fill([
@@ -245,7 +261,7 @@ class Monitoring
 
         $open = Incident::where('monitor_key', $key)->whereNull('resolved_at')->first();
 
-        if (! $up && $m->fail_streak >= self::FAIL_THRESHOLD && ! $open) {
+        if (! $up && $m->fail_streak >= $threshold && ! $open) {
             $incident = Incident::create(['monitor_key' => $key, 'label' => $label, 'detail' => $detail, 'started_at' => now()]);
             $incident->update(['alerted' => $this->alert("DOWN: $label - $detail")]);
         }
@@ -255,7 +271,7 @@ class Monitoring
             $this->alert("RECOVERED: $label after about $minutes min");
         }
 
-        $m->up = $up || $m->fail_streak < self::FAIL_THRESHOLD;
+        $m->up = $up || $m->fail_streak < $threshold;
         $m->save();
     }
 
