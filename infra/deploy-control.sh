@@ -386,9 +386,13 @@ aop=0
 if [[ ${CIC_ORIGIN_PULLS:-auto} != off && -n $origin_tls ]] && curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
      "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/settings/tls_client_auth" \
    | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["result"]["value"] == "on" else 1)' 2>/dev/null; then
-  aop=1
   scp -q infra/cloudflare-origin-pull-ca.crt "root@$ip:/etc/caddy/origin/cloudflare-origin-pull.pem"
   ssh_ 'chown root:caddy /etc/caddy/origin/cloudflare-origin-pull.pem && chmod 0644 /etc/caddy/origin/cloudflare-origin-pull.pem'
+  # Proven before it is required: a pool that does not parse trusts no one
+  # and refuses Cloudflare itself (h1, 2026-09-26).
+  ssh_ 'openssl x509 -in /etc/caddy/origin/cloudflare-origin-pull.pem -noout -subject | grep -q origin-pull.cloudflare.net' \
+    || die "Cloudflare's origin-pull CA does not parse on h2; origin pulls left off"
+  aop=1
   origin_tls="tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem {
 		client_auth {
 			mode require_and_verify
