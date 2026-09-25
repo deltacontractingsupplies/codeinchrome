@@ -4,6 +4,9 @@ import (
 	"bufio"
 	"context"
 	"net/netip"
+	"os"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -23,6 +26,40 @@ type SiteEgress struct {
 	// brute force or a scan against one target shows here, not in the
 	// distinct counts (the second security audit, 2026-09-25).
 	Refusals int `json:"refusals"`
+	// Bytes the site has sent out since its bridge was created (its
+	// bridge's received bytes: container egress arrives there). A counter:
+	// the control plane takes the difference between readings (A20).
+	SentBytes uint64 `json:"sent_bytes"`
+}
+
+// sysClassNet is where interface counters are; a variable for tests.
+var sysClassNet = "/sys/class/net"
+
+// bridgeSent maps each site to its bridge's received-bytes counter.
+func (m *Manager) bridgeSent(ctx context.Context) map[string]uint64 {
+	out, err := run(ctx, 15*time.Second, "docker", "network", "ls", "--filter", "name=^cic-net-", "--format", "{{.ID}} {{.Name}}")
+	if err != nil {
+		return nil
+	}
+	res := map[string]uint64{}
+	for _, line := range strings.Split(strings.TrimSpace(out), "\n") {
+		f := strings.Fields(line)
+		if len(f) != 2 || len(f[0]) < 12 {
+			continue
+		}
+		site := strings.TrimPrefix(f[1], "cic-net-")
+		if ValidID(site) != nil {
+			continue
+		}
+		b, err := os.ReadFile(filepath.Join(sysClassNet, "br-"+f[0][:12], "statistics", "rx_bytes"))
+		if err != nil {
+			continue
+		}
+		if n, err := strconv.ParseUint(strings.TrimSpace(string(b)), 10, 64); err == nil {
+			res[site] = n
+		}
+	}
+	return res
 }
 
 // kernelLog is the last ten minutes of the kernel log; a variable for tests.
@@ -63,6 +100,14 @@ func (m *Manager) Egress(ctx context.Context) ([]SiteEgress, error) {
 		return nil, err
 	}
 	res := egressFrom(table, ips)
+	sent := m.bridgeSent(ctx)
+	for i := range res {
+		res[i].SentBytes = sent[res[i].Site]
+		delete(sent, res[i].Site)
+	}
+	for site, n := range sent { // sending without an open connection in the table
+		res = append(res, SiteEgress{Site: site, SentBytes: n})
+	}
 	if log, err := kernelLog(ctx); err == nil {
 		per := map[string]int{}
 		for ip, n := range refusalsFrom(log) {
