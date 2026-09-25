@@ -115,6 +115,14 @@ class Monitoring
                 $at ? 'newest complete backup '.$at->diffForHumans() : 'no complete backup recorded', null];
         }
 
+        // The off-provider copy, once it has ever completed (it is optional).
+        if (($stamp = config('fleet.offsite_stamp')) && is_file($stamp)) {
+            clearstatcache(true, $stamp);
+            $at = \Illuminate\Support\Carbon::createFromTimestamp(filemtime($stamp));
+            $out['control:offsite'] = ['off-provider backup copy', $at->greaterThan($limit),
+                'newest complete copy '.$at->diffForHumans(), null];
+        }
+
         return $out;
     }
 

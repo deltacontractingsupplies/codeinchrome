@@ -128,6 +128,42 @@ SCRIPT
 control 'chmod 0750 /opt/codeinchrome/bin/cic-replicate'
 ok "replica account on $replica_name: rrsync, write-only, no deletion, one directory"
 
+# ── job 3: an off-provider copy (optional) ───────────────────────────────────
+# The replica above is on another host of the SAME provider. This copies the
+# same encrypted repositories to an S3-compatible bucket elsewhere (Cloudflare
+# R2, Backblaze B2, ...) once /opt/codeinchrome/etc/offsite.env exists - until
+# then it does nothing. Same rule as the replica: it only ever grows. rclone
+# `copy` never deletes, and --immutable refuses to overwrite a file that is
+# already there (restic never rewrites one). Deletion must also be refused BY
+# THE BUCKET (a lock/retention rule), so a compromised control host holding
+# the key still cannot erase it.
+#
+# offsite.env (root, 0600) - the owner's credentials:
+#   RCLONE_CONFIG_OFFSITE_TYPE=s3
+#   RCLONE_CONFIG_OFFSITE_PROVIDER=Other
+#   RCLONE_CONFIG_OFFSITE_ENDPOINT=https://<account>.r2.cloudflarestorage.com
+#   RCLONE_CONFIG_OFFSITE_ACCESS_KEY_ID=...
+#   RCLONE_CONFIG_OFFSITE_SECRET_ACCESS_KEY=...
+#   RCLONE_CONFIG_OFFSITE_NO_CHECK_BUCKET=true
+#   OFFSITE_PATH=<bucket>/backups-rest
+control 'DEBIAN_FRONTEND=noninteractive apt-get install -y -qq rclone >/dev/null'
+control 'cat > /opt/codeinchrome/bin/cic-replicate-offsite' <<'SCRIPT'
+#!/usr/bin/env bash
+# Copy every backup repository off the provider. See infra/setup-control-backup.sh.
+set -Eeuo pipefail
+env_file=/opt/codeinchrome/etc/offsite.env
+[[ -f $env_file ]] || { echo "no off-site target configured ($env_file); skipped"; exit 0; }
+set -a; . "$env_file"; set +a
+[[ -n ${OFFSITE_PATH:-} ]] || { echo "OFFSITE_PATH is not set in $env_file" >&2; exit 1; }
+rclone copy --immutable --transfers 4 --checkers 8 \
+  --exclude .htpasswd --exclude 'locks/**' \
+  /srv/backups-rest "offsite:$OFFSITE_PATH"
+# Proof of a complete run for the control plane's monitoring (App\Fleet\Monitoring).
+runuser -u codeinchrome -- touch /var/lib/codeinchrome/offsite.ok
+SCRIPT
+control 'chmod 0750 /opt/codeinchrome/bin/cic-replicate-offsite'
+ok "off-site copy installed ($(control 'test -f /opt/codeinchrome/etc/offsite.env && echo configured || echo "not configured: skipped until offsite.env exists"'))"
+
 control 'bash -s' <<'REMOTE'
 set -Eeuo pipefail
 cat > /etc/systemd/system/cic-control-backup.service <<'UNIT'
@@ -137,6 +173,7 @@ Description=codeinchrome: back up the control plane, then replicate all backups
 Type=oneshot
 ExecStart=/opt/codeinchrome/bin/cic-control-backup
 ExecStart=/opt/codeinchrome/bin/cic-replicate
+ExecStart=/opt/codeinchrome/bin/cic-replicate-offsite
 Nice=10
 IOSchedulingClass=idle
 UNIT
