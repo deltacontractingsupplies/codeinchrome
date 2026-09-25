@@ -257,6 +257,13 @@ if ip6tables -L DOCKER-USER >/dev/null 2>&1; then
   done
 fi
 
+# A container reaches the host on its bridge gateway (that is how it gets to
+# MySQL): not to the host's SSH, which is for the operator (the audit found it
+# reachable - ufw allows 22 from anywhere, and a bridge is "anywhere").
+for dev in 'br-+' docker0; do
+  iptables -C INPUT -i "$dev" -p tcp --dport 22 -j REJECT 2>/dev/null || iptables -I INPUT -i "$dev" -p tcp --dport 22 -j REJECT
+done
+
 # The host itself sends no mail (only the control host does): a process that
 # reaches the host's own network - cic-mysql runs with it - cannot either.
 for port in 25 465 587 2525; do
@@ -396,6 +403,7 @@ check "other UDP refused"            "$E -p udp -j CIC-REJECT"
 check "open connections capped"      "$E -p tcp --syn -m connlimit --connlimit-above 256 --connlimit-mask 32 --connlimit-saddr -j CIC-REJECT"
 check "refusals are logged"          'iptables -S CIC-REJECT | grep -q -- "--log-prefix \"cic-egress: \""'
 check "the host sends no mail"       'iptables -C OUTPUT -p tcp --dport 25 -j REJECT'
+check "containers cannot reach the host's SSH" 'iptables -C INPUT -i br-+ -p tcp --dport 22 -j REJECT'
 check "egress rules persist"     'systemctl is-enabled cic-egress.service'
 # Not only "running": it must FIND something. EICAR is the industry's harmless
 # test file, recognised by every scanner.
