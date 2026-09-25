@@ -220,6 +220,14 @@ iptables -A CIC-REJECT -p tcp -j REJECT --reject-with tcp-reset
 iptables -A CIC-REJECT -j REJECT --reject-with icmp-admin-prohibited
 
 e() { iptables -A CIC-EGRESS "$@"; }
+# Every container sends to the internet at most ~100 Mbit/s (12 MB/s, 24 MB
+# burst), before anything else - established connections included (audit
+# A20). Measured on h4, 2026-09-26: a 100 MB upload went 720-835 Mbit/s
+# without it and 108-157 with it (the burst lifts short runs); a site's
+# answers to its visitors never cross this chain (they reach Caddy through
+# the host: 18-22 Gbit/s either way). A PHP app needs a fraction of this;
+# a flood from one site no longer takes the host's whole line.
+e -m hashlimit --hashlimit-above 12mb/s --hashlimit-burst 24mb --hashlimit-mode srcip --hashlimit-name cic-bytes -j DROP
 e -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
 for net in 0.0.0.0/8 10.0.0.0/8 100.64.0.0/10 169.254.0.0/16 172.16.0.0/12 192.0.0.0/24 192.0.2.0/24 \
            192.168.0.0/16 198.18.0.0/15 198.51.100.0/24 203.0.113.0/24 224.0.0.0/4 240.0.0.0/4; do
@@ -290,7 +298,7 @@ chmod 0750 /opt/codeinchrome/bin/cic-egress
 /opt/codeinchrome/bin/cic-egress
 # The old snapshot must not linger where something might restore it.
 rm -f /etc/iptables/rules.v4
-ok "container egress: private ranges, mail and pool ports, and direct DNS refused; UDP, new-connection rate and open connections limited"
+ok "container egress: private ranges, mail and pool ports, and direct DNS refused; bandwidth, UDP, new-connection rate and open connections limited"
 
 # Survive reboot: re-applied after docker creates its chains.
 cat > /etc/systemd/system/cic-egress.service <<'UNIT'
@@ -514,6 +522,7 @@ check "Docker and Caddy updated automatically" 'apt-config dump | grep -q "origi
 check "swap active"              '[[ -n "$(swapon --show)" ]]'
 check "host id present"          'test -s /opt/codeinchrome/etc/host.id'
 check "customer root private"    '[[ "$(stat -c %a /srv/customers)" == "750" ]]'
+check "container upload capped (~100 Mbit/s each)" 'iptables -S CIC-EGRESS | head -2 | grep -q "hashlimit-name cic-bytes"'
 # DNS (audit A21), proven with a throwaway container on a throwaway network:
 # names still resolve through Docker's resolver, and a direct query to an
 # outside resolver is refused. The test image is the site image already on
