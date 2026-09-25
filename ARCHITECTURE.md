@@ -76,6 +76,8 @@ everything third parties do.
 - Container per customer: separate mount, PID and network namespaces
 - `cgroup` CPU and memory ceilings, and a watch that pauses a site held at its
   limit for hours (`abuse:cpu`)
+- Disk I/O ceilings per site on the host's disk (400/200 MB/s read/write,
+  10,000/5,000 IOPS; agent `diskio.go`), so one site cannot starve the rest
 - Outbound: mail ports, common mining-pool and brute-force ports refused;
   private, reserved and metadata ranges refused; UDP only DNS/QUIC; open and
   new connections capped per container; a site reaching hundreds of hosts is

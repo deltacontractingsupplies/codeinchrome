@@ -8,7 +8,11 @@ Schedule::command('fleet:sync-usage')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('fleet:apply-limits')->everyFiveMinutes()->withoutOverlapping();
 Schedule::command('fleet:monitor')->everyMinute()->withoutOverlapping();
 Schedule::command('trials:expire')->everyTenMinutes()->withoutOverlapping();
-Schedule::command('fleet:check-exposure')->dailyAt('05:15')->withoutOverlapping();
+// After the hosts' automatic reboot window (04:30 h1 .. 05:15 the control host,
+// install-agent.sh / deploy-control.sh): a job running while its host reboots
+// is skipped, or - for the roll - cut off between removing a container and
+// starting its replacement.
+Schedule::command('fleet:check-exposure')->dailyAt('05:40')->withoutOverlapping();
 // Every live site's newest backup, as the backup server lists it (monitoring alerts on an old one).
 Schedule::command('fleet:sync-backups')->hourlyAt(20)->withoutOverlapping();
 Schedule::command('explore:refresh')->hourlyAt(35)->withoutOverlapping();
@@ -20,4 +24,4 @@ Schedule::command('sites:idle')->dailyAt('06:00')->withoutOverlapping();
 Schedule::command('abuse:links')->hourlyAt(50)->withoutOverlapping();
 Schedule::command('audit:prune')->dailyAt('04:00');
 // Hosts rebuild the base image on Sundays at 03:30 (infra/install-agent.sh); sites move onto it here.
-Schedule::command('fleet:roll-image')->dailyAt('04:45')->withoutOverlapping();
+Schedule::command('fleet:roll-image')->dailyAt('05:30')->withoutOverlapping();

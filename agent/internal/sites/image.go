@@ -43,15 +43,29 @@ func (m *Manager) ImageStatuses(ctx context.Context) ([]ImageStatus, error) {
 	}
 	out := make([]ImageStatus, 0, len(list))
 	for _, s := range list {
-		img, err := run(ctx, 15*time.Second, "docker", "container", "inspect", m.container(s.ID), "--format", "{{.Image}}")
-		img = strings.TrimSpace(img)
-		out = append(out, ImageStatus{ID: s.ID, Image: img, Current: err == nil && img == current})
+		img, spec, err := m.containerSpec(ctx, s.ID)
+		out = append(out, ImageStatus{ID: s.ID, Image: img, Current: err == nil && img == current && spec == m.runSpec()})
 	}
 	return out, nil
 }
 
-// Recreate replaces a site's container with one on the current image and
-// confirms the new one answers HTTP before reporting success. Returns
+// containerSpec is the image a site's container runs and the run settings it
+// was created with (diskio.go runSpec; "" for one made before the label).
+func (m *Manager) containerSpec(ctx context.Context, id string) (image, spec string, err error) {
+	out, err := run(ctx, 15*time.Second, "docker", "container", "inspect", m.container(id),
+		"--format", `{{.Image}} {{index .Config.Labels "codeinchrome.runspec"}}`)
+	f := strings.Fields(out)
+	if len(f) > 0 {
+		image = f[0]
+	}
+	if len(f) > 1 {
+		spec = f[1]
+	}
+	return image, spec, err
+}
+
+// Recreate replaces a site's container with one on the current image and run
+// settings, and confirms the new one answers HTTP before reporting success. Returns
 // "current" without touching anything if it is already up to date.
 func (m *Manager) Recreate(ctx context.Context, id string) (string, error) {
 	if err := ValidID(id); err != nil {
@@ -72,8 +86,9 @@ func (m *Manager) Recreate(ctx context.Context, id string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	running, _ := run(ctx, 15*time.Second, "docker", "container", "inspect", m.container(id), "--format", "{{.Image}}")
-	if strings.TrimSpace(running) == current {
+	// Current means the current image AND the current run settings (the
+	// disk I/O ceilings, diskio.go): either one old, and it is recreated.
+	if img, spec, _ := m.containerSpec(ctx, id); img == current && spec == m.runSpec() {
 		return "current", nil
 	}
 	if err := m.replaceContainer(ctx, site); err != nil {

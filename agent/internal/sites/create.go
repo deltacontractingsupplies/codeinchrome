@@ -347,6 +347,7 @@ func (m *Manager) runArgs(s Site) []string {
 		"--network", m.network(s.ID),
 		"--label", "codeinchrome.site=" + s.ID,
 		"--label", "codeinchrome.host=" + m.cfg.HostID,
+		"--label", "codeinchrome.runspec=" + m.runSpec(),
 
 		// Resource ceilings. Mining stops being a policing problem and becomes
 		// arithmetic: capped at half a core, it earns cents, and sustained load
@@ -387,6 +388,8 @@ func (m *Manager) runArgs(s Site) []string {
 		// passes it to PHP with PassEnv (the image's cic-env.conf).
 		"--env", "APP_DEBUG=false",
 	}
+	// Disk I/O ceilings (diskio.go).
+	args = append(args, m.ioArgs()...)
 	if s.PHP != (PHPSettings{}) {
 		// The owner's PHP settings: mounted read-only over the image's, so
 		// the site's own code cannot change or widen them (php.go).
