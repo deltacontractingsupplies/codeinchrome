@@ -378,6 +378,24 @@ ssh_ 'caddy validate --config /etc/caddy/Caddyfile.new --adapter caddyfile >/dev
 # setup-cloudflare-proxy.sh has installed it.
 origin_tls=""
 ssh_ 'test -s /etc/caddy/origin/cert.pem' && origin_tls="tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem"
+# Authenticated Origin Pulls (audit A33), once the zone has them ON: these
+# vhosts then answer Cloudflare's own certificate only - not any Cloudflare
+# customer's Worker aimed at this address. The fleet's backups vhost, which
+# hosts reach directly, is not one of them.
+aop=0
+if [[ ${CIC_ORIGIN_PULLS:-auto} != off && -n $origin_tls ]] && curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+     "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/settings/tls_client_auth" \
+   | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["result"]["value"] == "on" else 1)' 2>/dev/null; then
+  aop=1
+  scp -q infra/cloudflare-origin-pull-ca.crt "root@$ip:/etc/caddy/origin/cloudflare-origin-pull.pem"
+  ssh_ 'chown root:caddy /etc/caddy/origin/cloudflare-origin-pull.pem && chmod 0644 /etc/caddy/origin/cloudflare-origin-pull.pem'
+  origin_tls="tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem {
+		client_auth {
+			mode require_and_verify
+			trust_pool file /etc/caddy/origin/cloudflare-origin-pull.pem
+		}
+	}"
+fi
 
 ssh_ "set -e
 cat > /opt/codeinchrome/caddy/sites/_control.caddy <<CADDY
@@ -565,6 +583,12 @@ pub() {
 }
 check "the bare domain redirects to the app" "[ \"\$(pub -sS -o /dev/null -w '%{http_code} %{redirect_url}' --retry 10 --retry-all-errors --retry-delay 6 https://$zone/pricing)\" = '301 https://$domain/pricing' ]"
 check "www redirects to the app" "[ \"\$(pub -sS -o /dev/null -w '%{http_code}' --retry 10 --retry-all-errors --retry-delay 6 https://www.$zone/)\" = 301 ]"
+# Origin pulls: from h2 itself (this machine is firewalled off, which would
+# prove nothing), a connection without Cloudflare's certificate is refused;
+# the checks above already went through Cloudflare and were answered.
+if (( aop )); then
+  check "origin pulls: h2 refuses a connection without Cloudflare's certificate" "ssh root@$ip '[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 8 --resolve $domain:443:127.0.0.1 --cacert /etc/caddy/origin/cert.pem https://$domain/login)\" = 000 ]'"
+fi
 check "the session cookie is __Host- (no sibling subdomain can set it)" "pub -sS -D - -o /dev/null https://$domain/login | grep -i '^set-cookie: __Host-codeinchrome-session=' | grep -iv 'domain='"
 # Hosts verify this certificate on every nightly upload. The proxy's origin
 # wildcard once took its place (Caddy prefers a loaded matching certificate),

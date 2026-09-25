@@ -281,3 +281,23 @@ func TestProgramFilesAreRefusedByPathButScriptsAndPagesAreNot(t *testing.T) {
 		}
 	}
 }
+
+// Authenticated Origin Pulls (A33): only the Cloudflare-facing block asks
+// for a client certificate; a custom domain - not behind Cloudflare - must not.
+func TestOriginPullsAreRequiredOnlyWhereCloudflareConnects(t *testing.T) {
+	cfg := Config{PlatformDomain: "codeinchrome.com", OriginCert: "/o/cert.pem", OriginKey: "/o/key.pem", OriginClientCA: "/o/client-ca.pem"}
+	out := caddyConfig(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com", Aliases: []string{"shop.example.org"}}, "20001")
+	blocks := strings.Split(out, "\n}\n")
+	want := "tls /o/cert.pem /o/key.pem {\n\t\tclient_auth {\n\t\t\tmode require_and_verify\n\t\t\ttrust_pool file /o/client-ca.pem\n\t\t}\n\t}"
+	if !strings.Contains(blocks[0], want) {
+		t.Fatalf("the platform block must require the origin-pull certificate:\n%s", blocks[0])
+	}
+	if strings.Contains(blocks[1], "client_auth") {
+		t.Fatalf("a custom domain must not require a client certificate:\n%s", blocks[1])
+	}
+	// Off unless configured.
+	cfg.OriginClientCA = ""
+	if strings.Contains(caddyConfig(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com"}, "20001"), "client_auth") {
+		t.Fatal("client_auth without a CA pool")
+	}
+}

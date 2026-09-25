@@ -238,10 +238,10 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 	// so a rewrite that breaks it can be told apart from a site that was
 	// already failing.
 	before := map[string]int{}
-	roots := m.edgeRoots()
+	roots, client := m.edgeRoots(), m.edgeClient()
 	for _, s := range list {
 		if s.State == "running" && !s.Suspended && s.Domain != "" {
-			before[s.Domain] = edgeStatus(ctx, s.Domain, roots)
+			before[s.Domain] = edgeStatus(ctx, s.Domain, roots, client)
 		}
 	}
 	probe := map[string]int{} // rewritten sites -> their status before
@@ -311,7 +311,7 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 		// Caddy accepting a config is not the same as serving with it.
 		after := map[string]int{}
 		for domain := range probe {
-			after[domain] = edgeStatus(ctx, domain, roots)
+			after[domain] = edgeStatus(ctx, domain, roots, client)
 		}
 		if broken := brokenByReload(probe, after); len(broken) > 0 {
 			for path, data := range previous {
@@ -655,12 +655,19 @@ func caddyConfig(cfg Config, s Site, port string) string {
 
 	out := fmt.Sprintf("# codeinchrome site %s - generated, do not edit by hand\n", s.ID)
 	if len(platform) > 0 {
+		tls := fmt.Sprintf("tls %s %s", cfg.OriginCert, cfg.OriginKey)
+		if cfg.OriginClientCA != "" {
+			// Authenticated Origin Pulls: only Cloudflare (and this host's
+			// own probe) may connect. Cloudflare's IP ranges alone admitted
+			// any Cloudflare customer's proxy or Worker (audit A33).
+			tls = fmt.Sprintf("tls %s %s {\n\t\tclient_auth {\n\t\t\tmode require_and_verify\n\t\t\ttrust_pool file %s\n\t\t}\n\t}", cfg.OriginCert, cfg.OriginKey, cfg.OriginClientCA)
+		}
 		out += fmt.Sprintf(`%s {
 	# Reached through Cloudflare; the origin certificate is trusted by
 	# Cloudflare only. No ACME order, no public CA rate limit.
-	tls %s %s
+	%s
 %s}
-`, strings.Join(platform, ", "), cfg.OriginCert, cfg.OriginKey, body)
+`, strings.Join(platform, ", "), tls, body)
 	}
 	if len(custom) > 0 {
 		out += fmt.Sprintf(`%s {

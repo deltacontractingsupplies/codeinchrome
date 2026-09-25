@@ -27,11 +27,19 @@ func TestTheEdgeProbeReachesThisHostsCaddyOverVerifiedTLS(t *testing.T) {
 	if domain == "" {
 		t.Skip("host-only test")
 	}
-	m := &Manager{cfg: Config{OriginCert: os.Getenv("CIC_ORIGIN_CERT")}}
-	if got := edgeStatus(context.Background(), domain, m.edgeRoots()); got == 0 || got >= 500 {
+	m := &Manager{cfg: Config{OriginCert: os.Getenv("CIC_ORIGIN_CERT"), OriginClientCA: os.Getenv("CIC_ORIGIN_CLIENT_CA"),
+		ProbeCert: os.Getenv("CIC_PROBE_CERT"), ProbeKey: os.Getenv("CIC_PROBE_KEY")}}
+	if got := edgeStatus(context.Background(), domain, m.edgeRoots(), m.edgeClient()); got == 0 || got >= 500 {
 		t.Fatalf("%s: status %d through verified TLS", domain, got)
 	}
-	if got := edgeStatus(context.Background(), domain, x509.NewCertPool()); got != 0 {
+	if got := edgeStatus(context.Background(), domain, x509.NewCertPool(), m.edgeClient()); got != 0 {
 		t.Fatalf("an empty trust pool must fail the handshake, got %d", got)
+	}
+
+	// With origin pulls authenticated, no client certificate: refused.
+	if m.cfg.OriginClientCA != "" {
+		if got := edgeStatus(context.Background(), domain, m.edgeRoots(), nil); got != 0 {
+			t.Fatalf("without a client certificate the edge answered %d", got)
+		}
 	}
 }

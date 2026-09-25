@@ -54,7 +54,25 @@ scp -q agent/bin/cic-agent-linux "root@$ip:/opt/codeinchrome/bin/cic-agent.new"
 scp -q infra/cic-mount "root@$ip:/opt/codeinchrome/bin/cic-mount"
 ssh_ 'chmod 0750 /opt/codeinchrome/bin/cic-mount' 
 ssh_ 'mv /opt/codeinchrome/bin/cic-agent.new /opt/codeinchrome/bin/cic-agent && chmod 0755 /opt/codeinchrome/bin/cic-agent'
-ssh_ "CIC_HOST_NAME=$name bash -s" < infra/install-agent.sh
+# Authenticated Origin Pulls (audit A33) are required at the edge only once
+# the zone has them ON - requiring Cloudflare's certificate before it sends
+# one would refuse every visitor. Unknown (no token, API down): left off,
+# the side that keeps sites up; the host is re-deployed to turn it on.
+aop=0
+if [[ ${CIC_ORIGIN_PULLS:-auto} == off ]]; then
+  echo "  origin pulls forced off (CIC_ORIGIN_PULLS=off)"
+elif [[ -f .env ]]; then
+  eval "$(grep -E '^CLOUDFLARE_(API_TOKEN|ZONE_ID)=' .env | sed 's/^/export /')"
+  if [[ -n ${CLOUDFLARE_API_TOKEN:-} && -n ${CLOUDFLARE_ZONE_ID:-} ]] \
+     && curl -fsS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+          "https://api.cloudflare.com/client/v4/zones/$CLOUDFLARE_ZONE_ID/settings/tls_client_auth" \
+        | python3 -c 'import json,sys; sys.exit(0 if json.load(sys.stdin)["result"]["value"] == "on" else 1)' 2>/dev/null; then
+    aop=1
+    scp -q infra/cloudflare-origin-pull-ca.crt "root@$ip:/etc/caddy/origin/cloudflare-origin-pull.pem"
+    ssh_ 'chown root:caddy /etc/caddy/origin/cloudflare-origin-pull.pem && chmod 0644 /etc/caddy/origin/cloudflare-origin-pull.pem'
+  fi
+fi
+ssh_ "CIC_HOST_NAME=$name CIC_AOP=$aop bash -s" < infra/install-agent.sh
 
 say "backups"
 infra/setup-backups.sh "$name" "$ip"

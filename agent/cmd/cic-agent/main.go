@@ -40,6 +40,9 @@ func main() {
 		platform = flag.String("platform-domain", "", "sites under this domain are served through Cloudflare with the origin certificate")
 		origCert = flag.String("origin-cert", "", "Cloudflare Origin CA certificate for *.platform-domain (empty: on-demand ACME for every name)")
 		origKey  = flag.String("origin-key", "", "private key for -origin-cert")
+		clientCA = flag.String("origin-client-ca", "", "require Cloudflare's origin-pull client certificate (and the probe's) on the platform names: this CA pool")
+		probeCrt = flag.String("probe-cert", "", "client certificate the agent's own edge checks present (with -origin-client-ca)")
+		probeKey = flag.String("probe-key", "", "private key for -probe-cert")
 	)
 	flag.Parse()
 
@@ -67,6 +70,9 @@ func main() {
 		PlatformDomain: *platform,
 		OriginCert:     *origCert,
 		OriginKey:      *origKey,
+		OriginClientCA: *clientCA,
+		ProbeCert:      *probeCrt,
+		ProbeKey:       *probeKey,
 	})
 	if err != nil {
 		fatal("cannot start site manager: %v", err)

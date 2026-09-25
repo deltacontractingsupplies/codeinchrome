@@ -36,6 +36,14 @@ type Config struct {
 	PlatformDomain string
 	OriginCert     string
 	OriginKey      string
+	// Authenticated Origin Pulls (audit A33): with OriginClientCA set, the
+	// platform names answer only a client that presents a certificate from
+	// that pool - Cloudflare's origin-pull CA, and this host's own probe CA
+	// (ProbeCert/ProbeKey, which the agent's edge checks present). Anyone
+	// else on Cloudflare's network (another customer's Worker) is refused.
+	OriginClientCA string
+	ProbeCert      string
+	ProbeKey       string
 }
 
 type Manager struct {
