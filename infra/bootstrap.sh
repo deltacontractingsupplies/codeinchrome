@@ -236,6 +236,12 @@ e -p icmp -j CIC-REJECT
 e -p tcp --syn -m connlimit --connlimit-above 256 --connlimit-mask 32 --connlimit-saddr -j CIC-REJECT
 e -p tcp --syn -m multiport --dports 80,443 -m hashlimit --hashlimit-above 30/sec --hashlimit-burst 120 \
   --hashlimit-mode srcip --hashlimit-name cic-syn-web -j CIC-REJECT
+# Log-in ports, per destination: an SSH or FTP brute force is one target and
+# one port, which neither the distinct-host watch nor the rate below noticed
+# (the second security audit, 2026-09-25). An app's own SFTP storage opens a
+# few connections a minute, not this many.
+e -p tcp --syn -m multiport --dports 21,22,2222 -m hashlimit --hashlimit-above 6/min --hashlimit-burst 6 \
+  --hashlimit-mode srcip,dstip,dstport --hashlimit-name cic-syn-login -j CIC-REJECT
 e -p tcp --syn -m multiport ! --dports 80,443 -m hashlimit --hashlimit-above 2/sec --hashlimit-burst 30 \
   --hashlimit-mode srcip --hashlimit-name cic-syn-other -j CIC-REJECT
 e -j RETURN

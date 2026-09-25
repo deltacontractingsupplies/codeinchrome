@@ -24,6 +24,15 @@ class AbuseEgress extends Command
     /** Distinct destination ports: a port scan of one machine. */
     public const MAX_PORTS = 100;
 
+    /**
+     * Refused connections logged in ten minutes (the log keeps at most 6 a
+     * minute per site): at this many the site has hammered a refused target
+     * for most of the window - an SSH brute force, a scan answered with
+     * resets, spam. The owner is told, once an hour; a buggy app can do it
+     * too, so nothing is paused for it.
+     */
+    public const MAX_REFUSALS = 30;
+
     protected $signature = 'abuse:egress';
 
     protected $description = 'Pause a site that reaches out to hundreds of hosts or ports (a scan)';
@@ -41,6 +50,9 @@ class AbuseEgress extends Command
                 continue;
             }
             foreach ($sites as $e) {
+                if (($e['refusals'] ?? 0) >= self::MAX_REFUSALS) {
+                    $this->refusals($e);
+                }
                 if (($e['distinct_hosts'] ?? 0) < self::MAX_HOSTS && ($e['distinct_ports'] ?? 0) < self::MAX_PORTS) {
                     continue;
                 }
@@ -58,6 +70,29 @@ class AbuseEgress extends Command
         }
 
         return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    private function refusals(array $e): void
+    {
+        $site = Site::where('site_id', $e['site'])->where('status', 'live')->first();
+        if (! $site || ! \Illuminate\Support\Facades\Cache::add("abuse.refusals.{$site->site_id}", true, now()->addHour())) {
+            return;
+        }
+        Audit::record('abuse.egress_refused', $site->user, $site, detail: ['refusals' => $e['refusals']]);
+        $this->warn("{$site->site_id}: {$e['refusals']} refused connections in ten minutes - owner told");
+        $to = config('fleet.owner_notify_email') ?: config('fleet.admin_emails');
+        if (! $to || ! config('fleet.mail_enabled')) {
+            return;
+        }
+        $body = "https://{$site->domain} kept trying connections the platform refuses - {$e['refusals']} logged in ten minutes "
+            ."(the log keeps at most 6 a minute). That is how an SSH brute force, a scan or spam looks; a broken app can do it too.\n"
+            .'Account: '.($site->user?->email ?? '?')."\nThe host's kernel log has each one (\"cic-egress: \").\n\n"
+            ."To pause the site: php artisan abuse:ban ".($site->user?->email ?? '<email>').' --reason="brute force"';
+        try {
+            Mail::raw($body, fn ($m) => $m->to($to)->subject("[codeinchrome] Refused connections from {$site->domain}"));
+        } catch (\Throwable $ex) {
+            Log::error('egress email failed', ['error' => $ex->getMessage()]);
+        }
     }
 
     private function tellOwner(Site $site, string $what, bool $paused): void

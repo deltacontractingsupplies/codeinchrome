@@ -18,6 +18,33 @@ type SiteEgress struct {
 	Connections   int    `json:"connections"`
 	DistinctHosts int    `json:"distinct_hosts"` // public destinations only
 	DistinctPorts int    `json:"distinct_ports"`
+	// Connections the egress policy refused in the last ten minutes, as
+	// logged (at most 6 a minute per container, bootstrap.sh CIC-REJECT). A
+	// brute force or a scan against one target shows here, not in the
+	// distinct counts (the second security audit, 2026-09-25).
+	Refusals int `json:"refusals"`
+}
+
+// kernelLog is the last ten minutes of the kernel log; a variable for tests.
+var kernelLog = func(ctx context.Context) (string, error) {
+	return run(ctx, 20*time.Second, "journalctl", "-k", "--since", "-10min", "--no-pager", "-o", "cat")
+}
+
+// refusalsFrom counts the policy's logged refusals per source address.
+func refusalsFrom(log string) map[string]int {
+	out := map[string]int{}
+	for _, line := range strings.Split(log, "\n") {
+		if !strings.Contains(line, "cic-egress: ") {
+			continue
+		}
+		for _, f := range strings.Fields(line) {
+			if strings.HasPrefix(f, "SRC=") {
+				out[f[4:]]++
+				break
+			}
+		}
+	}
+	return out
 }
 
 // conntrackList reads the table; a variable so the tests need no kernel.
@@ -35,7 +62,23 @@ func (m *Manager) Egress(ctx context.Context) ([]SiteEgress, error) {
 	if err != nil {
 		return nil, err
 	}
-	return egressFrom(table, ips), nil
+	res := egressFrom(table, ips)
+	if log, err := kernelLog(ctx); err == nil {
+		per := map[string]int{}
+		for ip, n := range refusalsFrom(log) {
+			if site, ok := ips[ip]; ok {
+				per[site] += n
+			}
+		}
+		for i := range res {
+			res[i].Refusals = per[res[i].Site]
+			delete(per, res[i].Site)
+		}
+		for site, n := range per { // refused everything: no open connection at all
+			res = append(res, SiteEgress{Site: site, Refusals: n})
+		}
+	}
+	return res, nil
 }
 
 // containerIPs maps each site container's address to its site id.

@@ -35,3 +35,14 @@ func TestEgressCountsWhatEachSiteOpenedToPublicHosts(t *testing.T) {
 		t.Errorf("only sites that reached out: %v", got)
 	}
 }
+
+func TestRefusalsAreCountedPerContainerFromTheKernelLog(t *testing.T) {
+	log := "cic-egress: IN=br-1 OUT=eth0 SRC=172.20.0.2 DST=203.0.113.9 LEN=60 PROTO=TCP SPT=40000 DPT=22\n" +
+		"cic-egress: IN=br-1 OUT=eth0 SRC=172.20.0.2 DST=203.0.113.9 LEN=60 PROTO=TCP SPT=40001 DPT=22\n" +
+		"cic-egress: IN=br-2 OUT=eth0 SRC=172.20.0.18 DST=198.51.100.1 LEN=60 PROTO=TCP SPT=1 DPT=25\n" +
+		"some other kernel line SRC=172.20.0.2\n"
+	got := refusalsFrom(log)
+	if got["172.20.0.2"] != 2 || got["172.20.0.18"] != 1 || len(got) != 2 {
+		t.Fatalf("refusals: %v", got)
+	}
+}
