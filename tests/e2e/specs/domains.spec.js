@@ -58,7 +58,12 @@ test('a customer can prove, attach, serve and remove their own domain', async ({
     await page.getByPlaceholder('shop.example.com').fill(custom);
     await page.getByRole('button', { name: 'Add domain' }).click();
 
+    // Off until Cloudflare for SaaS carries customers' domains (config
+    // fleet.custom_domains): the platform says so, and nothing else here applies.
+    const soon = page.getByText('Custom domains are coming soon');
     const row = page.locator(`[data-domain="${custom}"]`);
+    await expect(soon.or(row)).toBeVisible();
+    test.skip(await soon.isVisible(), 'custom domains are switched off on this platform (CIC_CUSTOM_DOMAINS)');
     await expect(row).toContainText('waiting for DNS');
     txtName = (await row.locator('[data-txt-name]').textContent()).trim();
     txtValue = (await row.locator('[data-txt-value]').textContent()).trim();

@@ -47,6 +47,8 @@
         <env name="CLOUDFLARE_ZONE_NAME" value="codeinchrome.com" force="true"/>
         <!-- Sign-up from the tests' example addresses; SignupTest proves the
              production rule (config/signup.php) with its own config. -->
+        <!-- DomainsTest proves the feature; CustomDomainsSwitchTest proves it off. -->
+        <env name="CIC_CUSTOM_DOMAINS" value="true" force="true"/>
         <env name="CIC_SIGNUP_EMAIL_DOMAINS" value="gmail.com,googlemail.com,example.com,example.org" force="true"/>
     </php>
 </phpunit>

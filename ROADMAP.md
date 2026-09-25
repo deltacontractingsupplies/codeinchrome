@@ -566,6 +566,16 @@ be hard to abuse. Every item is verified live, never assumed.
 - [ ] **Origin reachable only through Cloudflare** (80/443): needs custom domains
       on Cloudflare for SaaS and the hosts' certificates renewed without direct
       access first - designed, not yet rolled out.
+      DONE for the customer hosts 2026-09-25: h1, h3, h4 take 80/443 from
+      Cloudflare's 22 ranges only (a direct request to their IPs now gets
+      nothing; SSH unchanged; rolled out one host at a time with an automatic
+      revert armed); their own names use the origin certificate and are
+      proxied, so DNS no longer publishes their addresses. Custom domains
+      (none in production) are off until Cloudflare for SaaS carries them.
+      LEFT: the control host h2 - its backups endpoint takes restic uploads
+      larger than the proxy accepts, so it needs the hosts to reach it another
+      way (the SSH tunnels) first; and the addresses were public before, so
+      new ones (owner) would be the only way to make them unknown.
 
 **Research**
 - [x] **How Lovable, Replit, Vercel, Netlify, Render handle abuse** on free

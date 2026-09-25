@@ -171,6 +171,11 @@ return [
     // than a day and a bit. Unset (development): not checked.
     'control_backup_stamp' => env('CIC_CONTROL_BACKUP_STAMP'),
 
+    // Customers' own domains. Off until Cloudflare for SaaS carries them: the
+    // hosts take web traffic from Cloudflare only (install-agent.sh), and a
+    // domain pointed straight at a host would not be reached (2026-09-25).
+    'custom_domains' => (bool) env('CIC_CUSTOM_DOMAINS', false),
+
     // Told of every new site and domain (App\Fleet\OwnerNotifier). Unset: no mail.
     'owner_notify_email' => env('CIC_OWNER_NOTIFY_EMAIL'),
 
