@@ -75,6 +75,31 @@ var obfuscationRules = []struct {
 	{"request input handed to a callback runner", regexp.MustCompile(`(?i)\b(call_user_func(_array)?|array_map|array_filter|array_walk|usort|uasort|uksort|register_shutdown_function|register_tick_function|forward_static_call(_array)?|iterator_apply)\s*\(\s*@?\$_(GET|POST|REQUEST|COOKIE|SERVER)`)},
 	{"a function name built from chr()", regexp.MustCompile(`(?i)(\bchr\s*\(\s*\d+\s*\)\s*\.\s*){3,}`)},
 	{"a PHP file written from request input or decoded data", regexp.MustCompile(`(?is)\bfile_put_contents\s*\([^;]{0,200}\.ph(p[0-9]?|tml|ar)\b[^;]{0,300}(base64_decode|gzinflate|str_rot13|hex2bin|\$_(GET|POST|REQUEST|COOKIE|FILES))`)},
+	// include runs whatever it is given as PHP: an image or a text file
+	// included as code is PHP hidden where no extension-based check looks
+	// (audit A8/A10). A Laravel app never includes a .jpg.
+	{"a non-PHP file included as code", regexp.MustCompile(`(?i)\b(include|require)(_once)?\b\s*\(?[^;]{0,200}['"][^'"\n]*\.(jpe?g|png|gif|webp|bmp|ico|pdf|txt|log|csv|md|zip|gz|tar|mp[34]|mov|avi|webm|woff2?|ttf|dat|bin|tmp)['"]`)},
+}
+
+// imagePHP: a PHP open tag inside an image - PHP hidden for an include to
+// run. Six bytes and a space, case-insensitive: it does not occur in an
+// honest image by chance (a bare "<?=" would, in about one 1 MB image in 16).
+var imagePHP = regexp.MustCompile(`(?i)<\?php[\s]`)
+
+func isImage(rel string) bool {
+	switch strings.ToLower(filepath.Ext(rel)) {
+	case ".jpg", ".jpeg", ".png", ".gif", ".webp", ".bmp", ".ico":
+		return true
+	}
+	return false
+}
+
+// hiddenInImage is the finding for an image carrying PHP, or nil.
+func hiddenInImage(rel string, b []byte) *ErrMalware {
+	if isImage(rel) && imagePHP.Match(b) {
+		return &ErrMalware{Findings: []Finding{{Path: "/" + strings.TrimPrefix(rel, "/"), Kind: "obfuscated", Detail: "PHP code hidden in an image"}}}
+	}
+	return nil
 }
 
 // Names a webshell hides behind an escape sequence, a string concatenation
@@ -356,6 +381,14 @@ func (m *Manager) ScanSite(ctx context.Context, id string) ([]Finding, error) {
 			}
 			return nil
 		}
+		if isImage(rel) && d.Type()&fs.ModeSymlink == 0 {
+			if b, err := readBeneath(root, p, MaxUploadSize); err == nil {
+				if bad := hiddenInImage(rel, b); bad != nil {
+					found = append(found, bad.Findings...)
+				}
+			}
+			return nil
+		}
 		php, page := checkedForObfuscation(rel), checkedForPhishing(rel)
 		if d.Type()&fs.ModeSymlink != 0 || (!php && !page) {
 			return nil
@@ -403,6 +436,13 @@ func scanContent(rel, content string) *ErrMalware {
 // beneath root. A scan that cannot run is reported as an error, never as clean.
 func scanFile(ctx context.Context, root, rel string) error {
 	rel = "/" + strings.TrimPrefix(rel, "/")
+	if isImage(rel) {
+		if b, err := readBeneath(root, filepath.Join(root, rel), MaxUploadSize); err == nil {
+			if bad := hiddenInImage(rel, b); bad != nil {
+				return bad
+			}
+		}
+	}
 	if checkedForObfuscation(rel) {
 		if b, err := readBeneath(root, filepath.Join(root, rel), MaxUploadSize); err == nil {
 			if bad := scanContent(rel, string(b)); bad != nil {
@@ -419,6 +459,12 @@ func scanFile(ctx context.Context, root, rel string) error {
 
 // scanWrittenPHP applies the obfuscation rules to a file already written.
 func scanWrittenPHP(root, rel string) *ErrMalware {
+	if isImage(rel) {
+		if b, err := readBeneath(root, filepath.Join(root, rel), MaxUploadSize); err == nil {
+			return hiddenInImage(rel, b)
+		}
+		return nil
+	}
 	if !checkedForObfuscation(rel) {
 		return nil
 	}
@@ -454,7 +500,7 @@ func (m *Manager) ScanChangedSince(id string, t time.Time) *ErrMalware {
 			}
 			return nil
 		}
-		if d.Type()&fs.ModeSymlink != 0 || !checkedForObfuscation(rel) {
+		if d.Type()&fs.ModeSymlink != 0 || (!checkedForObfuscation(rel) && !isImage(rel)) {
 			return nil
 		}
 		if info, err := d.Info(); err != nil || info.ModTime().Before(t) {
