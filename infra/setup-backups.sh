@@ -84,6 +84,14 @@ if ! src 'grep -q "^RESTIC_REST_PASSWORD=" /opt/codeinchrome/etc/backup.env'; th
 fi
 src "sed -i '/^RESTIC_REPOSITORY=/d' /opt/codeinchrome/etc/backup.env && echo 'RESTIC_REPOSITORY=rest:https://$domain/$name/' >> /opt/codeinchrome/etc/backup.env"
 ok "append-only login for $name, confined to its own repository"
+# The endpoint serves Cloudflare's origin certificate (setup-backup-server.sh):
+# trusted by restic through RESTIC_CACERT - which REPLACES the system roots, so
+# the bundle holds both, and a host trusts the endpoint before and after the
+# switch alike.
+scp -q infra/cloudflare-origin-roots.pem "root@$ip:/opt/codeinchrome/etc/cloudflare-origin-roots.pem"
+src "cat /etc/ssl/certs/ca-certificates.crt /opt/codeinchrome/etc/cloudflare-origin-roots.pem > /opt/codeinchrome/etc/restic-ca.pem.new && mv /opt/codeinchrome/etc/restic-ca.pem.new /opt/codeinchrome/etc/restic-ca.pem && chmod 0644 /opt/codeinchrome/etc/restic-ca.pem"
+src "sed -i '/^RESTIC_CACERT=/d' /opt/codeinchrome/etc/backup.env && echo 'RESTIC_CACERT=/opt/codeinchrome/etc/restic-ca.pem' >> /opt/codeinchrome/etc/backup.env"
+ok "restic trusts the endpoint's certificate (system roots and Cloudflare's origin roots)"
 
 # ── 4. move an existing SFTP-era repository across, snapshots intact ─────────
 target "NAME=$name bash -s" <<'REMOTE'
@@ -158,6 +166,10 @@ check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else printf '\033[33m  !!\
 host_restic() { src "set -a; . /opt/codeinchrome/etc/backup.env; set +a; $*"; }
 
 check "host can reach and read its repository" "host_restic 'restic cat config'"
+# Through the tool itself, with ITS environment: a check that exported the
+# whole settings file passed while every nightly run failed TLS, because the
+# tool exports a named list and RESTIC_CACERT was not on it (2026-09-25).
+check "the backup tool itself reaches the repository" "src '/opt/codeinchrome/bin/cic-backup ping'"
 check "timer is scheduled"                     "src 'systemctl is-active cic-backup.timer'"
 # Positive control first: the host CAN add a snapshot...
 check "host can ADD a snapshot" \

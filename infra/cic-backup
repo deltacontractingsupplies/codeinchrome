@@ -30,6 +30,10 @@ die() { echo "cic-backup: $*" >&2; exit 1; }
 # shellcheck disable=SC1091
 . "$CIC/etc/mysql.env"
 export RESTIC_REPOSITORY RESTIC_PASSWORD RESTIC_REST_USERNAME RESTIC_REST_PASSWORD
+# The endpoint's certificate is trusted through this (setup-backups.sh). Left
+# out of the list above at first, every nightly run failed its TLS check while
+# a test that exported the whole file passed.
+if [[ -n ${RESTIC_CACERT:-} ]]; then export RESTIC_CACERT; fi
 # An explicit cache, in a path the agent's sandbox may write. Run by the agent
 # (systemd: ProtectHome=yes, no $HOME) restic otherwise finds no cache
 # directory and every customer's "Back up now" failed, while the same command
@@ -211,5 +215,7 @@ case "${1:-}" in
   list) cmd_list "${2:?site id}" ;;
   restore) cmd_restore "${2:?site id}" "${3:-latest}" ;;
   check) restic check ;;
+  # Reaches the repository with this tool's own environment (setup-backups.sh's check).
+  ping) restic cat config >/dev/null ;;
   *) die "usage: cic-backup {run|list|restore|check} ..." ;;
 esac
