@@ -6,6 +6,7 @@ use App\Abuse\Enforcer;
 use App\Fleet\AgentClient;
 use App\Models\Site;
 use Illuminate\Console\Command;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -26,27 +27,61 @@ class AbuseScan extends Command
         $clean = $flagged = $failed = 0;
         foreach ($sites as $site) {
             try {
-                $findings = AgentClient::for($site->host)->scanSite($site->site_id);
+                $scan = AgentClient::for($site->host)->scanSite($site->site_id);
             } catch (\Throwable $e) {
-                // Never counted as clean: said, and tried again next run.
                 $failed++;
-                $this->warn("{$site->site_id}: scan failed - ".$e->getMessage());
-                Log::warning('abuse scan failed', ['site' => $site->site_id, 'error' => $e->getMessage()]);
+                $this->failedScan($site, $e->getMessage());
 
                 continue;
             }
-            if ($findings === []) {
-                $clean++;
-                $site->forceFill(['scanned_clean_at' => now()])->save();
+            // Unscannable (a password-protected or oversize archive): nothing
+            // vouches for it, but it is not evidence of malware - a person
+            // looks (the second security audit, 2026-09-25).
+            $findings = array_values(array_filter($scan['findings'], fn ($f) => ($f['kind'] ?? '') !== 'unscannable'));
+            $unscannable = array_values(array_filter($scan['findings'], fn ($f) => ($f['kind'] ?? '') === 'unscannable'));
+            if ($findings !== []) {
+                $flagged++;
+                $this->error("{$site->site_id}: ".count($findings).' finding(s) - account banned');
+                $enforcer->malware($site, $findings, 'scheduled scan');
 
                 continue;
             }
-            $flagged++;
-            $this->error("{$site->site_id}: ".count($findings).' finding(s) - account banned');
-            $enforcer->malware($site, $findings, 'scheduled scan');
+            if ($scan['incomplete'] !== null) {
+                // The rules ran and found nothing, but ClamAV did not: never clean.
+                $failed++;
+                $this->failedScan($site, $scan['incomplete']);
+
+                continue;
+            }
+            if ($unscannable !== []) {
+                $flagged++;
+                $this->warn("{$site->site_id}: ".count($unscannable).' file(s) ClamAV could not open - for review');
+                $enforcer->review($site, 'files the malware scanner could not open (password-protected or oversize): '
+                    .implode(', ', array_map(fn ($f) => $f['path'].' ('.$f['detail'].')', $unscannable)));
+
+                continue;
+            }
+            $clean++;
+            Cache::forget("abuse.scan_failures.{$site->site_id}");
+            $site->forceFill(['scanned_clean_at' => now()])->save();
         }
         $this->info("scanned {$sites->count()} site(s): $clean clean, $flagged flagged, $failed could not be scanned");
 
         return $failed ? self::FAILURE : self::SUCCESS;
+    }
+
+    /**
+     * Never counted as clean: said, tried again next run, and after two
+     * failures in a row the owner is told - a site whose scans keep failing
+     * is a site nobody is checking (the audit, 2026-09-25).
+     */
+    private function failedScan(Site $site, string $why): void
+    {
+        $this->warn("{$site->site_id}: scan failed - $why");
+        Log::warning('abuse scan failed', ['site' => $site->site_id, 'error' => $why]);
+        $n = Cache::increment("abuse.scan_failures.{$site->site_id}");
+        if ($n === 2) {
+            app(Enforcer::class)->review($site, "its malware scan has failed twice in a row ($why)");
+        }
     }
 }

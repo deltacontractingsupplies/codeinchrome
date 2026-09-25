@@ -413,13 +413,18 @@ class AgentClient
      * {path, kind: malware|obfuscated, detail}. Throws if the scan could not
      * run - never an empty "clean" list in its place.
      */
+    /**
+     * @return array{findings: array, incomplete: ?string} incomplete: why part of
+     * the scan (ClamAV) could not run - the rules' findings still count.
+     */
     public function scanSite(string $id): array
     {
         // A whole site streamed through ClamAV: about a minute for a Laravel
         // app with its vendor/, so well past the usual timeout.
         $long = new self($this->host, $this->baseUrl, $this->token, 900);
+        $r = $long->send('post', "/v1/sites/$id/scan");
 
-        return $long->send('post', "/v1/sites/$id/scan")['findings'] ?? [];
+        return ['findings' => $r['findings'] ?? [], 'incomplete' => $r['incomplete'] ?? null];
     }
 
     public function search(string $id, string $q, int $limit = 200): array

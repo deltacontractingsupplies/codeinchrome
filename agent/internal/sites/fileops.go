@@ -569,8 +569,8 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 	if scanErr == nil {
 		if found, err := clamScan(ctx, root, paths...); err != nil {
 			scanErr = fmt.Errorf("the archive could not be checked for malware, so it was not unpacked: %v", err)
-		} else if len(found) > 0 {
-			scanErr = &ErrMalware{Findings: found}
+		} else {
+			scanErr = refusal(found)
 		}
 	}
 	if scanErr != nil {

@@ -306,6 +306,10 @@ PasswordAuthentication no
 PermitRootLogin prohibit-password
 KbdInteractiveAuthentication no
 MaxAuthTries 3
+LoginGraceTime 30
+X11Forwarding no
+AllowAgentForwarding no
+MaxStartups 10:30:60
 CONF
 sshd -t || die "sshd config invalid after writing $SSHD"
 systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || die "could not reload sshd"
@@ -333,7 +337,13 @@ fi
 # and a file clamd will not take is an upload refused as unscanned.
 conf=/etc/clamav/clamd.conf
 restart_clamd=0
-for kv in "StreamMaxLength 100M" "MaxFileSize 100M" "MaxScanSize 400M"; do
+# Alert*: an archive or document ClamAV cannot open (password-protected, or
+# past these limits) is reported as Heuristics.Encrypted/Limits.Exceeded
+# instead of "OK" - an encrypted zip holding EICAR scanned clean (the second
+# security audit, 2026-09-25). The agent refuses such uploads and sends
+# them to review; it never bans for them.
+for kv in "StreamMaxLength 100M" "MaxFileSize 100M" "MaxScanSize 400M" \
+          "AlertEncryptedArchive yes" "AlertEncryptedDoc yes" "AlertExceedsMax yes"; do
   key=${kv%% *}
   if ! grep -qx "$kv" "$conf"; then
     sed -i "/^$key /d" "$conf"; echo "$kv" >> "$conf"; restart_clamd=1
@@ -351,9 +361,36 @@ cat > /etc/apt/apt.conf.d/20auto-upgrades <<'CONF'
 APT::Periodic::Update-Package-Lists "1";
 APT::Periodic::Unattended-Upgrade "1";
 CONF
+# Docker (dockerd, containerd, runc) and Caddy come from their own
+# repositories, which unattended-upgrades left alone: their security fixes
+# never installed (the second security audit, 2026-09-25). Docker restarts
+# with live-restore on, so the sites keep running through it.
+cat > /etc/apt/apt.conf.d/51cic-origins <<'CONF'
+Unattended-Upgrade::Origins-Pattern {
+        "origin=Docker,label=Docker CE";
+        "origin=cloudsmith/caddy/stable";
+};
+CONF
+# fail2ban: SSH is open to the world and gets thousands of attempts a day
+# per host. Bans grow for repeat offenders, up to a week, and anyone banned
+# again within a day is banned for a week (recidive).
+cat > /etc/fail2ban/jail.d/cic.conf <<'CONF'
+[DEFAULT]
+bantime.increment = true
+bantime.maxtime = 1w
+
+[sshd]
+mode = aggressive
+
+[recidive]
+enabled = true
+bantime = 1w
+findtime = 1d
+CONF
 systemctl enable --now unattended-upgrades >/dev/null 2>&1 || true
 systemctl enable --now fail2ban            >/dev/null 2>&1 || true
-ok "unattended-upgrades and fail2ban active"
+systemctl restart fail2ban
+ok "unattended-upgrades (incl. Docker and Caddy) and fail2ban (with recidive) active"
 
 # ─────────────────────────────────────────────────────────────────────────────
 log "swap"
@@ -426,6 +463,9 @@ check "ssh password auth off"    'has "passwordauthentication no" sshd -T'
 check "ssh root password off"    'has "permitrootlogin without-password" sshd -T || has "permitrootlogin prohibit-password" sshd -T'
 check "unattended-upgrades on"   'systemctl is-active unattended-upgrades'
 check "fail2ban on"              'systemctl is-active fail2ban'
+check "fail2ban recidive jail"   'fail2ban-client status recidive'
+check "ssh: no X11 or agent forwarding" 'has "x11forwarding no" sshd -T && has "allowagentforwarding no" sshd -T'
+check "Docker and Caddy updated automatically" 'apt-config dump | grep -q "origin=Docker,label=Docker CE"'
 check "swap active"              '[[ -n "$(swapon --show)" ]]'
 check "host id present"          'test -s /opt/codeinchrome/etc/host.id'
 check "customer root private"    '[[ "$(stat -c %a /srv/customers)" == "750" ]]'

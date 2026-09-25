@@ -495,12 +495,13 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	// schedule. A scan that cannot run is an error, never "clean".
 	mux.HandleFunc("POST /v1/sites/{id}/scan", func(w http.ResponseWriter, r *http.Request) {
 		found, err := mgr.ScanSite(r.Context(), r.PathValue("id"))
-		if err != nil {
-			writeJSON(w, http.StatusInternalServerError, fail("scan_failed", err.Error()))
-			return
-		}
 		if found == nil {
 			found = []sites.Finding{}
+		}
+		if err != nil {
+			// What the rules found still counts; the site is not "clean".
+			writeJSON(w, http.StatusOK, ok(resp{"findings": found, "clean": false, "incomplete": err.Error()}))
+			return
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"findings": found, "clean": len(found) == 0}))
 	})

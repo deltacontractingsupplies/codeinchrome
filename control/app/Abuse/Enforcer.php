@@ -68,6 +68,14 @@ class Enforcer
         return $back;
     }
 
+    /** Something a person should look at, with nothing done to the site. */
+    public function review(Site $site, string $what): void
+    {
+        Audit::record('abuse.review', $site->user, $site, detail: ['what' => mb_substr($what, 0, 500)]);
+        $this->tellOwner("For review: {$site->domain}", "https://{$site->domain}: $what\nAccount: ".($site->user?->email ?? '?')
+            ."\n\nNothing was done to the site. To take the account down: php artisan abuse:ban ".($site->user?->email ?? '<email>'));
+    }
+
     private function tellOwner(string $subject, string $body): void
     {
         $to = config('fleet.owner_notify_email') ?: config('fleet.admin_emails');

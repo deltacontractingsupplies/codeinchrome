@@ -76,20 +76,20 @@ before it is ticked.
 - [x] **A31 [medium]** The site-name impersonation filter misses common phishing names - FIXED 2026-09-25: names normalised (hyphens, look-alike digits) and more brands; short brands refused beside a lure word; every audit example refused, foodbank-online and purchase-online still allowed (tested).
 - [x] **A32 [medium]** Customer apps see every visitor as the Docker gateway address, so per-IP limits and bans cannot tell visitors apart - FIXED 2026-09-25: Caddy sends X-Real-IP {client_ip} (agent 0.30.4) and the image's mod_remoteip trusts it from the Docker networks only; verified live through Cloudflare: my real address logged, a forged X-Real-IP ignored.
 - [ ] **A33 [medium]** Authenticated Origin Pulls are off: the Cloudflare-ranges allowlist admits any Cloudflare customer's proxy or Worker, and h2's IP is published in DNS
-- [ ] **A34 [medium]** Docker CE, containerd.io (which includes runc), Caddy and the ondrej PHP packages are never auto-updated
+- [x] **A34 [medium]** Docker CE, containerd.io (which includes runc), Caddy and the ondrej PHP packages are never auto-updated - FIXED 2026-09-25: unattended-upgrades also takes Docker (docker-ce, containerd, runc) and Caddy on every host, and Ondrej's PHP and Caddy on the control host (origins read from apt-cache policy); checked by bootstrap.
 - [x] **A35 [low]** Wildcard *.lemonsqueezy.com lets any self-made Lemon Squeezy store be a redirect target - FIXED 2026-09-25: Lemon Squeezy only at /checkout/ or /buy/, at the edge and in LinkScanner; verified live.
 - [x] **A36 [low]** Several Location headers are joined before the check, so an offsite one after a relative one passes the edge - FIXED 2026-09-25: several joined Location values with an offsite one are refused; verified live.
 - [x] **A37 [low]** The mining check resets on any 5-minute reading under 90% CPU, so a throttled miner is never paused - FIXED 2026-09-25 with A12: the 6-hour average pauses a miner held under 90%.
 - [ ] **A38 [low]** Scans read only the first 2 MiB (scheduled) or 32 MiB (unzip) of a PHP file, and clamd reports content past 100 MB as clean
-- [ ] **A39 [low]** A clamd failure skips the rules walk in ScanSite, and repeated scan failures alert nobody
-- [ ] **A40 [low]** Password-protected archives pass ClamAV as clean (AlertEncrypted not set)
+- [x] **A39 [low]** A clamd failure skips the rules walk in ScanSite, and repeated scan failures alert nobody - FIXED 2026-09-25: the rules run and their findings count even when ClamAV fails (agent 0.30.8); a site never counts as clean without both; two failed scans in a row are emailed.
+- [x] **A40 [low]** Password-protected archives pass ClamAV as clean (AlertEncrypted not set) - FIXED 2026-09-25: clamd AlertEncryptedArchive/Doc and AlertExceedsMax; such files are refused on upload and sent for review, never a ban; verified live: an encrypted zip with EICAR is now Heuristics.Encrypted.Zip.
 - [x] **A41 [low]** Site image loads no php.ini, so compiled-in defaults apply (zend.assertions=1, zend.exception_ignore_args=0) - FIXED 2026-09-25: the image sets zend.assertions=-1, zend.exception_ignore_args=On, display_startup_errors=Off; verified in a live container.
 - [ ] **A42 [low]** Control plane: Vite hashed assets not marked immutable (Cloudflare applies max-age=14400), and /theme.js is unversioned
 - [ ] **A43 [low]** The e2e test sign-up domain is enabled in production and will skip Turnstile once it is on
 - [x] **A44 [low]** The first-week noindex is lifted on schedule even when the link check has open review findings - FIXED 2026-09-25: noindex is lifted only when both checks passed within the week (tested).
-- [ ] **A45 [low]** fail2ban runs only the default sshd jail (10-minute bans, no recidive), and sshd keeps defaults while SSH is open to the world
-- [ ] **A46 [low]** The control host's tunnel key (cictunnel) can open remote (-R) and unix-socket forwards on every customer host
-- [ ] **A47 [low]** The control host still runs an unused root cic-agent, the Docker daemon and old DOCKER-USER rules
+- [x] **A45 [low]** fail2ban runs only the default sshd jail (10-minute bans, no recidive), and sshd keeps defaults while SSH is open to the world - FIXED 2026-09-25: fail2ban sshd aggressive with growing bans (to a week) and recidive, on every host and the control host; sshd LoginGraceTime 30, no X11 or agent forwarding, MaxStartups 10:30:60; checked by the deploy scripts.
+- [x] **A46 [low]** The control host's tunnel key (cictunnel) can open remote (-R) and unix-socket forwards on every customer host - FIXED 2026-09-25: the tunnel key also carries permitlisten="localhost:1" and command=nologin; proved with a throwaway key first (agent forward works, -R and a shell refused), then the tunnels were restarted one at a time.
+- [x] **A47 [low]** The control host still runs an unused root cic-agent, the Docker daemon and old DOCKER-USER rules - FIXED 2026-09-25: the control host runs no agent and no Docker; checked by deploy-control.
 - [ ] **A48 [low]** There is no verifiable Cloudflare-side rate limiting or IP reputation, and the API token cannot read or manage it
 - [ ] **A49 [low]** Host auditing and kernel hardening are at Ubuntu defaults: no auditd, and several sysctls are not hardened
 
