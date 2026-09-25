@@ -139,9 +139,30 @@ class FileManagerController extends FileController
             'repository' => ['required', 'string', 'max:200', 'regex:#^(https://github\.com/)?[A-Za-z0-9][A-Za-z0-9-]{0,38}/[A-Za-z0-9._-]{1,100}(\.git)?/?$#'],
             'ref' => ['nullable', 'string', 'max:100', 'regex:#^[A-Za-z0-9._/-]+$#', 'not_regex:#\.\.#'],
             'into' => ['nullable', 'string', 'max:1024'],
+            'replace' => ['sometimes', 'boolean'],
+            'confirm' => ['sometimes', 'boolean'],
         ]);
 
+        if ($request->boolean('replace')) {
+            // The whole site becomes the repository (after a backup; .env and
+            // storage/ are kept). Refused by the host without confirm.
+            return $this->attempt(function () use ($site, $d, $request) {
+                $r = AgentClient::for($site->host)->cloneReplace($site->site_id, $d['repository'], $d['ref'] ?? null, $request->boolean('confirm'));
+                \App\Audit\Audit::record('site.replaced_with_clone', site: $site, detail: ['repository' => $d['repository'], 'ref' => $d['ref'] ?? 'HEAD']);
+
+                return $r;
+            });
+        }
+
         return $this->attempt(fn () => AgentClient::for($site->host)->cloneRepository($site->site_id, $d['repository'], $d['ref'] ?? null, $d['into'] ?? null));
+    }
+
+    /** The current or last backup, restore or clone-replace, for the editor to poll. */
+    public function operation(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+
+        return $this->attempt(fn () => AgentClient::for($site->host)->operation($site->site_id));
     }
 
     /** Every file path, for Quick Open (⌘P). */

@@ -66,6 +66,7 @@ const SITE = {
   grepUrl: root.dataset.grep,
   findUrl: root.dataset.find,
   cloneUrl: root.dataset.clone,
+  operationUrl: root.dataset.operation,
   uploadUrl: root.dataset.upload,
   downloadUrl: root.dataset.download,
   skillUrl: root.dataset.skill,
@@ -2361,9 +2362,11 @@ const shellIo = {
   query: (sql, write) => apiAt(SITE.dbQueryUrl, 'POST', {}, { sql, write }),
   clone: async (o) => {
     const r = await apiAt(SITE.cloneUrl, 'POST', {}, o);
-    if (r.ok) (async () => { await reloadAround(o.into); })();
+    if (r.ok && !o.replace) (async () => { await reloadAround(o.into); })();
     return r;
   },
+  operation: () => apiAt(SITE.operationUrl, 'GET'),
+  sleep: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 };
 // Unset options left out, booleans as 1, a list as include[]=... (Laravel's form).
 function shellQuery(o) {
@@ -2560,6 +2563,10 @@ false. Nothing is paraphrased.
   cic.find({ under, name, iname, type, newer, maxdepth, all })
                                find, as data -> { entries: [{ path, dir, size, mtime }], files, bytes }
   cic.clone(repo, { ref, into }) git clone of a public GitHub repository into a new folder
+  cic.clone(repo, { replace: true, confirm: true })
+                               the whole site BECOMES the repository (an open-source Laravel
+                               app): backed up first, .env and storage/ kept, composer install.
+                               Only with the person's agreement. Follow it: cic.operation()
   cic.diff(pathA, pathB)       unified diff of two files (or { text }) -> { same, diff }
   cic.run(tool, args, { confirm })
                                run ONE allow-listed command in the site's container:
@@ -3460,7 +3467,12 @@ const cicApi = {
     return apiAt(SITE.findUrl, 'GET', shellQuery({ under: norm(under), name: name ?? iname, icase: iname !== undefined, type, newer: secs, maxdepth, all, limit }));
   },
   // A public GitHub repository into a NEW folder (default: its name), scanned.
-  clone: (repository, { ref = '', into } = {}) => shellIo.clone({ repository: String(repository), ref, into: into ? norm(into) : `/${String(repository).replace(/\.git\/?$/, '').split('/').filter(Boolean).pop() ?? ''}` }),
+  // { replace: true, confirm: true }: the whole site becomes the repository
+  // (after a backup; .env and storage/ kept) - poll cic.operation().
+  clone: (repository, { ref = '', into, replace = false, confirm = false } = {}) => (replace
+    ? shellIo.clone({ repository: String(repository), ref, replace: true, confirm: confirm === true })
+    : shellIo.clone({ repository: String(repository), ref, into: into ? norm(into) : `/${String(repository).replace(/\.git\/?$/, '').split('/').filter(Boolean).pop() ?? ''}` })),
+  operation: () => shellIo.operation(),
   // A unified diff of two files (or a file and some text: { text }), shaped to show.
   diff: async (a, b) => {
     const [x, y] = await Promise.all([a, b].map((p) => (typeof p === 'object' && p !== null && 'text' in p ? { ok: true, content: String(p.text) } : api('GET', { read: 1, path: norm(p) }))));

@@ -559,6 +559,35 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"hits": res.Hits, "truncated": res.Truncated}))
 	})
+	// The site itself replaced by a public GitHub repository, after a backup.
+	mux.HandleFunc("POST /v1/sites/{id}/clone-replace", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Repository string `json:"repository"`
+			Ref        string `json:"ref"`
+			Confirm    bool   `json:"confirm"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("invalid_body", "send JSON: repository, ref, confirm"))
+			return
+		}
+		op, err := mgr.StartReplaceWithClone(r.Context(), r.PathValue("id"), body.Repository, body.Ref, body.Confirm)
+		if bad, is := sites.IsMalware(err); is {
+			// Someone else's code, none of it kept: counted like any clone.
+			writeJSON(w, http.StatusUnprocessableEntity, resp{"ok": false, "error": "malware_in_clone", "findings": bad.Findings,
+				"hint": fmt.Sprintf("%s - nothing from %s was kept, and the site was not changed", bad.Error(), body.Repository)})
+			return
+		}
+		switch {
+		case errors.Is(err, sites.ErrNeedsConfirm):
+			writeJSON(w, http.StatusConflict, fail("needs_confirm", "This replaces the whole site with the repository (after a backup; .env and storage/ are kept). Send confirm: true if that is intended."))
+		case errors.Is(err, sites.ErrBackupRunning):
+			writeJSON(w, http.StatusConflict, fail("busy", "A backup or restore is running on this site; try again when it is done."))
+		case err != nil:
+			writeJSON(w, http.StatusBadRequest, fail("cannot_clone", err.Error()))
+		default:
+			writeJSON(w, http.StatusAccepted, ok(resp{"operation": op}))
+		}
+	})
 	// git clone of a public GitHub repository into a new folder of the site.
 	mux.HandleFunc("POST /v1/sites/{id}/clone", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
@@ -927,6 +956,15 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	// Backups: the nightly snapshots, a backup now, and a restore - which
 	// backs the site up first, so it can be undone. Both run in the
 	// background; GET .../backups reports progress as "operation".
+	// The current or last backup, restore or clone-replace, without listing
+	// backups: what the editor polls while one runs.
+	mux.HandleFunc("GET /v1/sites/{id}/operation", func(w http.ResponseWriter, r *http.Request) {
+		if err := sites.ValidID(r.PathValue("id")); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("invalid_id", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"operation": mgr.BackupStatus(r.PathValue("id"))}))
+	})
 	mux.HandleFunc("GET /v1/sites/{id}/backups", func(w http.ResponseWriter, r *http.Request) {
 		id := r.PathValue("id")
 		list, err := mgr.Backups(r.Context(), id)

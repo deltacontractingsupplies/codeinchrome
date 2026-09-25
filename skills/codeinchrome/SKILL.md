@@ -157,7 +157,11 @@ rm -r, mkdir -p, touch, tree, du, sort, uniq, cut, tr, xargs, tee, test/[ ], pip
 `php -r 'code'` (in the booted app, like tinker), `mysql -e 'SQL'` (the site's own
 database), `git log/diff/show -- FILE` over the saved versions (there is no git
 repository: every save is already a version) and `git clone https://github.com/owner/repo
-[folder]` - a public GitHub repository into a new folder, scanned like any upload. There are no `$VARIABLES` or `$(...)`: a `$`
+[folder]` - a public GitHub repository into a new folder, scanned like any upload.
+`git clone URL /` makes the whole site that repository (an open-source Laravel app run as
+the site): it is checked and scanned, the site is backed up, its `.env` and `storage/` are
+kept, then `composer install`. It asks for confirmation - only with the person's agreement -
+and `git clone --status` follows it. Then `php artisan migrate`. There are no `$VARIABLES` or `$(...)`: a `$`
 is an ordinary character, so PHP in a heredoc arrives exactly as written. `cd` is
 remembered between calls. Deleting a folder, a destructive artisan command and a SQL write
 answer with a refusal that says to resend with `{ confirm: true }` - only with the person's
