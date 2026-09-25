@@ -142,6 +142,10 @@
                      A native dialog freezes the page for a browser-driving
                      agent, which cannot dismiss it - and this product is
                      meant to be driven by one. --}}
+                @if ($site->status === 'suspended' && in_array($site->paused_reason, ['cpu', 'egress', 'abuse'], true))
+                    {{-- A site paused by the abuse checks is not deleted by its owner (Middleware\PausedSite). --}}
+                    <span class="text-sm text-neutral-500" title="Paused by our abuse checks. Write to support.">Paused by our checks</span>
+                @else
                 <details class="relative">
                     <summary class="list-none cursor-pointer rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-400 hover:border-red-800 hover:text-red-300">Delete</summary>
                     <form method="POST" action="{{ route('sites.destroy', $site) }}"
@@ -151,6 +155,7 @@
                         <button class="mt-3 w-full rounded-md bg-red-700 px-3 py-1.5 font-medium text-red-50 hover:bg-red-600">Delete permanently</button>
                     </form>
                 </details>
+                @endif
                 </div>
             </li>
         @endforeach

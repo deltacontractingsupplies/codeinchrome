@@ -58,6 +58,13 @@ class AccountController extends Controller
         $request->validate(['password' => ['required', 'current_password']]);
         $user = $request->user();
 
+        // Not while the abuse checks have a site paused: deleting the account
+        // would free its email for a new one and void a ban (the second
+        // security audit, 2026-09-25).
+        if ($user->sites()->where('status', 'suspended')->whereIn('paused_reason', ['cpu', 'egress', 'abuse'])->exists()) {
+            return back()->with('error', 'A site of yours is paused by our abuse checks. Write to support to close the account.');
+        }
+
         $billing = $user->subscriptions()->latest()->first();
         if ($billing && in_array($billing->status, ['active', 'on_trial', 'past_due'], true)) {
             return back()->with('error', 'Cancel your subscription in the billing portal first, so you are not charged for a deleted account.');

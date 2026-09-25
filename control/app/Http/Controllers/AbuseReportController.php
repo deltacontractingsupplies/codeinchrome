@@ -41,9 +41,30 @@ class AbuseReportController extends Controller
         $report = AbuseReport::create([
             'site_id' => $site->id, 'url' => $data['url'], 'reason' => $data['reason'],
             'details' => $data['details'] ?? null, 'reporter_email' => $data['email'] ?? null,
-            'reporter_hash' => hash_hmac('sha256', (string) $request->ip(), (string) config('app.key')),
+            // Per network (an IPv6 /64), so one person cannot be three reporters.
+            'reporter_hash' => hash_hmac('sha256', \App\Auth\ClientNet::key($request->ip()), (string) config('app.key')),
         ]);
         $this->tellOwner($report, $site);
+
+        // A report is acted on, not only filed (the second security audit,
+        // 2026-09-25; Cloudflare expects a response within 24 hours):
+        // three different reporters in a day pause the site - a pause, never
+        // a ban, so a rival cannot delete anyone's work - and the site is
+        // checked at once, as the hourly link check would.
+        $reporters = AbuseReport::where('site_id', $site->id)->where('created_at', '>=', now()->subDay())
+            ->distinct()->count('reporter_hash');
+        if ($reporters >= 3 && $site->status === 'live' && app(\App\Fleet\Suspension::class)->pause($site, 'abuse')) {
+            app(\App\Abuse\Enforcer::class)->review($site, "paused: $reporters different people reported it in 24 hours. "
+                ."Look, then: php artisan abuse:resume {$site->site_id}   or   php artisan abuse:ban ".($site->user?->email ?? '<email>'));
+        }
+        dispatch(function () use ($site) {
+            $r = app(\App\Abuse\LinkScanner::class)->scan($site);
+            if ($r['ban'] !== []) {
+                app(\App\Abuse\Enforcer::class)->ban($site->user, "After an abuse report, the site's pages:\n".implode("\n", $r['ban']));
+            } elseif ($r['review'] !== []) {
+                app(\App\Abuse\Enforcer::class)->review($site, "after an abuse report, its pages: ".implode('; ', $r['review']));
+            }
+        })->afterResponse();
 
         return redirect()->route('report')->with('status', 'Thank you. The report was received and will be looked at.');
     }

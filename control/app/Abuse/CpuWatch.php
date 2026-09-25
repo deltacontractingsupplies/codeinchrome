@@ -134,6 +134,9 @@ class CpuWatch
     {
         $paused = $this->suspension->pause($site, 'cpu');
         Audit::record('abuse.cpu_paused', $site->user, $site, detail: ['why' => $why, 'paused' => $paused]);
+        if ($site->user) {
+            app(Enforcer::class)->escalateRepeatPause($site->user, "sustained CPU on {$site->domain}");
+        }
         Log::warning('site paused for sustained CPU', ['site' => $site->site_id, 'why' => $why, 'paused' => $paused]);
         $this->tellOwner("Site paused for sustained CPU: {$site->domain}", "https://{$site->domain} $why and was paused (".($paused ? 'done' : 'NOT done: host unreachable').")."
             ."\nAccount: ".($site->user?->email ?? '?')."\n\nIf it is legitimate: php artisan abuse:resume {$site->site_id}\n"

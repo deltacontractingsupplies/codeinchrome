@@ -48,8 +48,13 @@ class Enforcer
         // The platform's own test accounts (the e2e suite bans one each run)
         // are not news for the owner.
         $isTest = collect(config('showcase.explore.exclude_email_suffixes', []))->contains(fn ($s) => str_ends_with($user->email, $s));
+        // Other accounts signed up from the same network (ClientNet::signal):
+        // named for the owner to judge, never banned automatically.
+        $related = $user->signup_net ? User::where('signup_net', $user->signup_net)->whereKeyNot($user->getKey())
+            ->where('created_at', '>=', now()->subDays(90))->limit(10)->pluck('email')->all() : [];
         if ($first && ! $isTest) {
             $this->tellOwner("Account banned: {$user->email}", "Account: {$user->email}\nSites taken down: ".(implode(', ', $down) ?: 'none')."\n\n$reason\n\n"
+                .($related ? 'Accounts signed up from the same network in the last 90 days: '.implode(', ', $related)."\n\n" : '')
                 ."Nothing was deleted. To reverse this: php artisan abuse:unban {$user->email}");
         }
     }
@@ -66,6 +71,31 @@ class Enforcer
         Audit::record('abuse.unbanned', $user, actor: null, detail: ['sites' => $back]);
 
         return $back;
+    }
+
+    /** An account that may not create sites until a person has looked. */
+    public function holdForReview(User $user, string $why): void
+    {
+        Audit::record('abuse.held', $user, actor: null, detail: ['why' => $why]);
+        $this->tellOwner("Account held for review: {$user->email}", "Account: {$user->email}\nWhy: $why\n\n"
+            .'It can sign in but cannot create sites. If it is fine, nothing needs doing once the other ban is 30 days old; '
+            ."to clear it now: php artisan tinker --execute=\"App\\Models\\User::where('email','{$user->email}')->update(['signup_net' => null]);\"\n"
+            .'To take it down: php artisan abuse:ban '.$user->email);
+    }
+
+    /**
+     * An account paused by an automatic check (CPU, scanning) a second time
+     * within 30 days is banned: a pause alone let it start over each time.
+     */
+    public function escalateRepeatPause(User $user, string $what): void
+    {
+        // An EARLIER pause: two sites paused in the same run are one incident.
+        $earlier = \App\Models\AuditEvent::query()->where('account_id', $user->id)
+            ->whereIn('action', ['abuse.cpu_paused', 'abuse.scan_paused'])
+            ->whereBetween('created_at', [now()->subDays(30), now()->subMinutes(10)])->count();
+        if ($earlier >= 1) {
+            $this->ban($user, "Paused by the automatic checks again within 30 days ($earlier time(s) before), this time for $what.");
+        }
     }
 
     /** Something a person should look at, with nothing done to the site. */
