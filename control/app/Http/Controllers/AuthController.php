@@ -65,7 +65,8 @@ class AuthController extends Controller
     {
         $domain = strtolower((string) substr(strrchr($email, '@') ?: '', 1));
         $allowed = config('signup.email_domains', []);
-        if ($test = config('signup.test_domain')) {
+        // The suite's reserved domain, only on the suite's own requests (App\Auth\TestSuite).
+        if (($test = config('signup.test_domain')) && \App\Auth\TestSuite::isRequest()) {
             $allowed[] = strtolower($test);
         }
 

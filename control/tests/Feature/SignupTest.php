@@ -47,8 +47,17 @@ class SignupTest extends TestCase
     public function test_the_e2e_suites_reserved_domain_only_where_configured(): void
     {
         $this->register('run-1@codeinchrome.test')->assertSessionHasErrors(['email']);
-        config(['signup.test_domain' => 'codeinchrome.test']);
-        $this->register('run-2@codeinchrome.test')->assertSessionHasNoErrors();
+        config(['signup.test_domain' => 'codeinchrome.test', 'signup.test_secret' => 'shh']);
+        // Configured, but only the suite's own requests (App\Auth\TestSuite, the audit 2026-09-25).
+        $this->register('run-2@codeinchrome.test')->assertSessionHasErrors(['email']);
+        $this->withHeader('X-CIC-E2E', 'forged')->post('/register', ['name' => 'N', 'email' => 'run-3@codeinchrome.test',
+            'password' => 'correct-horse-battery-9', 'password_confirmation' => 'correct-horse-battery-9'])->assertSessionHasErrors(['email']);
+        $this->withHeader('X-CIC-E2E', \App\Auth\TestSuite::header('shh'))->post('/register', ['name' => 'N', 'email' => 'run-4@codeinchrome.test',
+            'password' => 'correct-horse-battery-9', 'password_confirmation' => 'correct-horse-battery-9'])->assertSessionHasNoErrors();
+        auth()->logout();
+        config(['signup.test_secret' => null]);
+        $this->withHeader('X-CIC-E2E', \App\Auth\TestSuite::header('shh'))->post('/register', ['name' => 'N', 'email' => 'run-5@codeinchrome.test',
+            'password' => 'correct-horse-battery-9', 'password_confirmation' => 'correct-horse-battery-9'])->assertSessionHasErrors(['email']);
     }
 
     public function test_existing_accounts_at_other_domains_still_sign_in(): void

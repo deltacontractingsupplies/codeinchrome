@@ -96,7 +96,8 @@ class TurnstileTest extends TestCase
     public function test_the_e2e_suites_reserved_addresses_skip_it_and_nothing_else_does(): void
     {
         $this->turnOn();
-        config(['signup.test_domain' => 'codeinchrome.test']);
+        config(['signup.test_domain' => 'codeinchrome.test', 'signup.test_secret' => 'shh']);
+        $this->withHeader('X-CIC-E2E', \App\Auth\TestSuite::header('shh'));
         $form = fn ($email) => ['name' => 'P', 'email' => $email, 'password' => 'a-long-enough-pass-9Q', 'password_confirmation' => 'a-long-enough-pass-9Q']; // gitleaks:allow - a throwaway test password
 
         $this->post('/register', $form('e2e-1@codeinchrome.test'));

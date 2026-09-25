@@ -15,7 +15,7 @@ class ThemeTest extends TestCase
 {
     private function assertThemed(string $html): void
     {
-        $theme = strpos($html, '<script src="/theme.js"></script>');
+        $theme = strpos($html, '<script src="/theme.js?v=');
         $styles = strpos($html, '<link rel="stylesheet"') ?: strpos($html, '/build/');
         $this->assertNotFalse($theme, 'The page does not load /theme.js.');
         $this->assertLessThan($styles, $theme, '/theme.js must run before the styles load, or light-mode visitors see a dark flash.');

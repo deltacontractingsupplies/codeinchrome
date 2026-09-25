@@ -316,6 +316,39 @@ systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || die "co
 ok "keys only"
 
 # ─────────────────────────────────────────────────────────────────────────────
+log "kernel hardening and audit"
+# Kernel settings Ubuntu leaves at their defaults (the second security audit,
+# 2026-09-25). Not ip_forward: Docker needs it. Not log_martians: with the
+# Docker bridges it fills the kernel log.
+cat > /etc/sysctl.d/60-cic.conf <<'CONF'
+net.core.bpf_jit_harden = 2
+kernel.kexec_load_disabled = 1
+dev.tty.ldisc_autoload = 0
+net.ipv4.conf.all.send_redirects = 0
+net.ipv4.conf.default.send_redirects = 0
+kernel.sysrq = 0
+fs.suid_dumpable = 0
+CONF
+sysctl -q --system >/dev/null
+# auditd: every write to the configuration that controls this host is
+# recorded (who, when, what), in a bounded log.
+DEBIAN_FRONTEND=noninteractive apt-get install -y -qq auditd >/dev/null
+sed -ri 's/^max_log_file *=.*/max_log_file = 50/; s/^num_logs *=.*/num_logs = 4/' /etc/audit/auditd.conf
+cat > /etc/audit/rules.d/cic.rules <<'CONF'
+-w /opt/codeinchrome/etc -p wa -k cic-config
+-w /etc/ssh -p wa -k ssh-config
+-w /etc/ufw -p wa -k firewall
+-w /etc/docker -p wa -k docker-config
+-w /etc/caddy -p wa -k caddy-config
+-w /etc/sudoers -p wa -k sudoers
+-w /etc/sudoers.d -p wa -k sudoers
+-w /root/.ssh -p wa -k root-ssh
+CONF
+systemctl enable --now auditd >/dev/null 2>&1
+augenrules --load >/dev/null 2>&1 || true
+ok "sysctl hardened; auditd watching the host configuration"
+
+# ─────────────────────────────────────────────────────────────────────────────
 log "malware scanning (ClamAV)"
 # Customers upload files and run code the platform did not write; the owner
 # decided (2026-09-25) that malware or encrypted PHP on a free site bans the
@@ -464,6 +497,8 @@ check "ssh root password off"    'has "permitrootlogin without-password" sshd -T
 check "unattended-upgrades on"   'systemctl is-active unattended-upgrades'
 check "fail2ban on"              'systemctl is-active fail2ban'
 check "fail2ban recidive jail"   'fail2ban-client status recidive'
+check "kernel: sysrq off, kexec off, BPF JIT hardened" '[[ "$(sysctl -n kernel.sysrq)" == 0 && "$(sysctl -n kernel.kexec_load_disabled)" == 1 && "$(sysctl -n net.core.bpf_jit_harden)" == 2 ]]'
+check "auditd watching the configuration" 'auditctl -l | grep -q cic-config'
 check "ssh: no X11 or agent forwarding" 'has "x11forwarding no" sshd -T && has "allowagentforwarding no" sshd -T'
 check "Docker and Caddy updated automatically" 'apt-config dump | grep -q "origin=Docker,label=Docker CE"'
 check "swap active"              '[[ -n "$(swapon --show)" ]]'
