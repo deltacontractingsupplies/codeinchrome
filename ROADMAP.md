@@ -103,9 +103,13 @@ code exists.
 - [ ] **Custom domains through Cloudflare for SaaS** - the zone has no SaaS
       quota yet (API: "No quota has been allocated"); the owner switches it on
       in the dashboard (free for 100 hostnames). Then certificates from
-      Cloudflare instead of on-demand ACME, and ports 80/443 firewalled to
-      Cloudflare's ranges only. Customers' own domains work today via ACME;
-      only names under codeinchrome.com share the exhausted weekly quota.
+      Cloudflare instead of on-demand ACME. Until then customers' own domains
+      are OFF (CIC_CUSTOM_DOMAINS, "coming soon" in the panel; checked
+      2026-09-25: none exist): every host's 80/443 now accept Cloudflare's
+      ranges only, so a domain pointed straight at a host could be neither
+      visited nor issued a certificate - and pointing it there would publish
+      the host's address. With SaaS, a customer points a CNAME at Cloudflare
+      and the origin stays hidden.
 - [x] **Background processes in the site container**: queue worker, scheduler
       and Laravel Reverb under supervisor; WebSockets routed through Caddy and
       Cloudflare. Proven end to end: a queued job run by the worker and a
