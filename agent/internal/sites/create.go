@@ -234,6 +234,17 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 
 	var changed []string
 	previous := map[string][]byte{} // vhost file -> what it held before this pass
+	// Each running site's answer through Caddy BEFORE anything is rewritten,
+	// so a rewrite that breaks it can be told apart from a site that was
+	// already failing.
+	before := map[string]int{}
+	roots := m.edgeRoots()
+	for _, s := range list {
+		if s.State == "running" && !s.Suspended && s.Domain != "" {
+			before[s.Domain] = edgeStatus(ctx, s.Domain, roots)
+		}
+	}
+	probe := map[string]int{} // rewritten sites -> their status before
 	for _, s := range list {
 		// A container must never run without its disk. If the boot-time
 		// mount failed, docker has already started it on a bind mount of an
@@ -283,6 +294,7 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 			continue
 		}
 		previous[m.caddyFile(s.ID)] = have
+		probe[s.Domain] = before[s.Domain]
 		changed = append(changed, s.ID+": vhost rewritten to match the running container")
 	}
 	if len(changed) > 0 {
@@ -295,6 +307,20 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 			}
 			_ = m.ReloadProxy(context.Background())
 			return append(changed, "vhosts restored: caddy refused the rewrite"), err
+		}
+		// Caddy accepting a config is not the same as serving with it.
+		after := map[string]int{}
+		for domain := range probe {
+			after[domain] = edgeStatus(ctx, domain, roots)
+		}
+		if broken := brokenByReload(probe, after); len(broken) > 0 {
+			for path, data := range previous {
+				_ = os.WriteFile(path, data, 0o644)
+			}
+			if err := m.ReloadProxy(context.Background()); err != nil {
+				return append(changed, "vhosts restored after the rewrite broke "+strings.Join(broken, ", ")+", but the reload failed"), err
+			}
+			return append(changed, "vhosts restored: the rewrite broke "+strings.Join(broken, ", ")), fmt.Errorf("the new vhosts answered 5xx for %s; the previous ones are back", strings.Join(broken, ", "))
 		}
 	}
 	return changed, nil
@@ -605,6 +631,9 @@ func caddyConfig(cfg Config, s Site, port string) string {
 		X-Content-Type-Options "nosniff"
 		X-Frame-Options "SAMEORIGIN"
 		Referrer-Policy "strict-origin-when-cross-origin"%s
+		# A Refresh header sends the visitor elsewhere like a redirect, and
+		# was not checked (audit, 2026-09-25). No Laravel app needs it.
+		-Refresh
 	}
 	log {
 		output file /var/log/caddy/%s.log
@@ -1024,24 +1053,32 @@ const secretPath = `(?i)(\.(env|sql|sqlite|sqlite3|db|log|bak|old|orig|swp|save|
 //
 // A plain link on a page cannot be stopped here - no browser policy covers
 // navigation - so those are the scanner's job.
-var (
-	blockedDownloadTypes = []string{
-		"application/x-msdownload*", "application/x-msdos-program*", "application/x-msi*",
-		"application/vnd.android.package-archive*", "application/x-apple-diskimage*", "application/java-archive*",
-		"application/x-executable*", "application/x-sh*", "application/zip*", "application/x-zip-compressed*",
-		"application/x-rar-compressed*", "application/vnd.rar*", "application/x-7z-compressed*",
-	}
-	blockedDownloadNames = []string{
-		"*.exe*", "*.msi*", "*.apk*", "*.dmg*", "*.scr*", "*.bat*", "*.cmd*", "*.ps1*",
-		"*.vbs*", "*.jar*", "*.zip*", "*.rar*", "*.7z*",
-	}
-	// Where a site may send its visitors besides itself: payment and sign-in.
-	redirectAllowHosts = []string{
-		`checkout\.stripe\.com`, `billing\.stripe\.com`, `connect\.stripe\.com`,
-		`(www\.)?paypal\.com`, `www\.sandbox\.paypal\.com`, `[a-z0-9-]+\.lemonsqueezy\.com`,
-		`accounts\.google\.com`, `appleid\.apple\.com`,
-	}
+// Every rule is a case-insensitive RE2 regexp, used as is by Caddy's CEL
+// matches() and by the Go tests. Lists of Caddy header values were
+// case-sensitive and exact: "setup.EXE", "Application/X-MSDownload",
+// filename*=UTF-8”setup%2Eexe and a dozen unlisted types walked past them
+// (the second security audit, 2026-09-25, reproduced each one live).
+const (
+	// A program, installer, disk image or archive, by Content-Type.
+	downloadTypeRE = `(?i)^\s*application/(x-msdownload|x-msdos-program|x-msi|x-ms-installer|vnd\.microsoft\.portable-executable|x-dosexec|x-executable|x-elf|x-sh|x-shellscript|x-bat|x-msdos-windows|vnd\.android\.package-archive|x-apple-diskimage|java-archive|x-java-archive|x-iso9660-image|x-raw-disk-image|x-cd-image|zip|x-zip|x-zip-compressed|x-rar|x-rar-compressed|vnd\.rar|x-7z-compressed|gzip|x-gzip|x-tar|x-gtar|x-xz|x-bzip2|x-compress|vnd\.ms-cab-compressed|hta|x-silverlight|vnd\.debian\.binary-package|x-debian-package|x-rpm|x-redhat-package-manager|msix|appx|x-msix|x-appx|vnd\.ms-appx|x-ms-shortcut|x-apple-installer|vnd\.apple\.installer\+xml)\s*(;|$)`
+	// The same, by the file name a download is given (filename= or filename*=).
+	downloadNameRE = `(?i)filename\*?\s*=[^;]*?(\.|%2e)(exe|msi|msix|msixbundle|appx|appxbundle|apk|xapk|aab|dmg|pkg|mpkg|scr|pif|cpl|bat|cmd|ps1|psm1|vbs|vbe|js|jse|wsf|wsh|hta|lnk|jar|reg|iso|img|vhd|vhdx|cab|zip|rar|7z|gz|tgz|tar|xz|bz2|deb|rpm|appimage|sh|run|bin|elf|dll|sys|msp|mst|application|gadget|inf|chm|url)\b`
+	// The same, by the path requested: files in public/ are served by Apache
+	// with whatever type it guesses, often application/octet-stream. Not
+	// .js (sites need it) and not .com (an address in a path ends with it).
+	execPathRE = `(?i)\.(exe|msi|msix|msixbundle|appx|appxbundle|apk|xapk|aab|dmg|pkg|mpkg|scr|pif|cpl|bat|cmd|ps1|psm1|vbs|vbe|jse|wsf|wsh|hta|lnk|jar|reg|iso|img|vhd|vhdx|cab|zip|rar|7z|gz|tgz|tar|xz|bz2|deb|rpm|appimage|dll|msp|mst|application|gadget|chm)$`
 )
+
+// Where a site may send its visitors besides itself: payment and sign-in.
+// Lemon Squeezy only to a checkout: anyone can open a store under
+// lemonsqueezy.com, so the bare subdomain was a redirect to anywhere.
+var redirectAllowHosts = []string{
+	`checkout\.stripe\.com`, `billing\.stripe\.com`, `connect\.stripe\.com`,
+	`(www\.)?paypal\.com`, `www\.sandbox\.paypal\.com`,
+	`accounts\.google\.com`, `appleid\.apple\.com`,
+}
+
+const lemonSqueezyCheckout = `https://[a-z0-9-]+\.lemonsqueezy\.com/(checkout|buy)/`
 
 const (
 	blockedDownloadMsg = "codeinchrome does not serve program or archive downloads from free sites."
@@ -1051,19 +1088,32 @@ const (
 // celString is s as a CEL string literal, for a Caddy expression matcher.
 func celString(s string) string { return `"` + strings.ReplaceAll(s, `\`, `\\`) + `"` }
 
-// guardAbuseMatchers defines @cic_redirect_ok: a Location that stays on this
-// site (relative, or one of its own names) or goes to an allowed provider.
+// guardAbuseMatchers defines what appProxy refuses: @cic_download (a program
+// or archive, by type or by name) and @cic_redirect_bad (a Location that
+// leaves this site for anywhere but an allowed provider).
 func guardAbuseMatchers(cfg Config, s Site) string {
-	abs, scheme, double := redirectRules(cfg, s)
-	return fmt.Sprintf("\t@cic_redirect_ok expression `{rp.header.Location}.matches(%s) || (!{rp.header.Location}.matches(%s) && !{rp.header.Location}.matches(%s))`\n",
-		celString(abs), celString(scheme), celString(double))
+	abs, scheme, double, ctrl, multi := redirectRules(cfg, s)
+	// A header the response does not carry is null to CEL, and matches() on
+	// null is an error ("no such overload") that Caddy answers with a 502 -
+	// which took two sites down on a host for three minutes (2026-09-25). So
+	// every header is tested for null first.
+	has := func(h, re string) string { return fmt.Sprintf("(%s != null && %s.matches(%s))", h, h, celString(re)) }
+	loc := "{rp.header.Location}"
+	ok := fmt.Sprintf("(%s || (!%s && !%s))", has(loc, abs), has(loc, scheme), has(loc, double))
+	return fmt.Sprintf("\t@cic_download expression `%s || %s`\n",
+		has("{rp.header.Content-Type}", downloadTypeRE), has("{rp.header.Content-Disposition}", downloadNameRE)) +
+		fmt.Sprintf("\t@cic_redirect_bad expression `%s != null && (!%s || %s || %s)`\n",
+			loc, ok, has(loc, ctrl), has(loc, multi))
 }
 
 // redirectRules: a Location is allowed when it matches abs (an absolute URL
 // to this site or an allowed provider), or when it matches neither scheme (it
 // has none) nor double (it does not start "//" or "/\", which browsers read as
-// another host). RE2, as Caddy's CEL matches() is: the Go tests use them as is.
-func redirectRules(cfg Config, s Site) (abs, scheme, double string) {
+// another host) - and, either way, when it matches neither ctrl (a control
+// character anywhere: browsers drop tabs and newlines, so "/<TAB>/evil" and
+// "ht<TAB>tps://evil" were both offsite) nor multi (several Location headers
+// arrive joined by a comma; the second one was never checked).
+func redirectRules(cfg Config, s Site) (abs, scheme, double, ctrl, multi string) {
 	hosts := append([]string{}, redirectAllowHosts...)
 	for _, name := range append([]string{s.Domain}, s.Aliases...) {
 		hosts = append(hosts, `(www\.)?`+regexp.QuoteMeta(strings.ToLower(name)))
@@ -1071,43 +1121,34 @@ func redirectRules(cfg Config, s Site) (abs, scheme, double string) {
 	if cfg.PlatformDomain != "" {
 		hosts = append(hosts, regexp.QuoteMeta("app."+cfg.PlatformDomain))
 	}
-	abs = `(?i)^[\x00-\x20]*https?://(` + strings.Join(hosts, "|") + `)(:[0-9]+)?([/?#]|$)`
+	abs = `(?i)^[\x00-\x20]*(https?://(` + strings.Join(hosts, "|") + `)(:[0-9]+)?([/?#]|$)|` + lemonSqueezyCheckout + `)`
 	scheme = `(?i)^[\x00-\x20]*[a-z][a-z0-9+.-]*:`
 	double = `^[\x00-\x20]*[/\\][/\\]`
-	return abs, scheme, double
+	ctrl = `[\x00-\x1f\x7f]`
+	multi = `,\s*([a-zA-Z][a-zA-Z0-9+.-]*:|[/\\]{2})`
+	return abs, scheme, double, ctrl, multi
 }
 
-// appProxy is the reverse_proxy to the site's app, with its responses checked.
+// appProxy is the reverse_proxy to the site's app, with every response
+// checked. One handle_response for all of them: Caddy's response matchers
+// compare header values exactly, so the checks are CEL expressions
+// (guardAbuseMatchers), evaluated here with the response's headers.
 func appProxy(port, indent string) string {
 	var b strings.Builder
 	w := func(depth int, line string) { b.WriteString(indent + strings.Repeat("\t", depth) + line + "\n") }
 	w(0, "reverse_proxy 127.0.0.1:"+port+" {")
-	w(1, "@cic_download_type {")
-	for _, t := range blockedDownloadTypes {
-		w(2, "header Content-Type "+t)
-	}
-	w(1, "}")
-	w(1, "handle_response @cic_download_type {")
-	w(2, fmt.Sprintf("respond %q 403", blockedDownloadMsg))
-	w(1, "}")
-	w(1, "@cic_download_name {")
-	for _, n := range blockedDownloadNames {
-		w(2, "header Content-Disposition "+n)
-	}
-	w(1, "}")
-	w(1, "handle_response @cic_download_name {")
-	w(2, fmt.Sprintf("respond %q 403", blockedDownloadMsg))
-	w(1, "}")
-	w(1, "@cic_redirect header Location *")
-	w(1, "handle_response @cic_redirect {")
-	w(2, "handle @cic_redirect_ok {")
+	w(1, "handle_response {")
+	w(2, "handle @cic_download {")
+	w(3, fmt.Sprintf("respond %q 403", blockedDownloadMsg))
+	w(2, "}")
+	w(2, "handle @cic_redirect_bad {")
+	w(3, fmt.Sprintf("respond %q 403", blockedRedirectMsg))
+	w(2, "}")
+	w(2, "handle {")
 	// copy_response alone: the headers are already on the response here, and
 	// copy_response_headers sent every one of them twice - Location and
 	// Set-Cookie included (found on production by the link scanner).
 	w(3, "copy_response")
-	w(2, "}")
-	w(2, "handle {")
-	w(3, fmt.Sprintf("respond %q 403", blockedRedirectMsg))
 	w(2, "}")
 	w(1, "}")
 	w(0, "}")
@@ -1150,6 +1191,15 @@ func guardSecrets(route string) string {
 	b.WriteString("\t\trespond @cic_secret_name 404\n")
 	b.WriteString("\t\t@cic_secret_dot {\n\t\t\tpath_regexp cic_secret_dot `" + secretDot + "`\n\t\t\tnot path /.well-known/*\n\t\t}\n")
 	b.WriteString("\t\trespond @cic_secret_dot 404\n")
+	// Programs and archives by path, whatever type Apache serves them with
+	// (and /x.php/setup.exe, which Chrome names after the path).
+	b.WriteString("\t\t@cic_exec_path path_regexp cic_exec_path `" + execPathRE + "`\n")
+	b.WriteString(fmt.Sprintf("\t\trespond @cic_exec_path %q 403\n", blockedDownloadMsg))
+	// No Service Workers: a worker answers the site's requests inside the
+	// browser, so its downloads and redirects never pass this edge. Browsers
+	// send this header on every worker script fetch.
+	b.WriteString("\t\t@cic_worker header Service-Worker script\n")
+	b.WriteString("\t\trespond @cic_worker \"codeinchrome does not allow service workers on free sites.\" 403\n")
 	for _, line := range strings.Split(strings.TrimRight(route, "\n"), "\n") {
 		b.WriteString("\t" + line + "\n")
 	}

@@ -95,9 +95,9 @@ class LinkScanner
                     $review[] = "links through a URL shortener, which hides where it goes: $target (on $url)";
                 } elseif (filter_var($host, FILTER_VALIDATE_IP)) {
                     $review[] = "links to a bare IP address: $target (on $url)";
-                } elseif ($kind === 'form' && ! $this->allowed($host)) {
+                } elseif ($kind === 'form' && ! $this->allowed($host, $path)) {
                     $review[] = "a form posts what is typed to another site: $host (on $url)";
-                } elseif ($kind === 'refresh' && ! $this->allowed($host)) {
+                } elseif ($kind === 'refresh' && ! $this->allowed($host, $path)) {
                     $review[] = "sends visitors on to another site: $target (on $url)";
                 }
             }
@@ -124,9 +124,15 @@ class LinkScanner
         return ['ban' => array_values(array_unique($ban)), 'review' => array_values(array_unique($review)), 'pages' => $pages];
     }
 
-    private function allowed(string $host): bool
+    /**
+     * Payment and sign-in providers. Lemon Squeezy only at a checkout: anyone
+     * can open a store under lemonsqueezy.com (the audit, 2026-09-25; the
+     * edge applies the same rule, agent create.go lemonSqueezyCheckout).
+     */
+    private function allowed(string $host, string $path): bool
     {
-        return in_array($host, self::ALLOWED_HOSTS, true) || str_ends_with($host, '.lemonsqueezy.com');
+        return in_array($host, self::ALLOWED_HOSTS, true)
+            || (str_ends_with($host, '.lemonsqueezy.com') && preg_match('#^/(checkout|buy)/#', $path) === 1);
     }
 
     /** @return list<array{0: string, 1: string}> [kind, absolute url] for links, forms and meta refreshes */

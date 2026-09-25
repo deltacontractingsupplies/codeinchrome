@@ -278,9 +278,10 @@ twice is harmless (unique test values, and delete what they create).
 - **Email goes through an API, never SMTP.** Mail ports are closed to sites. Use a
   provider's HTTPS API with Laravel's own driver (Resend: `MAIL_MAILER=resend` with
   `resend/resend-php`; Postmark: `MAIL_MAILER=postmark`), its key in `.env`.
-- **No redirect to another site** except payment and sign-in (Stripe, PayPal, Lemon
-  Squeezy, Google, Apple): the platform refuses any other offsite redirect (403). Link
-  instead, and keep the visitor on the site.
+- **No redirect to another site** except payment and sign-in (Stripe, PayPal, a Lemon
+  Squeezy checkout, Google, Apple): the platform refuses any other offsite redirect (403),
+  and removes `Refresh` headers. Link instead, and keep the visitor on the site.
+- **No Service Workers** on free sites: the worker script request is refused (403).
 - **No program or archive downloads** (exe, apk, dmg, zip, ...) from free sites, and no
   links to them: refused at the edge, and a link to one bans the account.
 - **Nothing runs in the background** on a site without a queue, scheduler or Reverb:

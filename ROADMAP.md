@@ -43,10 +43,10 @@ code and production; none was refuted. Full evidence and proposed fixes are
 in the audit's journal; each item below is fixed, tested and verified live
 before it is ticked.
 
-- [ ] **A1 [high]** Offsite redirect passes the edge when the Location contains a TAB ("/<TAB>/evil", "ht<TAB>tps://evil", "\<TAB>\evil")
-- [ ] **A2 [high]** Refresh response header is not checked, so a free site can send visitors to any site
-- [ ] **A3 [high]** The download guard is bypassed by letter case, RFC 5987 filename*, bare attachment with octet-stream, and unlisted executable MIME types
-- [ ] **A4 [high]** Static files in public/ with executable or container extensions not on the list are served (.scr, .iso, .hta, .cab, .gz, .deb, .lnk, .img, .vhd, .msix, .appx, .xapk)
+- [x] **A1 [high]** Offsite redirect passes the edge when the Location contains a TAB ("/<TAB>/evil", "ht<TAB>tps://evil", "\<TAB>\evil") - FIXED 2026-09-25: a control character anywhere in Location is refused (agent 0.30.1); reproduced blocked live.
+- [x] **A2 [high]** Refresh response header is not checked, so a free site can send visitors to any site - FIXED at the edge 2026-09-25: Refresh headers are removed (0.30.1); verified live (no refresh header reaches the visitor).
+- [x] **A3 [high]** The download guard is bypassed by letter case, RFC 5987 filename*, bare attachment with octet-stream, and unlisted executable MIME types - FIXED 2026-09-25: one case-insensitive CEL check of Content-Type and Content-Disposition (filename*= too), wider type/extension lists; verified live.
+- [x] **A4 [high]** Static files in public/ with executable or container extensions not on the list are served (.scr, .iso, .hta, .cab, .gz, .deb, .lnk, .img, .vhd, .msix, .appx, .xapk) - FIXED 2026-09-25: program/archive extensions refused by path before the app (incl. /x.php/setup.exe); verified live.
 - [ ] **A5 [high]** Phishing detection can be evaded (only pages linked from the home page, a published User-Agent, server HTML only) and never pauses a site (review email only)
 - [ ] **A6 [high]** No Safe Browsing or threat-feed monitoring of hosted sites, although sites share codeinchrome.com with the dashboard
 - [ ] **A7 [high]** Customer sites are not on a separate Public Suffix List domain (owner-deferred item, re-raised)
@@ -59,7 +59,7 @@ before it is ticked.
 - [ ] **A14 [high]** The egress watch counts only distinct hosts and ports in a conntrack snapshot, so SSH brute force, single-target floods or credential stuffing, and RST-answered port scans go unnoticed
 - [ ] **A15 [high]** The phishing/link scanner can be cloaked (fixed User-Agent, control-host source) and never sees unlinked or JS-rendered pages, yet Explore trusts its result
 - [x] **A16 [high]** The control host h2 answers on 80/443 to the whole internet: an old iptables snapshot, restored at boot, undid the Cloudflare-only firewall, and the deploy check still reports the ports as closed - FIXED 2026-09-25 (#21): the snapshot and unit retired, ufw rebuilt, and the deploy now checks the live ruleset and a direct request from outside.
-- [ ] **A17 [medium]** No CSP or Service-Worker restriction at the edge: page scripts can register a Service Worker and make blob: downloads that never pass through Caddy
+- [ ] **A17 [medium]** No CSP or Service-Worker restriction at the edge: page scripts can register a Service Worker and make blob: downloads that never pass through Caddy - PART DONE 2026-09-25: Service Worker registration refused at the edge (verified live); blob: downloads by page script remain (a sandbox CSP would also block legitimate downloads - owner decision).
 - [ ] **A18 [medium]** The link scanner is blind to JS navigation and iframes, uses a self-identifying User-Agent from the control host, only reviews offsite meta refreshes, and checks only the path extension
 - [ ] **A19 [medium]** A banned person can come straight back: no network/device link between accounts, no daily sign-up cap, Turnstile off
 - [ ] **A20 [medium]** No per-site outbound bandwidth cap or byte-volume watch
@@ -77,8 +77,8 @@ before it is ticked.
 - [ ] **A32 [medium]** Customer apps see every visitor as the Docker gateway address, so per-IP limits and bans cannot tell visitors apart
 - [ ] **A33 [medium]** Authenticated Origin Pulls are off: the Cloudflare-ranges allowlist admits any Cloudflare customer's proxy or Worker, and h2's IP is published in DNS
 - [ ] **A34 [medium]** Docker CE, containerd.io (which includes runc), Caddy and the ondrej PHP packages are never auto-updated
-- [ ] **A35 [low]** Wildcard *.lemonsqueezy.com lets any self-made Lemon Squeezy store be a redirect target
-- [ ] **A36 [low]** Several Location headers are joined before the check, so an offsite one after a relative one passes the edge
+- [x] **A35 [low]** Wildcard *.lemonsqueezy.com lets any self-made Lemon Squeezy store be a redirect target - FIXED 2026-09-25: Lemon Squeezy only at /checkout/ or /buy/, at the edge and in LinkScanner; verified live.
+- [x] **A36 [low]** Several Location headers are joined before the check, so an offsite one after a relative one passes the edge - FIXED 2026-09-25: several joined Location values with an offsite one are refused; verified live.
 - [ ] **A37 [low]** The mining check resets on any 5-minute reading under 90% CPU, so a throttled miner is never paused
 - [ ] **A38 [low]** Scans read only the first 2 MiB (scheduled) or 32 MiB (unzip) of a PHP file, and clamd reports content past 100 MB as clean
 - [ ] **A39 [low]** A clamd failure skips the rules walk in ScanSite, and repeated scan failures alert nobody

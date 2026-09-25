@@ -178,8 +178,9 @@ func TestEveryAppResponseIsCheckedForDownloadsAndOffsiteRedirects(t *testing.T) 
 		{ID: "chat", Domain: "chat.codeinchrome.com", Reverb: true, WSPort: 21001},
 	} {
 		out := caddyConfig(cfg, s, "20001")
-		for _, want := range []string{"@cic_redirect_ok expression", "handle_response @cic_download_type", "handle_response @cic_download_name",
-			"header Content-Type application/x-msdownload*", "header Content-Disposition *.exe*", "handle_response @cic_redirect", "copy_response"} {
+		for _, want := range []string{"@cic_download expression", "@cic_redirect_bad expression", "handle_response {",
+			"handle @cic_download {", "handle @cic_redirect_bad {", "copy_response", "@cic_exec_path path_regexp",
+			"@cic_worker header Service-Worker script", "-Refresh"} {
 			if !strings.Contains(out, want) {
 				t.Errorf("%s: missing %q:\n%s", s.ID, want, out)
 			}
@@ -187,12 +188,9 @@ func TestEveryAppResponseIsCheckedForDownloadsAndOffsiteRedirects(t *testing.T) 
 		if strings.Contains(out, "copy_response_headers") {
 			t.Errorf("%s: copy_response_headers doubles every header of an allowed redirect", s.ID)
 		}
-		// One value per line: Caddy's response header matcher silently ignored
-		// the rest of a line with several (found testing on a host).
-		for _, line := range strings.Split(out, "\n") {
-			if f := strings.Fields(line); len(f) > 3 && f[0] == "header" && (f[1] == "Content-Type" || f[1] == "Content-Disposition") {
-				t.Errorf("several values on one matcher line: %q", line)
-			}
+		// The path and worker refusals run before the app is asked.
+		if i, j := strings.Index(out, "@cic_exec_path"), strings.Index(out, "reverse_proxy 127.0.0.1:20001"); i < 0 || j < 0 || i > j {
+			t.Errorf("%s: the path refusal must come before the proxy", s.ID)
 		}
 	}
 	if out := caddyConfig(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com", Suspended: true}, "20001"); strings.Contains(out, "reverse_proxy") {
@@ -202,15 +200,22 @@ func TestEveryAppResponseIsCheckedForDownloadsAndOffsiteRedirects(t *testing.T) 
 
 func TestOnlyRedirectsToThisSiteOrAPaymentOrSignInProviderPass(t *testing.T) {
 	cfg := Config{PlatformDomain: "codeinchrome.com"}
-	abs, scheme, double := redirectRules(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com", Aliases: []string{"myshop.example"}})
-	a, sc, d := regexp.MustCompile(abs), regexp.MustCompile(scheme), regexp.MustCompile(double)
-	allowed := func(loc string) bool { return a.MatchString(loc) || (!sc.MatchString(loc) && !d.MatchString(loc)) }
+	abs, scheme, double, ctrl, multi := redirectRules(cfg, Site{ID: "shop", Domain: "shop.codeinchrome.com", Aliases: []string{"myshop.example"}})
+	a, sc, d, c, m := regexp.MustCompile(abs), regexp.MustCompile(scheme), regexp.MustCompile(double), regexp.MustCompile(ctrl), regexp.MustCompile(multi)
+	allowed := func(loc string) bool {
+		return (a.MatchString(loc) || (!sc.MatchString(loc) && !d.MatchString(loc))) && !c.MatchString(loc) && !m.MatchString(loc)
+	}
 	for loc, want := range map[string]bool{
 		"/login": true, "login": true, "?page=2": true, "#top": true, "../up": true, "/login?next=https://evil.example": true,
 		"https://shop.codeinchrome.com/cart": true, "https://SHOP.codeinchrome.com": true, "https://www.myshop.example/": true,
 		"https://myshop.example:8443/x": true, "https://checkout.stripe.com/c/pay/cs_1": true, "https://www.paypal.com/checkoutnow": true,
 		"https://accounts.google.com/o/oauth2/auth": true, "https://appleid.apple.com/auth/authorize": true,
-		"https://app.codeinchrome.com/login": true, "https://store.lemonsqueezy.com/checkout": true,
+		"https://app.codeinchrome.com/login": true, "https://store.lemonsqueezy.com/checkout/buy/0f1e": true,
+		"https://store.lemonsqueezy.com/buy/0f1e": true, "/search?q=a,b": true, "/login?next=/cart,/x": true,
+		// Found by the audit, 2026-09-25: each was served, and followed by Chrome.
+		"/\t/evil.example": false, "ht\ttps://evil.example": false, "\\\t\\evil.example": false, "/\n/evil.example": false,
+		"https://checkout.stripe.com\t.evil.example": false, "/ok, https://evil.example/get": false, "/ok,//evil.example": false,
+		"https://anything-attacker.lemonsqueezy.com/": false, "https://store.lemonsqueezy.com/checkout": false,
 		"https://virusdownloadauto.example/get": false, "http://evil.example": false, "//evil.example/x": false,
 		"/\\evil.example": false, "\\\\evil.example": false, " //evil.example": false, "\t//evil.example": false,
 		"javascript:alert(1)": false, "JaVaScRiPt:alert(1)": false, "data:text/html,x": false,
@@ -232,5 +237,47 @@ func TestANewFreeSiteCanBeKeptOutOfSearchEngines(t *testing.T) {
 	}
 	if shown := caddyConfig(cfg, Site{ID: "old", Domain: "old.codeinchrome.com"}, "20001"); strings.Contains(shown, "X-Robots-Tag") {
 		t.Errorf("an ordinary site must be indexable:\n%s", shown)
+	}
+}
+
+// The download rules, as Caddy evaluates them (RE2, case-insensitive).
+func TestProgramAndArchiveDownloadsAreRefusedWhateverTheCaseOrForm(t *testing.T) {
+	ct, cd := regexp.MustCompile(downloadTypeRE), regexp.MustCompile(downloadNameRE)
+	for v, want := range map[string]bool{
+		"application/x-msdownload": true, "Application/X-MSDownload": true, "application/vnd.microsoft.portable-executable": true,
+		"application/x-dosexec": true, "application/x-iso9660-image": true, "application/gzip": true, "application/zip; charset=binary": true,
+		"application/vnd.debian.binary-package": true, "application/hta": true, "application/x-silverlight": true,
+		"text/html; charset=UTF-8": false, "application/json": false, "text/csv": false, "application/pdf": false,
+		"image/png": false, "application/zipper": false, "application/octet-stream": false,
+	} {
+		if got := ct.MatchString(v); got != want {
+			t.Errorf("Content-Type %q: refused=%v, want %v", v, got, want)
+		}
+	}
+	for v, want := range map[string]bool{
+		`attachment; filename="setup.exe"`: true, `attachment; filename="setup.EXE"`: true, `attachment; filename*=UTF-8''setup%2Eexe`: true,
+		`attachment; filename=a.iso`: true, `attachment; filename="a.hta"`: true, `attachment; filename="a.lnk"`: true,
+		`attachment; filename="a.js"`: true, `inline; filename="tool.apk"`: true, `attachment; filename="backup.tar.gz"`: true,
+		`attachment; filename="report.csv"`: false, `attachment; filename="invoice.pdf"`: false, `attachment; filename="exercise.pdf"`: false,
+		`inline`: false, `attachment`: false,
+	} {
+		if got := cd.MatchString(v); got != want {
+			t.Errorf("Content-Disposition %q: refused=%v, want %v", v, got, want)
+		}
+	}
+}
+
+func TestProgramFilesAreRefusedByPathButScriptsAndPagesAreNot(t *testing.T) {
+	p := regexp.MustCompile(execPathRE)
+	for path, want := range map[string]bool{
+		"/setup.exe": true, "/SETUP.EXE": true, "/files/a.scr": true, "/a.iso": true, "/a.hta": true, "/a.lnk": true,
+		"/a.cab": true, "/a.tgz": true, "/a.deb": true, "/a.img": true, "/a.vhd": true, "/a.msix": true, "/a.appx": true,
+		"/a.xapk": true, "/x.php/setup.exe": true, "/app.apk": true,
+		"/js/app.js": false, "/css/app.css": false, "/": false, "/products/merino-crew": false, "/users/ada@example.com": false,
+		"/build/app.exe.map": false, "/img/logo.png": false, "/export.csv": false,
+	} {
+		if got := p.MatchString(path); got != want {
+			t.Errorf("%q: refused=%v, want %v", path, got, want)
+		}
 	}
 }
