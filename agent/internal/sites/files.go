@@ -373,6 +373,10 @@ func (m *Manager) checkWrite(id, rel, content, expect string) (root, relAbs stri
 	// can replace a folder with a symlink between the two, and the agent is
 	// root.
 	relAbs = strings.TrimPrefix(abs, root)
+	// The site's own secrets never go where the world can read them.
+	if err := publishesSecret(root, relAbs, []byte(content)); err != nil {
+		return "", "", err
+	}
 
 	var current []byte
 	exists := false

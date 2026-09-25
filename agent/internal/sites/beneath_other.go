@@ -153,3 +153,38 @@ func removeBeneath(root, rel string) error {
 	}
 	return os.Remove(p)
 }
+
+// removeAllBeneath: the checked-by-path fallback of the Linux version (the
+// hosts run that one): no parent may be a link, and the target is deleted
+// without following one.
+func removeAllBeneath(root, rel string) error {
+	if len(strings.Trim(filepath.ToSlash(filepath.Clean("/"+rel)), "/")) == 0 {
+		return fmt.Errorf("refusing to delete the site root")
+	}
+	if err := plainParents(root, rel); err != nil {
+		return err
+	}
+	return os.RemoveAll(filepath.Join(root, filepath.Clean("/"+rel)))
+}
+
+// removeEmptyDirBeneath: rmdir, never through a link.
+func removeEmptyDirBeneath(root, rel string) error {
+	if len(strings.Trim(filepath.ToSlash(filepath.Clean("/"+rel)), "/")) == 0 {
+		return fmt.Errorf("refusing to delete the site root")
+	}
+	if err := plainParents(root, rel); err != nil {
+		return err
+	}
+	p := filepath.Join(root, filepath.Clean("/"+rel))
+	info, err := os.Lstat(p)
+	if err != nil {
+		return fmt.Errorf("no such folder")
+	}
+	if !info.IsDir() {
+		return fmt.Errorf("that is not a folder")
+	}
+	if err := syscall.Rmdir(p); err != nil {
+		return fmt.Errorf("the folder is not empty")
+	}
+	return nil
+}

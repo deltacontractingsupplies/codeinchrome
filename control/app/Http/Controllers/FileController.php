@@ -216,6 +216,25 @@ class FileController extends Controller
                     'hint' => ($e->detail['hint'] ?? 'Malware refused.').' '.\App\Http\Middleware\BannedAccount::MESSAGE], 403);
             }
 
+            if ($error === 'malware_in_clone' && $this->site) {
+                // A public repository with malware in it: nothing was kept, and
+                // it is not the customer's own code - a person looks, no ban.
+                // But not a free way to test payloads against the scanner: the
+                // third in a day is treated like any malware (security review
+                // of 2026-09-25).
+                $owner = $this->site->user;
+                \App\Audit\Audit::record('abuse.clone_malware', $owner, $this->site, detail: ['hint' => mb_substr((string) ($e->detail['hint'] ?? ''), 0, 300)]);
+                $recent = \App\Models\AuditEvent::where('account_id', $owner?->id)->where('action', 'abuse.clone_malware')
+                    ->where('created_at', '>=', now()->subDay())->count();
+                if ($owner && $recent >= 3) {
+                    app(\App\Abuse\Enforcer::class)->ban($owner, "Cloned repositories with malware $recent times in a day.");
+
+                    return response()->json(['ok' => false, 'error' => 'malware',
+                        'hint' => ($e->detail['hint'] ?? 'Malware refused.').' '.\App\Http\Middleware\BannedAccount::MESSAGE], 403);
+                }
+                app(\App\Abuse\Enforcer::class)->review($this->site, 'git clone refused: '.($e->detail['hint'] ?? 'malware in a repository'));
+            }
+
             return response()->json([
                 'ok' => false,
                 'error' => $error,

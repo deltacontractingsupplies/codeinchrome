@@ -340,6 +340,10 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 				refusedMalware(w, bad)
 				return
 			}
+			if err := mgr.UnpublishSecretsSince(r.PathValue("id"), started); err != nil {
+				writeJSON(w, http.StatusUnprocessableEntity, fail("publishes_secret", err.Error()))
+				return
+			}
 		}
 		if errors.Is(err, sites.ErrBusy) {
 			writeJSON(w, http.StatusConflict, fail("busy", "Another command is running on this site; try again in a moment."))
@@ -447,6 +451,14 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		return mgr.Unzip(r.Context(), r.PathValue("id"), a, b)
 	}))
 	mux.HandleFunc("DELETE /v1/sites/{id}/tree", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("empty") == "1" {
+			if err := mgr.RemoveEmptyDir(r.Context(), r.PathValue("id"), r.URL.Query().Get("path")); err != nil {
+				writeJSON(w, http.StatusBadRequest, fail("cannot_delete", err.Error()))
+				return
+			}
+			writeJSON(w, http.StatusOK, ok(resp{"deleted": true}))
+			return
+		}
 		err := mgr.DeleteTree(r.Context(), r.PathValue("id"), r.URL.Query().Get("path"), r.URL.Query().Get("confirm") == "1")
 		if errors.Is(err, sites.ErrNeedsConfirm) {
 			writeJSON(w, http.StatusConflict, fail("needs_confirm", "Deleting a folder deletes everything in it. Pass confirm=1."))
@@ -549,7 +561,13 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 		res, err := mgr.Clone(r.Context(), r.PathValue("id"), body.Repository, body.Ref, body.Into)
 		if err != nil {
-			if refusedMalware(w, err) {
+			// Someone else's code, and none of it was kept: refused, and
+			// reported for review - not the ban that malware the customer
+			// writes or uploads earns. A prompt injection telling an agent to
+			// clone a poisoned repository must not take the customer down.
+			if bad, is := sites.IsMalware(err); is {
+				writeJSON(w, http.StatusUnprocessableEntity, resp{"ok": false, "error": "malware_in_clone", "findings": bad.Findings,
+					"hint": fmt.Sprintf("%s - nothing from %s was kept", bad.Error(), body.Repository)})
 				return
 			}
 			writeJSON(w, http.StatusBadRequest, fail("cannot_clone", err.Error()))
@@ -749,6 +767,10 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			// What the command wrote is held to the same rules as a save.
 			if bad := mgr.ScanChangedSince(r.PathValue("id"), started); bad != nil {
 				refusedMalware(w, bad)
+				return
+			}
+			if err := mgr.UnpublishSecretsSince(r.PathValue("id"), started); err != nil {
+				writeJSON(w, http.StatusUnprocessableEntity, fail("publishes_secret", err.Error()))
 				return
 			}
 		}

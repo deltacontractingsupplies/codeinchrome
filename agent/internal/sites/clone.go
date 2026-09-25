@@ -67,9 +67,21 @@ var archiveClient = &http.Client{
 // archiveBase is where archives are fetched; a test points it at itself.
 var archiveBase = "https://github.com"
 
+// cloneSlots: at most two clones at once on a host - each downloads up to
+// 100 MB on a line every site on it shares.
+var cloneSlots = make(chan struct{}, 2)
+
 // Clone fetches owner/repo at ref (the default branch when empty) into the
 // site folder into, which must not exist yet.
 func (m *Manager) Clone(ctx context.Context, id, repository, ref, into string) (CloneResult, error) {
+	select {
+	case cloneSlots <- struct{}{}:
+		defer func() { <-cloneSlots }()
+	case <-time.After(20 * time.Second):
+		return CloneResult{}, fmt.Errorf("this host is busy with other clones; try again in a minute")
+	case <-ctx.Done():
+		return CloneResult{}, ctx.Err()
+	}
 	start := time.Now()
 	owner, repo, err := ParseRepository(repository)
 	if err != nil {
@@ -151,9 +163,9 @@ func (m *Manager) Clone(ctx context.Context, id, repository, ref, into string) (
 	}
 	files, err := extractZip(ctx, root, zr, dst, prefix)
 	if err != nil {
-		// The folder was made for this clone; RemoveAll never follows a
-		// symlink, even one the site's code swapped in since.
-		_ = os.RemoveAll(dst)
+		// Deleted through directory handles, never by path: the site's code
+		// could have swapped a parent folder for a link while this ran.
+		_ = removeAllBeneath(root, strings.TrimPrefix(dst, root))
 		return CloneResult{}, err
 	}
 	var bytes int64

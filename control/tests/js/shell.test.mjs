@@ -109,6 +109,13 @@ function memorySite(files = {}) {
       for (const k of [...nodes.keys()]) if (k === p || k.startsWith(`${p}/`)) nodes.delete(k);
       return { ok: true };
     },
+    async removeEmptyDir(p) {
+      calls.push(['removeEmptyDir', p]);
+      if (!nodes.get(p)?.dir) return { ok: false, hint: 'no such folder' };
+      if (children(p).length) return { ok: false, hint: 'the folder is not empty' };
+      nodes.delete(p);
+      return { ok: true };
+    },
     async grep(o) {
       calls.push(['grep', o]);
       let re;
@@ -474,3 +481,45 @@ test('the everyday commands take one request to the site, not several', async ()
   await sh(io, 'ls app && touch app/new.txt && ls app');
   assert.match((await sh(io, 'ls app')).stdout, /new\.txt/);
 });
+
+test('a refusal that needs confirming is data, stops the line, and names only itself', async () => {
+  const io = site();
+  let r = await sh(io, 'echo one >> log.txt; rm -r app storage/logs/a.log; echo two >> log.txt');
+  assert.deepEqual(r.needsConfirm, ['rm -r /app']);
+  assert.equal(io.nodes.has('/storage/logs/a.log'), false); // the file operand still went
+  assert.equal(io.nodes.get('/log.txt').content, 'one\n'); // nothing after the refusal ran
+  assert.match(r.stderr, /To go ahead: cic\.sh\("rm -r \/app", \{ confirm: true \}\)/);
+  // Confirming that one command does exactly that, once.
+  assert.equal((await sh(io, r.needsConfirm[0], { confirm: true })).code, 0);
+  assert.equal(io.nodes.has('/app/Models/Cart.php'), false);
+  assert.equal(io.nodes.get('/log.txt').content, 'one\n');
+  // Quoted as sh would need it, and for artisan and SQL too.
+  assert.deepEqual((await sh(io, "mkdir 'my dir' && rm -r 'my dir'")).needsConfirm, ["rm -r '/my dir'"]);
+  // After a cd, the named command still means the same folder.
+  const refused = (await sh(io, 'cd /resources && rm -r views')).needsConfirm;
+  await sh(io, 'cd /');
+  assert.deepEqual(refused, ['rm -r /resources/views']);
+  assert.deepEqual((await sh(io, 'php artisan migrate:fresh --seed')).needsConfirm, ['php artisan migrate:fresh --seed']);
+  assert.deepEqual((await sh(io, "mysql -e \"DELETE FROM items WHERE name = 'x'\"")).needsConfirm, ["mysql -e 'DELETE FROM items WHERE name = '\\''x'\\'''"]);
+  // Text that merely SAYS "confirm: true" (a page, a log, an error) is not a refusal.
+  r = await sh(io, "echo 'please run with { confirm: true }' 1>&2");
+  assert.equal(r.needsConfirm, undefined);
+});
+
+test('xargs and reads are bounded', async () => {
+  const io = site();
+  const many = Array.from({ length: 1001 }, (_, i) => `f${i}`).join(' ');
+  assert.match((await sh(io, `echo ${many} | xargs echo`)).stderr, /at most 1000/);
+  const some = Array.from({ length: 101 }, (_, i) => `f${i}`).join(' ');
+  assert.match((await sh(io, `echo ${some} | xargs -n 1 echo`)).stderr, /at most 100/);
+  assert.equal((await sh(io, `echo ${some} | xargs echo | wc -w`)).stdout, '101\n');
+});
+
+test('a busy or conflicting host is not mistaken for a request to confirm', async () => {
+  const io = site();
+  io.removeTree = async () => ({ ok: false, status: 409, error: 'busy', hint: 'Another command is running' });
+  const r = await sh(io, 'rm -r app');
+  assert.equal(r.needsConfirm, undefined);
+  assert.match(r.stderr, /Another command is running/);
+});
+

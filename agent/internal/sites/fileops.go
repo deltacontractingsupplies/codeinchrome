@@ -2,6 +2,7 @@ package sites
 
 import (
 	"archive/zip"
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -217,7 +218,7 @@ func copyFileBeneath(root, src, rel string) error {
 // real folder inside the site (never through a link planted since).
 func (m *Manager) removeBeneath(root, abs string) {
 	if info, err := os.Lstat(abs); err == nil && info.IsDir() && strings.HasPrefix(abs, root+string(os.PathSeparator)) {
-		_ = os.RemoveAll(abs)
+		_ = removeAllBeneath(root, strings.TrimPrefix(abs, root))
 	}
 }
 
@@ -253,17 +254,31 @@ func (m *Manager) Upload(ctx context.Context, id, rel string, body io.Reader) er
 	var n int64
 	err = replaceBeneath(root, rel, 0o640, func(f *os.File) error {
 		var cerr error
-		n, cerr = io.Copy(f, io.LimitReader(body, MaxUploadSize+1))
+		// Into public/, a copy of the bytes is kept to check (below).
+		var seen bytes.Buffer
+		src := io.LimitReader(body, MaxUploadSize+1)
+		if underPublic(rel) {
+			src = io.TeeReader(src, &seen)
+		}
+		n, cerr = io.Copy(f, src)
 		if cerr != nil {
 			return fmt.Errorf("upload interrupted")
 		}
 		if n > MaxUploadSize {
 			return fmt.Errorf("the file is larger than %d MB", MaxUploadSize>>20)
 		}
+		// Into public/, checked BEFORE it takes the name: a refused upload is
+		// never served for a moment, and never replaces the file that was there.
+		if underPublic(rel) {
+			if err := publishesSecret(root, rel, seen.Bytes()); err != nil {
+				return err
+			}
+		}
 		return nil
 	})
 	if err != nil {
-		if n > MaxUploadSize || strings.HasPrefix(err.Error(), "upload interrupted") {
+		var pub *ErrPublishesSecret
+		if n > MaxUploadSize || strings.HasPrefix(err.Error(), "upload interrupted") || errors.As(err, &pub) {
 			return err
 		}
 		return fmt.Errorf("cannot write there")
@@ -320,10 +335,29 @@ func (m *Manager) DeleteTree(ctx context.Context, id, rel string, confirm bool) 
 	if abs == root {
 		return fmt.Errorf("refusing to delete the site root")
 	}
-	if err := os.RemoveAll(abs); err != nil {
+	// Never by path: a parent swapped for a link would send it elsewhere.
+	if err := removeAllBeneath(root, strings.TrimPrefix(abs, root)); err != nil {
 		return fmt.Errorf("could not delete everything: %v", err)
 	}
 	m.record(ctx, id, "delete folder "+m.relativeTo(id, abs))
+	return nil
+}
+
+// RemoveEmptyDir is rmdir: no confirm needed, since nothing can be lost -
+// the kernel refuses a folder that is not empty at that moment.
+func (m *Manager) RemoveEmptyDir(ctx context.Context, id, rel string) error {
+	abs, err := m.resolveLink(id, rel)
+	if err != nil {
+		return err
+	}
+	root, _ := m.realRoot(id)
+	if abs == root {
+		return fmt.Errorf("refusing to delete the site root")
+	}
+	if err := removeEmptyDirBeneath(root, strings.TrimPrefix(abs, root)); err != nil {
+		return err
+	}
+	m.record(ctx, id, "delete empty folder "+m.relativeTo(id, abs))
 	return nil
 }
 
@@ -384,6 +418,12 @@ func (m *Manager) Zip(ctx context.Context, id, from, to string) error {
 	root, err := m.realRoot(id)
 	if err != nil {
 		return err
+	}
+	// An archive in public/ would publish whatever it holds - compiled config
+	// and logs carry the site's secret values - and compressed, no content
+	// check could see them. Archives are made anywhere else.
+	if underPublic(strings.TrimPrefix(dst, root)) {
+		return fmt.Errorf("an archive cannot be made in public/: everything there is served to the world")
 	}
 	base := filepath.Dir(src)
 	budget := treeBudget{}
@@ -555,6 +595,15 @@ func extractZip(ctx context.Context, root string, zr *zip.Reader, dstRoot, prefi
 			return 0, err
 		}
 	}
+	// Nothing unpacked into public/ may carry the site's secret values.
+	if underPublic(intoRel) {
+		secrets := siteSecrets(root)
+		for _, rel := range written {
+			if err := publishedSecretIn(root, rel, secrets); err != nil {
+				return 0, err
+			}
+		}
+	}
 	// Every extracted file scanned as one batch: if any is malware or
 	// obfuscated PHP - or the scan cannot run - none of the archive is kept.
 	var scanErr error
@@ -601,7 +650,8 @@ func refuseSecretIntoPublic(root, src, dst string) error {
 	if found {
 		return fmt.Errorf("a .env file cannot go into public/: everything there is served to the world")
 	}
-	return nil
+	// And no file whose contents carry one of the site's secret values.
+	return publishedSecretIn(root, strings.TrimPrefix(src, root), siteSecrets(root))
 }
 
 // isEnvFile: .env, .env.backup, .env.production, production.env, ...

@@ -31,13 +31,13 @@ class FileManagerApiTest extends TestCase
             '127.0.0.1:944*/v1/sites/*/download*' => Http::response($this->png, 200, [
                 'Content-Type' => 'application/octet-stream', 'Content-Disposition' => 'attachment; filename="logo.png"']),
             '127.0.0.1:944*/v1/sites/*/upload*' => fn ($r) => Http::response(['ok' => true, 'bytes' => strlen($r->body())]),
-            '127.0.0.1:944*/v1/sites/*/tree*' => fn ($r) => str_contains($r->url(), 'confirm=1')
+            '127.0.0.1:944*/v1/sites/*/tree*' => fn ($r) => str_contains($r->url(), 'confirm=1') || str_contains($r->url(), 'empty=1')
                 ? Http::response(['ok' => true, 'deleted' => true])
                 : Http::response(['ok' => false, 'error' => 'needs_confirm', 'hint' => 'Pass confirm=1.'], 409),
             '127.0.0.1:944*/v1/sites/*/grep*' => Http::response(['ok' => true, 'hits' => [['path' => '/routes/web.php', 'line' => 3, 'text' => "Route::get('/')"]], 'truncated' => false]),
             '127.0.0.1:944*/v1/sites/*/find*' => Http::response(['ok' => true, 'entries' => [['path' => '/app/Models', 'dir' => true, 'size' => 96, 'mtime' => 1]], 'files' => 12, 'bytes' => 4096, 'truncated' => false]),
             '127.0.0.1:944*/v1/sites/*/clone' => fn ($r) => str_contains($r['repository'], 'kit')
-                ? Http::response(['ok' => false, 'error' => 'malware', 'hint' => 'shell.php: webshell.', 'findings' => [['path' => '/kit/shell.php', 'rule' => 'webshell']]], 400)
+                ? Http::response(['ok' => false, 'error' => 'malware_in_clone', 'hint' => 'refused: shell.php is malware - nothing from acme/kit was kept', 'findings' => [['path' => '/kit/shell.php', 'rule' => 'webshell']]], 422)
                 : Http::response(['ok' => true, 'clone' => ['repository' => 'acme/demo', 'ref' => 'HEAD', 'into' => '/demo', 'files' => 3, 'bytes' => 99, 'ms' => 800]]),
             '127.0.0.1:944*/v1/sites/*/search*' => Http::response(['ok' => true, 'hits' => [['path' => '/routes/web.php', 'line' => 2, 'text' => 'checkout']]]),
             '127.0.0.1:944*/v1/sites/*/files/*' => Http::response(['ok' => true, 'done' => 'x']),
@@ -180,10 +180,15 @@ class FileManagerApiTest extends TestCase
         $as->postJson($this->url('files.clone'), ['repository' => 'acme/demo'])->assertStatus(429);
     }
 
-    public function test_cloning_malware_is_refused_like_any_upload(): void
+    public function test_cloning_malware_is_refused_and_reviewed_but_never_bans(): void
     {
+        // Someone else's code, none of it kept: a prompt injection telling an
+        // agent to clone a poisoned repository must not take the customer down.
         $this->actingAs($this->owner)->postJson($this->url('files.clone'), ['repository' => 'acme/kit'])
-            ->assertStatus(403)->assertJsonPath('error', 'malware');
+            ->assertStatus(422)->assertJsonPath('error', 'malware_in_clone');
+        $this->assertNull($this->owner->fresh()->banned_at);
+        $this->assertSame('live', $this->site->fresh()->status);
+        $this->assertDatabaseHas('audit_events', ['action' => 'abuse.review']);
     }
 
     public function test_git_clone_refuses_someone_elses_site(): void
@@ -191,4 +196,38 @@ class FileManagerApiTest extends TestCase
         $this->actingAs(User::factory()->create())->postJson($this->url('files.clone'), ['repository' => 'acme/demo'])->assertNotFound();
         Http::assertNothingSent();
     }
+
+    public function test_rmdir_asks_the_host_to_remove_only_an_empty_folder(): void
+    {
+        $this->actingAs($this->owner)->deleteJson($this->url('files.tree.destroy', ['path' => '/app/Empty', 'empty' => 1]))->assertOk();
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/v1/sites/shop/tree') && str_contains($r->url(), 'empty=1') && ! str_contains($r->url(), 'confirm=1'));
+    }
+
+    public function test_a_grep_pattern_keeps_its_spaces(): void
+    {
+        $this->actingAs($this->owner)->getJson($this->url('files.grep', ['pattern' => ' foo ']))->assertOk();
+        Http::assertSent(fn ($r) => str_contains($r->url(), 'pattern=%20foo%20'));
+    }
+
+    public function test_reading_and_writing_files_is_bounded_per_user(): void
+    {
+        $routes = app('router')->getRoutes();
+        $this->assertContains('throttle:files', $routes->getByName('files.index')->gatherMiddleware());
+        foreach (['files.store', 'files.batch', 'files.edit', 'files.destroy'] as $name) {
+            $this->assertContains('throttle:file-writes', $routes->getByName($name)->gatherMiddleware(), $name);
+        }
+    }
+
+    public function test_the_third_malware_clone_in_a_day_bans_like_any_malware(): void
+    {
+        $as = $this->actingAs($this->owner);
+        foreach ([1, 2] as $n) {
+            $as->postJson($this->url('files.clone'), ['repository' => "acme/kit$n"])->assertStatus(422);
+            $this->assertNull($this->owner->fresh()->banned_at, "banned after clone $n");
+        }
+        $this->travel(61)->seconds(); // the clone limit is 3 a minute
+        $as->postJson($this->url('files.clone'), ['repository' => 'acme/kit3'])->assertStatus(403)->assertJsonPath('error', 'malware');
+        $this->assertNotNull($this->owner->fresh()->banned_at);
+    }
 }
+

@@ -228,3 +228,15 @@ func TestFindOnAFileCountsIt(t *testing.T) {
 		t.Fatalf("find on a file: %+v, want 1 file of %d bytes", r, info.Size())
 	}
 }
+
+func TestGrepNeverReadsAnyKindOfEnvFile(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	for _, name := range []string{".env", ".env.production", "production.env", "Staging.ENV"} {
+		os.WriteFile(filepath.Join(m.appDir(id), name), []byte("SECRET_VALUE=zzz"), 0o640)
+	}
+	r, err := m.Grep(ctx, id, GrepOptions{Pattern: "SECRET_VALUE"})
+	if err != nil || len(r.Hits) != 0 {
+		t.Fatalf("grep read an env file: %+v %v", r.Hits, err)
+	}
+}
