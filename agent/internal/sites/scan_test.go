@@ -44,7 +44,7 @@ func TestPHPThatHidesWhatItDoesIsNamed(t *testing.T) {
 		`<?php system($_GET['cmd']);`:                                      "request input handed to a shell",
 		`<?php shell_exec( $_REQUEST["x"] );`:                              "request input handed to a shell",
 		`<?php preg_replace('/.*/e', $_POST['c'], '');`:                    "preg_replace /e (runs its replacement as code)",
-		`<?php $f = "\x65\x76\x61\x6c\x28\x24"; $f($c);`:                   "function names spelled in hex escapes",
+		`<?php $f = "\x65\x76\x61\x6c"; $f($c);`:                           "function names spelled in escape sequences",
 		`<?php //0046a` + "\n" + `if(!extension_loaded('ionCube Loader'))`: "a commercial PHP encoder (ionCube, SourceGuardian, Zend Guard)",
 		`<?php sg_load('ABCD');`:                                           "a commercial PHP encoder (ionCube, SourceGuardian, Zend Guard)",
 		`<?php eval('` + strings.Repeat("QUJD", 300) + `');`:               "a large encoded blob run as code",
@@ -63,10 +63,22 @@ func TestPHPThatHidesWhatItDoesIsNamed(t *testing.T) {
 		`<?php preg_replace('/\s+/', ' ', $text);`,
 		`<?php Str::of($x)->replace('a', 'b');`,
 		`<?php $hash = "\x00\x01";`,
+		// False positives the audit found in the old hex rule, and ordinary code near the new rules.
+		`<?php return str_starts_with($b, "\x89\x50\x4E\x47\x0D\x0A\x1A\x0A");`,
+		`<?php $s = str_replace("\xE2\x80\x8B\xE2\x80\x8C", '', $s);`,
+		`<?php return $next($request);`,
+		`<?php $callback = $this->resolver; return $callback($value);`,
+		`<?php $this->assertTrue($ok); Assert::that($x);`,
+		`<?php $evaluation = $model->evaluate(); $interval = 5;`,
+		`<?php $name = 'system_setting'; $m = 'execute';`,
+		`<?php Storage::put('reports/'.$id.'.csv', $csv);`,
+		`<?php array_map(fn ($x) => $x * 2, $items);`,
+		`<?php $sum = array_sum(array_map('intval', $values));`,
+		`<?php $role = $request->input('role'); return view('x', ['role' => $role]);`,
 		`<?php // decode the webhook: json_decode(base64_decode($payload))`,
 	} {
 		if got := phpObfuscation(code); got != "" {
-			t.Errorf("normal code flagged (%s): %.60q", got, code)
+			t.Errorf("normal code flagged (%s): %.70q", got, code)
 		}
 	}
 }
@@ -174,5 +186,39 @@ func TestASiteScanNamesMalwareAndObfuscationButNotVendor(t *testing.T) {
 	}
 	if _, bad := got["/vendor/pkg/Loader.php"]; bad {
 		t.Errorf("vendor/ is ClamAV's, not the PHP rules': %v", found)
+	}
+}
+
+// Every bypass the second security audit (2026-09-25) found: 17 webshell
+// forms none of the old rules caught.
+func TestTheAuditsWebshellVariantsAreAllCaught(t *testing.T) {
+	for _, code := range []string{
+		`<?php create_function('', $_POST['c']);`,
+		`<?php $f=$_GET['x'];$f($_GET['y']);`,
+		`<?php $_GET['a']($_GET['b']);`,
+		`<?php $f = chr(115).chr(121).chr(115).chr(116).chr(101).chr(109); $f($x);`,
+		`<?php $f = "\163\171\163\164\145\155"; $f($x);`,
+		"<?php echo `$_GET[c]`;",
+		`<?php $c=$_GET['c'];system($c);`,
+		`<?php $a='ba'.'se64_decode';eval($a($_POST['x']));`,
+		`<?php $a='ba'.'se64_decode'; $b = $a($p);`,
+		`<?php eval/**/(base64_decode($x));`,
+		`<?php $x=base64_decode($p);eval($x);`,
+		`<?php eval("?>".base64_decode($p));`,
+		`<?php include $_GET['p'];`,
+		`<?php call_user_func($_REQUEST['f'], $_REQUEST['a']);`,
+		`<?php array_map($_POST['f'], [$_POST['a']]);`,
+		`<?php file_put_contents(__DIR__.'/x.php', base64_decode($_POST['d']));`,
+		`<?php if(isset($_REQUEST['cmd'])){ $cmd = ($_REQUEST['cmd']); system($cmd); }`,
+		`<?php ($_=@$_GET[2]).@$_($_GET[1]);`,
+		`<?php $f = "sy\x73tem"; $f($_GET['c']);`,
+	} {
+		if phpObfuscation(code) == "" {
+			t.Errorf("not caught: %q", code)
+		}
+	}
+	// JavaScript template strings in a Blade view are not shell commands.
+	if got := phpObfuscation("<script>const u = `/items/${id}`;</script>", true); got != "" {
+		t.Errorf("a Blade view's JavaScript was flagged: %s", got)
 	}
 }

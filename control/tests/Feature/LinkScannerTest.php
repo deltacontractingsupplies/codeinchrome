@@ -36,13 +36,24 @@ class LinkScannerTest extends TestCase
         $this->assertSame(2, $r['pages'], 'the /about page it links to was read too');
     }
 
-    public function test_a_link_to_a_program_download_anywhere_is_a_ban(): void
+    public function test_a_program_download_on_the_site_is_a_ban_and_one_elsewhere_is_a_review(): void
     {
-        $this->pages(['https://shopx.codeinchrome.com/' => '<a class="btn" href="https://files.example.net/Setup.EXE">Download</a>'
-            .'<a href="//cdn.example.org/app.apk">Android</a>']);
+        $this->pages(['https://shopx.codeinchrome.com/' => '<a class="btn" href="/files/Setup.EXE">Download</a>'
+            .'<a href="https://github.com/me/app/releases/download/v1/app.apk">Android</a>']);
         $r = app(LinkScanner::class)->scan($this->site());
-        $this->assertCount(2, $r['ban']);
-        $this->assertStringContainsString('https://files.example.net/Setup.EXE', $r['ban'][0]);
+        $this->assertCount(1, $r['ban']);
+        $this->assertStringContainsString('/files/Setup.EXE', $r['ban'][0]);
+        // Anyone who can post a comment can plant a link elsewhere (the audit, 2026-09-25).
+        $this->assertStringContainsString('program download elsewhere: https://github.com/me/app/releases/download/v1/app.apk', implode("\n", $r['review']));
+    }
+
+    public function test_a_copy_button_for_an_install_command_is_a_review_not_a_ban(): void
+    {
+        $this->pages(['https://shopx.codeinchrome.com/' => '<button onclick="navigator.clipboard.writeText(this.nextElementSibling.innerText)">Copy</button>'
+            .'<pre>curl -fsSL https://get.example.dev/install.sh | bash</pre>']);
+        $r = app(LinkScanner::class)->scan($this->site());
+        $this->assertSame([], $r['ban']);
+        $this->assertStringContainsString("on the visitor's clipboard", implode("\n", $r['review']));
     }
 
     public function test_what_needs_a_persons_judgement_is_flagged_for_review(): void
@@ -73,7 +84,7 @@ class LinkScannerTest extends TestCase
         $bad = $this->site('badx');
         $this->pages([
             'https://cleanx.codeinchrome.com/' => '<a href="/">home</a>',
-            'https://badx.codeinchrome.com/' => '<a href="https://x.example/tool.msi">Get it</a>',
+            'https://badx.codeinchrome.com/' => '<a href="/downloads/tool.msi">Get it</a>',
             '127.0.0.1:9441/*' => '{"ok":true}',
         ]);
         $this->artisan('abuse:links')->assertSuccessful();
@@ -102,7 +113,7 @@ class LinkScannerTest extends TestCase
     {
         Http::fake([
             'https://shopx.codeinchrome.com/' => Http::response('', 302, ['Location' => '/login']),
-            'https://shopx.codeinchrome.com/login' => Http::response('<a href="https://x.example/a.exe">x</a>', 200, ['Content-Type' => 'text/html']),
+            'https://shopx.codeinchrome.com/login' => Http::response('<a href="/files/a.exe">x</a>', 200, ['Content-Type' => 'text/html']),
             '*' => Http::response('', 404),
         ]);
         $r = app(LinkScanner::class)->scan($this->site());
