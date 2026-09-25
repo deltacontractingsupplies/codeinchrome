@@ -669,7 +669,17 @@ fixed, deployed and verified (above). These remain - each needs the owner:
       copying vendor/ cold went from 5.0 s to 1.8 s.
 - [ ] **One provider for everything** (Hetzner): the control plane, every
       host, the backups and their replica. A second provider for the backup
-      replica removes the single point of failure.
+      replica removes the single point of failure. BUILT (2026-09-25):
+      cic-replicate-offsite copies every encrypted repository nightly to an
+      S3-compatible bucket, grow-only (rclone copy --immutable: never deletes,
+      never overwrites) and monitored (`control:offsite`, alerted when a day
+      old). Tested on the control host against a stand-in target: all 631
+      files, the password file excluded, a copy-only file survives, a
+      tampered file fails the run and is not overwritten, the copy opens with
+      its escrowed password. Off until /opt/codeinchrome/etc/offsite.env
+      exists. Owner: a bucket at another provider (Cloudflare R2 is one
+      account we already have; Backblaze B2), WITH a lock/retention rule so
+      the key cannot delete, and an access key for it.
 - [ ] **Operator identity and an abuse-response process** (legal name on the
       terms, a response-time commitment to Hetzner and Cloudflare reports).
 - [x] **A failing scheduled job is an incident** (2026-09-25): abuse scans,

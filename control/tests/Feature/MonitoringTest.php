@@ -211,6 +211,27 @@ class MonitoringTest extends TestCase
         $this->assertSame(0, \App\Models\Monitor::where('key', 'like', 'site:shop%')->count());
     }
 
+    public function test_the_off_provider_copy_is_watched_once_it_has_ever_run(): void
+    {
+        $monitor = app(\App\Fleet\Monitoring::class);
+        $stamp = storage_path('framework/testing/offsite-'.getmypid().'.ok');
+        @unlink($stamp);
+        config(['fleet.offsite_stamp' => $stamp]);
+        try {
+            $this->assertArrayNotHasKey('control:offsite', $monitor->run(), 'not configured yet: no check, no alert');
+
+            touch($stamp, now()->subHours(3)->getTimestamp());
+            $this->assertTrue($monitor->run()['control:offsite'][1]);
+
+            touch($stamp, now()->subHours(31)->getTimestamp());
+            $check = $monitor->run()['control:offsite'];
+            $this->assertFalse($check[1], 'a copy that stopped is an incident');
+            $this->assertStringContainsString('newest complete copy 1 day ago', $check[2]);
+        } finally {
+            @unlink($stamp);
+        }
+    }
+
     public function test_the_control_planes_own_backup_is_watched_by_its_stamp(): void
     {
         $monitor = app(\App\Fleet\Monitoring::class);
