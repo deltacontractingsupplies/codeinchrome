@@ -25,6 +25,9 @@ use RuntimeException;
  */
 class Provisioner
 {
+    /** A new free site asks search engines not to index it for this long (owner's decision, 2026-09-25; sites:indexing). */
+    public const NOINDEX_DAYS = 7;
+
     public function __construct(private readonly Dns $dns) {}
 
     public static function make(): self
@@ -113,6 +116,18 @@ class Provisioner
                 'last_error' => null,
             ]);
             Audit::record('site.created', $user, $site, ['host' => $host, 'plan' => $user->plan]);
+
+            // A new free site stays out of search engines for its first week
+            // (owner's decision, 2026-09-25; lifted by sites:indexing). Never a
+            // reason for the site itself to fail: retried by that command.
+            if (! $user->isPaid()) {
+                $site->update(['noindex_until' => now()->addDays(self::NOINDEX_DAYS)]);
+                try {
+                    AgentClient::for($host)->setNoIndex($siteId, true);
+                } catch (\Throwable $e) {
+                    Log::warning('noindex not applied yet', ['site' => $siteId, 'error' => $e->getMessage()]);
+                }
+            }
         } catch (\Throwable $e) {
             // Record WHY before cleaning up, so a failure that repeats is
             // diagnosable from the row rather than only from the log.

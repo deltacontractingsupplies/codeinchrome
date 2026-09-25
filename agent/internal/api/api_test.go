@@ -115,3 +115,20 @@ func TestARestoreNeedsConfirmBeforeAnythingRuns(t *testing.T) {
 		t.Fatalf("restore without confirm: %d %v", res.StatusCode, j)
 	}
 }
+
+// The success path reloads Caddy, which a test machine does not run; the
+// sites package tests the header itself. Here: nothing but a real site and a
+// well-formed body gets through.
+func TestIndexingRefusesABadBodyAnInvalidIdAndAnUnknownSite(t *testing.T) {
+	srv, _ := server(t)
+	for _, c := range []struct{ url, body, want string }{
+		{"/v1/sites/shop/indexing", `not json`, "bad_json"},
+		{"/v1/sites/..%2Fetc/indexing", `{"noIndex":true}`, "cannot_apply"},
+		{"/v1/sites/no-such-site/indexing", `{"noIndex":true}`, "cannot_apply"},
+	} {
+		res, j := call(t, "PUT", srv.URL+c.url, c.body)
+		if res.StatusCode != http.StatusBadRequest || j["error"] != c.want {
+			t.Fatalf("%s %s: %d %v, want 400 %s", c.url, c.body, res.StatusCode, j, c.want)
+		}
+	}
+}

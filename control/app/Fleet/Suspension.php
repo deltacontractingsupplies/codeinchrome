@@ -18,7 +18,8 @@ use Illuminate\Support\Facades\Log;
  */
 class Suspension
 {
-    public function pause(Site $site): bool
+    /** $reason: trial | abuse | cpu | egress | idle - only an idle pause can be undone by its owner (SiteController::wake). */
+    public function pause(Site $site, string $reason): bool
     {
         try {
             AgentClient::for($site->host)->setSuspended($site->site_id, true);
@@ -27,8 +28,8 @@ class Suspension
 
             return false;
         }
-        $site->update(['status' => 'suspended']);
-        Audit::record('site.paused', $site->user, $site);
+        $site->update(['status' => 'suspended', 'paused_reason' => $reason]);
+        Audit::record('site.paused', $site->user, $site, ['reason' => $reason]);
 
         return true;
     }
@@ -46,7 +47,7 @@ class Suspension
 
             return false;
         }
-        $site->update(['status' => 'live']);
+        $site->update(['status' => 'live', 'paused_reason' => null]);
         Audit::record('site.resumed', $site->user, $site);
 
         return true;

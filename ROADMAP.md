@@ -612,16 +612,26 @@ fixed, deployed and verified (above). These remain - each needs the owner:
       that gets the domain listed by Safe Browsing takes the dashboard down
       with it. The fix every platform uses (vercel.app, netlify.app): a
       separate domain for customer sites, submitted to the Public Suffix
-      List. Owner: buy the domain; the move is then scripted.
+      List. **Owner, 2026-09-25: not now** - deferred, the risk accepted
+      and reduced by the phishing checks (name refusals, LinkScanner, the
+      report form, first-week noindex). The move is scripted when it is bought.
 - [ ] **Bot protection on sign-up and login** (Cloudflare Turnstile, Bot Fight
       Mode): our Cloudflare token has no permission for either. Owner: turn on
       Bot Fight Mode, and create a Turnstile widget (or give the token
       Turnstile:Edit) - the forms are then wired to it.
-- [ ] **Free sites: how long, and how public**: free accounts and their
-      sites live forever while paid plans are closed, and a new site is
-      public at once (it reaches Explore only after passing both scans).
-      Options: an inactivity expiry for free sites; noindex until a site is
-      a week old. A product decision.
+- [x] **Free sites: how long, and how public** (owner, 2026-09-25):
+      - a new free site sends `X-Robots-Tag: noindex, nofollow` for its first
+        7 days (agent `PUT /v1/sites/{id}/indexing`; set by the Provisioner,
+        lifted hourly by `sites:indexing`, at once on an upgrade);
+      - a free site with no visitors and no edits for 30 days is warned, then
+        paused at least 3 days later (`sites:idle`, daily). Visits come from
+        the access logs (agent `GET /v1/visits`: people only - crawlers,
+        scanners, scripts and our own checks do not count); work from any
+        request the owner makes on the site (`SiteActivity`). A host whose
+        logs cannot be read pauses nothing. One click on the dashboard brings
+        it back (`sites.wake`), and only an idle pause - never a trial, CPU,
+        egress or abuse one (`sites.paused_reason`). Nothing is deleted.
+        In the terms.
 - [ ] **Stronger sandbox** (gVisor, or user-namespace remapping): containers
       share the host kernel under plain runc. A real hardening, with a
       compatibility and performance cost to test first.
@@ -635,8 +645,12 @@ fixed, deployed and verified (above). These remain - each needs the owner:
 - [ ] **Platform mail from its own IP** (the control host): a mail provider
       (Postmark, Resend) instead keeps the host's address out of every mail
       header and SPF record.
-- [ ] **Automatic reboots for kernel updates**: now alerted after 3 days;
-      automatic reboots mean a minute of downtime - the owner's call.
+- [x] **Automatic reboots for kernel updates** (owner, 2026-09-25: automatic
+      at 04:30 UTC): unattended-upgrades reboots when an update needs it,
+      one host at a time - h1 04:30, h3 04:50, h4 05:00, the control host
+      05:15 (`/etc/apt/apt.conf.d/52cic-reboot`, from install-agent.sh and
+      deploy-control.sh). The 3-day `host:hN:reboot` alert stays as the
+      backstop.
 
 ### Found while verifying, 2026-09-24
 - [x] **The legal pages say what the service really does** (audited 2026-09-24):

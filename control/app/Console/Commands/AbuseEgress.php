@@ -48,7 +48,7 @@ class AbuseEgress extends Command
                 if (! $site) {
                     continue;
                 }
-                $paused = $suspension->pause($site);
+                $paused = $suspension->pause($site, 'egress');
                 $what = "{$e['distinct_hosts']} distinct hosts, {$e['distinct_ports']} distinct ports, {$e['connections']} connections in about two minutes";
                 Audit::record('abuse.scan_paused', $site->user, $site, detail: $e + ['paused' => $paused]);
                 Log::warning('site paused: scanning', ['site' => $site->site_id] + $e);

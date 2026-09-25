@@ -78,7 +78,7 @@ class CpuWatch
 
     private function suspend(Site $site, float $minutes): void
     {
-        $paused = $this->suspension->pause($site);
+        $paused = $this->suspension->pause($site, 'cpu');
         Audit::record('abuse.cpu_paused', $site->user, $site, detail: ['minutes' => round($minutes), 'paused' => $paused]);
         Log::warning('site paused for sustained CPU', ['site' => $site->site_id, 'minutes' => round($minutes), 'paused' => $paused]);
         $this->tellOwner("Site paused for sustained CPU: {$site->domain}", "https://{$site->domain} ran at its CPU limit for "

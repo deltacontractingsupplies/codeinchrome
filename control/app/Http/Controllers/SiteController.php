@@ -3,6 +3,8 @@
 namespace App\Http\Controllers;
 
 use App\Fleet\Provisioner;
+use App\Fleet\Stock;
+use App\Fleet\Suspension;
 use App\Models\Site;
 use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
@@ -65,6 +67,33 @@ class SiteController extends Controller
         $request->attributes->set('csp_style_nonce', $nonce);
 
         return view('sites.editor', ['site' => $site, 'cspNonce' => $nonce]);
+    }
+
+    /**
+     * One click brings back a site paused for 30 days without visits or edits
+     * (sites:idle). Only that pause: a trial, CPU or abuse pause has its own
+     * way back, and this must never be a way round one of them.
+     */
+    public function wake(Request $request, Site $site, Suspension $suspension): RedirectResponse
+    {
+        abort_unless($site->user_id === $request->user()->id, 404);
+        if ($site->status !== 'suspended' || $site->paused_reason !== 'idle') {
+            return back()->with('error', "{$site->domain} is not paused for being idle.");
+        }
+        if ($request->user()->trialExpired()) {
+            return redirect()->route('billing')->with('error', 'Your free trial has ended. Upgrade to Starter to bring your site back.');
+        }
+        // Free sites only take room paying customers have left (Stock), the
+        // same rule as creating one.
+        if (! $request->user()->isPaid() && ! app(Stock::class)->siteFits($request->user()->plan ?: 'free')) {
+            return back()->with('error', 'There is no room for free sites right now. Please try again later.');
+        }
+        if (! $suspension->resume($site)) {
+            return back()->with('error', "{$site->domain} could not be brought back just now. Please try again in a minute.");
+        }
+        $site->update(['last_worked_at' => now(), 'idle_warned_at' => null]);
+
+        return redirect()->route('dashboard')->with('status', "{$site->domain} is back.");
     }
 
     public function destroy(Request $request, Site $site): RedirectResponse

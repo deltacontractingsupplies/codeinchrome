@@ -189,6 +189,22 @@ systemctl start cic-mounts.service
 ok "site disks mounted before docker at boot"
 
 # ─────────────────────────────────────────────────────────────────────────────
+log "automatic reboots for kernel updates"
+# The owner's decision (2026-09-25): security updates install themselves, and
+# when one needs a reboot the host takes it early in the morning (UTC) - a
+# minute of downtime - one host at a time: h1 04:30, then 10 minutes apart by
+# host number (the control host is 05:15, deploy-control.sh). Monitoring
+# still alerts if an update waits more than 3 days (Monitoring REBOOT_GRACE_DAYS).
+n=${CIC_HOST_NAME#h}; [[ $n =~ ^[0-9]+$ ]] || n=1
+at_min=$(( 4*60 + 30 + (n - 1) * 10 ))
+reboot_at=$(printf '%02d:%02d' $(( at_min / 60 )) $(( at_min % 60 )))
+cat > /etc/apt/apt.conf.d/52cic-reboot <<APT
+Unattended-Upgrade::Automatic-Reboot "true";
+Unattended-Upgrade::Automatic-Reboot-WithUsers "true";
+Unattended-Upgrade::Automatic-Reboot-Time "$reboot_at";
+APT
+ok "an update that needs a reboot is applied at $reboot_at UTC"
+
 log "evidence retention"
 # A deleted site's access log is kept 30 days for abuse reports (the agent
 # moves it to /var/log/caddy/deleted), then removed: they hold visitors' IPs.

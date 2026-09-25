@@ -32,6 +32,15 @@ class LegalTest extends TestCase
             ->assertSee('separately');
     }
 
+    public function test_the_terms_state_the_free_site_idle_pause_and_first_week_noindex(): void
+    {
+        $this->get(route('terms'))->assertOk()
+            ->assertSee('for its first 7 days', false)
+            ->assertSee('no visitors and no edits for 30 days', false)
+            ->assertSee('at least 3 days before', false)
+            ->assertSee('comes back with one click', false);
+    }
+
     public function test_the_pages_say_when_they_last_changed(): void
     {
         $this->get(route('terms'))->assertSee('Last updated '.config('legal.updated'));

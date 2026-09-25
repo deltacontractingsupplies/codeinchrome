@@ -94,7 +94,7 @@ class TrialsExpire extends Command
             }
             foreach ($live as $site) {
                 // One still provisioning is paused on a later run, once it is live.
-                if ($site->status === 'live' && ! $dry && ! $suspension->pause($site)) {
+                if ($site->status === 'live' && ! $dry && ! $suspension->pause($site, 'trial')) {
                     $this->warn("{$site->site_id}: not paused; retrying next run");
                 }
             }
