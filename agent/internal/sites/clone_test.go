@@ -126,3 +126,30 @@ func TestCloneOfMalwareKeepsNothing(t *testing.T) {
 		t.Fatal("the refused clone left files behind")
 	}
 }
+
+// A file flagged by a later scan counts as the repository's only while it is
+// byte for byte what was cloned.
+func TestOnlyAnUnchangedClonedFileIsTheRepositorys(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	fakeGitHub(t, map[string]string{"lib/a.php": "<?php echo 'a';\n", "lib/b.php": "<?php echo 'b';\n"})
+	if _, err := m.Clone(ctx, id, "acme/demo", "", "/demo"); err != nil {
+		t.Fatal(err)
+	}
+	if !m.FromCloneUnchanged(id, "/demo/lib/a.php") {
+		t.Fatal("a cloned file is not recognised")
+	}
+	// Changed, added, or somewhere else: the customer's own.
+	m.WriteFile(ctx, id, "/demo/lib/b.php", "<?php echo 'changed';\n")
+	m.WriteFile(ctx, id, "/demo/lib/new.php", "<?php echo 'new';\n")
+	m.WriteFile(ctx, id, "/app/a.php", "<?php echo 'a';\n") // same bytes, other path
+	for _, p := range []string{"/demo/lib/b.php", "/demo/lib/new.php", "/app/a.php", "/demo/../demo/lib/missing.php"} {
+		if m.FromCloneUnchanged(id, p) {
+			t.Fatalf("%s counted as the repository's", p)
+		}
+	}
+	// The record is out of the site's reach.
+	if _, err := os.Stat(filepath.Join(m.appDir(id), "cloned.json")); err == nil {
+		t.Fatal("the record is inside the app directory")
+	}
+}

@@ -161,7 +161,8 @@ func (m *Manager) Clone(ctx context.Context, id, repository, ref, into string) (
 	if err := mkdirBeneath(root, strings.TrimPrefix(dst, root)); err != nil {
 		return CloneResult{}, err
 	}
-	files, err := extractZip(ctx, root, zr, dst, prefix)
+	written, err := extractZip(ctx, root, zr, dst, prefix)
+	files := len(written)
 	if err != nil {
 		// Deleted through directory handles, never by path: the site's code
 		// could have swapped a parent folder for a link while this ran.
@@ -172,6 +173,9 @@ func (m *Manager) Clone(ctx context.Context, id, repository, ref, into string) (
 	for _, f := range zr.File {
 		bytes += int64(f.UncompressedSize64)
 	}
+	// What arrived, byte for byte, so a later scan can tell a repository's
+	// own file from one the customer changed or added (cloned.go).
+	m.rememberCloned(id, root, written)
 	m.record(ctx, id, fmt.Sprintf("clone %s/%s@%s into %s", owner, repo, ref, m.relativeTo(id, dst)))
 	return CloneResult{Repository: owner + "/" + repo, Ref: ref, Into: strings.TrimPrefix(dst, root), Files: files, Bytes: bytes, Millis: time.Since(start).Milliseconds()}, nil
 }

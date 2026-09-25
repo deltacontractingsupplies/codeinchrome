@@ -216,8 +216,12 @@ frame-ancestors none; no postMessage listener; every route checks the owner.
       carrying a secret value is moved to storage/app/quarantine/ (kept, not
       served - runtime files have no saved version) and reported for review
       (kind published_secret, no ban). Eval and commands quarantine the same way.
-- [ ] Tag cloned folders so a later ClamAV signature update on them goes
-      to review, not a ban.
+- [x] Tag cloned folders so a later ClamAV signature update on them goes
+      to review, not a ban. DONE: the host records each cloned file's
+      SHA-256 beside the site's history (out of the container's reach); a
+      scan finding on a file still byte for byte as cloned is
+      malware_in_clone (review). A changed, added or back-dated file is the
+      customer's own and treated as any other.
 - [ ] Masking is for accidents, not a boundary: `cut -d= -f2 .env` or
       `{ raw: true }` show values. Said in the skill.
 - [ ] php -r / tinker (cic.eval) run any PHP in the site's own container:

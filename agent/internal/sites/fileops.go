@@ -515,13 +515,13 @@ func (m *Manager) Unzip(ctx context.Context, id, archive, into string) error {
 // symlink, not too many files or bytes, nothing overwritten. prefix is
 // taken off every name (a GitHub archive's "repo-main/"). Every file is then
 // scanned as one batch; if any is malware - or the scan cannot run - none of
-// the archive is kept. It returns how many files were written.
-func extractZip(ctx context.Context, root string, zr *zip.Reader, dstRoot, prefix string) (int, error) {
+// the archive is kept. It returns the files written (site-relative).
+func extractZip(ctx context.Context, root string, zr *zip.Reader, dstRoot, prefix string) ([]string, error) {
 	files := make([]*zip.File, 0, len(zr.File))
 	for _, f := range zr.File {
 		if prefix != "" {
 			if !strings.HasPrefix(f.Name, prefix) {
-				return 0, fmt.Errorf("the archive entry %q is outside its top folder", f.Name)
+				return nil, fmt.Errorf("the archive entry %q is outside its top folder", f.Name)
 			}
 			g := *f
 			g.Name = strings.TrimPrefix(f.Name, prefix)
@@ -536,22 +536,22 @@ func extractZip(ctx context.Context, root string, zr *zip.Reader, dstRoot, prefi
 	// Check the whole archive before writing anything.
 	var total uint64
 	if len(files) > maxTreeEntries {
-		return 0, fmt.Errorf("too many files in the archive")
+		return nil, fmt.Errorf("too many files in the archive")
 	}
 	for _, f := range files {
 		name := filepath.Clean("/" + f.Name)
 		target := filepath.Join(dstRoot, name)
 		if strings.Contains(f.Name, "..") || filepath.IsAbs(f.Name) || !strings.HasPrefix(target, dstRoot+string(os.PathSeparator)) {
-			return 0, fmt.Errorf("%w: the archive entry %q would land outside the destination", errOutside, f.Name)
+			return nil, fmt.Errorf("%w: the archive entry %q would land outside the destination", errOutside, f.Name)
 		}
 		if f.Mode()&fs.ModeSymlink != 0 {
-			return 0, fmt.Errorf("the archive contains a symlink (%q); refused", f.Name)
+			return nil, fmt.Errorf("the archive contains a symlink (%q); refused", f.Name)
 		}
 		if total += f.UncompressedSize64; total > maxTreeBytes {
-			return 0, fmt.Errorf("the archive expands to more than %d MB", maxTreeBytes>>20)
+			return nil, fmt.Errorf("the archive expands to more than %d MB", maxTreeBytes>>20)
 		}
 		if _, err := os.Lstat(target); err == nil && !f.FileInfo().IsDir() {
-			return 0, fmt.Errorf("%s already exists; unzip into an empty folder", strings.TrimPrefix(name, "/"))
+			return nil, fmt.Errorf("%s already exists; unzip into an empty folder", strings.TrimPrefix(name, "/"))
 		}
 	}
 
@@ -570,13 +570,13 @@ func extractZip(ctx context.Context, root string, zr *zip.Reader, dstRoot, prefi
 		rel := filepath.Join(intoRel, filepath.Clean("/"+f.Name))
 		if f.FileInfo().IsDir() {
 			if err := mkdirBeneath(root, rel); err != nil {
-				return 0, err
+				return nil, err
 			}
 			continue
 		}
 		rc, err := f.Open()
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 		// Kernel-enforced: no symlink anywhere on the way, nothing replaced.
 		out, err := createBeneath(root, rel, 0o640)
@@ -585,14 +585,14 @@ func extractZip(ctx context.Context, root string, zr *zip.Reader, dstRoot, prefi
 		}
 		if err != nil {
 			rc.Close()
-			return 0, err
+			return nil, err
 		}
 		// Bounded by what the header claimed, so a lying header cannot write more.
 		_, err = io.Copy(out, io.LimitReader(rc, int64(f.UncompressedSize64)+1))
 		rc.Close()
 		out.Close()
 		if err != nil {
-			return 0, err
+			return nil, err
 		}
 	}
 	// Nothing unpacked into public/ may carry the site's secret values.
@@ -600,7 +600,7 @@ func extractZip(ctx context.Context, root string, zr *zip.Reader, dstRoot, prefi
 		secrets := siteSecrets(root)
 		for _, rel := range written {
 			if err := publishedSecretIn(root, rel, secrets); err != nil {
-				return 0, err
+				return nil, err
 			}
 		}
 	}
@@ -623,10 +623,10 @@ func extractZip(ctx context.Context, root string, zr *zip.Reader, dstRoot, prefi
 		}
 	}
 	if scanErr != nil {
-		return 0, scanErr
+		return nil, scanErr
 	}
 	ok = true
-	return len(written), nil
+	return written, nil
 }
 
 // refuseSecretIntoPublic stops a .env file - the site's keys and database
