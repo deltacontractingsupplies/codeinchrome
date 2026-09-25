@@ -51,7 +51,11 @@ if ($__r !== null) {
 // evalCommand runs php in a site's container reading the script on stdin; a
 // variable so tests can stand in for Docker.
 var evalCommand = func(ctx context.Context, container string) *exec.Cmd {
+	// timeout INSIDE the container: killing the docker CLI on the host leaves
+	// the process in the container running (found by the audit); timeout
+	// kills php and its process group itself.
 	return exec.CommandContext(ctx, "docker", "exec", "-i", "-u", "33:33", "-e", "HOME=/tmp", container,
+		"timeout", "--kill-after=5", strconv.Itoa(int(evalTimeout/time.Second)),
 		"php", "-d", "display_errors=stderr", "-d", "log_errors=0", "-d", "memory_limit=256M")
 }
 

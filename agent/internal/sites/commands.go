@@ -209,7 +209,10 @@ func (m *Manager) RunCommand(ctx context.Context, id, tool string, args []string
 	for _, e := range commandEnv(tool, args) {
 		full = append(full, "-e", e)
 	}
-	full = append(append(full, m.container(id)), argv...)
+	// Bounded INSIDE the container too (see evalCommand): the docker CLI
+	// dying on its timeout does not stop the process in the container.
+	full = append(full, m.container(id), "timeout", "--kill-after=5", strconv.Itoa(int(timeout/time.Second)))
+	full = append(full, argv...)
 	cmd := exec.CommandContext(ctx, "docker", full...)
 	out := &cappedBuffer{limit: maxCommandOutput}
 	cmd.Stdout, cmd.Stderr = out, out

@@ -53,7 +53,11 @@ do_mount() {
   # nodev, nosuid: a customer must not be able to plant a device node or a
   # setuid binary on a filesystem that is mounted on the host. Customers get
   # no shell, but a PHP upload is enough to create a file.
-  mount -o loop,nodev,nosuid,noatime "$IMG" "$MNT"
+  # noexec: a site's own files are data and PHP, never programs. Without it a
+  # file uploaded or written there - a miner, a scanner - could be run, and
+  # it is the only writable place in the container (/tmp and /run are noexec,
+  # the rest read-only). PHP scripts still run: php reads them.
+  mount -o loop,nodev,nosuid,noexec,noatime "$IMG" "$MNT"
   mountpoint -q "$MNT" || die "mount of $IMG did not take effect"
 }
 
