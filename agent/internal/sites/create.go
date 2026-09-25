@@ -1156,6 +1156,10 @@ func appProxy(port, indent string) string {
 	// (the second security audit, 2026-09-25). Overwrites whatever a visitor
 	// sent under the same name.
 	w(1, "header_up X-Real-IP {client_ip}")
+	// The platform's own checks mark their requests so they are not counted
+	// as visits (visits.go); the app never sees the mark, so it cannot show
+	// them a different page (control LinkScanner).
+	w(1, "header_up -X-Cic-Probe")
 	w(1, "handle_response {")
 	w(2, "handle @cic_download {")
 	w(3, fmt.Sprintf("respond %q 403", blockedDownloadMsg))

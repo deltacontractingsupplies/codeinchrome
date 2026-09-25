@@ -25,7 +25,8 @@ class ExploreTest extends TestCase
         $site = Site::create(['user_id' => $user->id, 'site_id' => $id, 'domain' => "$id.codeinchrome.com",
             'host' => 'h1', 'status' => $status, 'cpu_limit' => '0.5', 'memory_limit' => '384m', 'port' => $this->port++]);
         // Passed the malware scan and the link check (LinkScannerTest covers the gate itself).
-        $site->forceFill(['scanned_clean_at' => now(), 'links_clean_at' => now()])->save();
+        // Past its first week: Explore lists nothing younger (Provisioner::NOINDEX_DAYS).
+        $site->forceFill(['scanned_clean_at' => now(), 'links_clean_at' => now(), 'created_at' => now()->subDays(8)])->save();
 
         return $site;
     }

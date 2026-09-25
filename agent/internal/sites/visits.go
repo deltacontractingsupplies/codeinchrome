@@ -110,6 +110,9 @@ func humanVisit(line string) (int64, bool) {
 	if e.Status < 200 || e.Status >= 400 || (e.Request.Method != "GET" && e.Request.Method != "POST") {
 		return 0, false
 	}
+	if len(e.Request.Headers["X-Cic-Probe"]) > 0 {
+		return 0, false // the platform's own check, looking like a browser
+	}
 	ua := strings.TrimSpace(strings.Join(e.Request.Headers["User-Agent"], " "))
 	if ua == "" || notAVisitor.MatchString(ua) {
 		return 0, false

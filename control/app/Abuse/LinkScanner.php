@@ -22,7 +22,21 @@ use Illuminate\Support\Facades\Http;
  */
 class LinkScanner
 {
-    public const MAX_PAGES = 15;
+    public const MAX_PAGES = 30;
+
+    /**
+     * Sent like a browser, so a kit cannot show the scanner a clean page by
+     * its User-Agent (the second security audit, 2026-09-25: the old one
+     * announced itself). X-Cic-Probe is removed by the edge before the app
+     * sees it (agent appProxy) and keeps these requests out of the visitor
+     * count (agent visits.go).
+     */
+    public const HEADERS = [
+        'User-Agent' => 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0.0.0 Safari/537.36',
+        'Accept' => 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+        'Accept-Language' => 'en-US,en;q=0.9',
+        'X-Cic-Probe' => '1',
+    ];
 
     private const EXECUTABLE = '/\.(exe|msi|msix|apk|aab|dmg|pkg|scr|bat|cmd|ps1|vbs|vbe|jar|hta|wsf|lnk|pif|cpl|appimage|deb|rpm)$/i';
 
@@ -43,7 +57,9 @@ class LinkScanner
     public function scan(Site $site): array
     {
         $own = array_map('strtolower', array_merge([$site->domain], $site->domains()->pluck('domain')->all()));
-        $queue = ["https://{$site->domain}/"];
+        // The home page, and every GET route without parameters: a kit at a
+        // path nothing links to was never fetched.
+        $queue = array_merge(["https://{$site->domain}/"], array_map(fn ($p) => "https://{$site->domain}/".ltrim($p, '/'), $this->routes($site)));
         $seen = [];
         $ban = $review = [];
         $pages = 0;
@@ -55,7 +71,7 @@ class LinkScanner
             $seen[$url] = true;
             try {
                 $res = Http::timeout(10)->withoutRedirecting()
-                    ->withHeaders(['User-Agent' => 'codeinchrome-safety (+https://codeinchrome.com/report)'])->get($url);
+                    ->withHeaders(self::HEADERS)->get($url);
             } catch (\Throwable) {
                 continue;
             }
@@ -105,7 +121,10 @@ class LinkScanner
                 } elseif ($kind === 'form' && ! $this->allowed($host, $path)) {
                     $review[] = "a form posts what is typed to another site: $host (on $url)";
                 } elseif ($kind === 'refresh' && ! $this->allowed($host, $path)) {
-                    $review[] = "sends visitors on to another site: $target (on $url)";
+                    // The edge refuses the same redirect sent as a header.
+                    $ban[] = "sends visitors on to another site with a meta refresh: $target (on $url)";
+                } elseif (in_array($kind, ['iframe', 'script', 'js-redirect'], true) && ! $this->allowed($host, $path)) {
+                    $review[] = ['iframe' => 'frames another site', 'script' => 'runs a script from another site', 'js-redirect' => 'sends visitors on to another site from a script'][$kind].": $target (on $url)";
                 }
             }
             // "ClickFix" fake CAPTCHA pages (Trend Micro, 2025-26, on Lovable,
@@ -168,6 +187,21 @@ class LinkScanner
                 $out[] = ['form', $u];
             }
         }
+        foreach (['iframe' => 'iframe', 'script' => 'script'] as $tag => $kind) {
+            foreach ($doc->getElementsByTagName($tag) as $el) {
+                if (($src = $el->getAttribute('src')) !== '' && ($u = $this->absolute($src, $base))) {
+                    $out[] = [$kind, $u];
+                }
+            }
+        }
+        // location = / .href = / .replace( / .assign( / window.open( to an absolute URL.
+        if (preg_match_all('/(?:location(?:\.href)?\s*=|location\.(?:replace|assign)\(|window\.open\()\s*[\'"`]((?:https?:)?\/\/[^\'"`\s]+)/i', $html, $js)) {
+            foreach ($js[1] as $u) {
+                if ($abs = $this->absolute($u, $base)) {
+                    $out[] = ['js-redirect', $abs];
+                }
+            }
+        }
         foreach ($doc->getElementsByTagName('meta') as $m) {
             if (strtolower($m->getAttribute('http-equiv')) === 'refresh' && preg_match('/url\s*=\s*[\'"]?([^\'";]+)/i', $m->getAttribute('content'), $mm)) {
                 if ($u = $this->absolute(trim($mm[1]), $base)) {
@@ -177,6 +211,21 @@ class LinkScanner
         }
 
         return $out;
+    }
+
+    /** The site's GET routes without parameters, from the app itself; none if it cannot be asked. */
+    private function routes(Site $site): array
+    {
+        try {
+            $r = \App\Fleet\AgentClient::for($site->host)->runCommand($site->site_id, 'artisan', ['route:list', '--json', '--method=GET']);
+            $list = json_decode((string) ($r['result']['output'] ?? ''), true);
+        } catch (\Throwable) {
+            return [];
+        }
+
+        return collect(is_array($list) ? $list : [])->pluck('uri')
+            ->filter(fn ($u) => is_string($u) && ! str_contains($u, '{') && ! str_starts_with($u, '_') && ! str_starts_with($u, 'up'))
+            ->take(self::MAX_PAGES)->values()->all();
     }
 
     private function absolute(string $href, string $base): ?string

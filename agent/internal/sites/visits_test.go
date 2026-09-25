@@ -84,3 +84,13 @@ func TestALineSplitByAChunkBoundaryIsJoinedBackTogether(t *testing.T) {
 		t.Fatalf("last visit %d, want 700 (the line straddling the boundary)", got)
 	}
 }
+
+func TestThePlatformsOwnBrowserLikeCheckIsNotAVisit(t *testing.T) {
+	line := `{"ts":1000.5,"request":{"method":"GET","headers":{"User-Agent":["Mozilla/5.0 (Windows NT 10.0) Chrome/141.0"],"X-Cic-Probe":["1"]}},"status":200}`
+	if _, ok := humanVisit(line); ok {
+		t.Fatal("a request marked X-Cic-Probe is the link check, not a person")
+	}
+	if _, ok := humanVisit(strings.Replace(line, `,"X-Cic-Probe":["1"]`, "", 1)); !ok {
+		t.Fatal("the same request without the mark is a person")
+	}
+}
