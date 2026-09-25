@@ -186,6 +186,10 @@ UNIT
 systemctl daemon-reload
 systemctl enable cic-mounts.service >/dev/null 2>&1
 systemctl start cic-mounts.service
+# Also on a host already up: brings every mounted site's disk to the current
+# settings (direct I/O) without a remount - a oneshot that has run already
+# would not run again.
+$CIC/bin/cic-mount all
 ok "site disks mounted before docker at boot"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -312,6 +316,7 @@ check "caddy reload works"       'systemctl reload caddy'
 check "admin api loopback only"  '! has "0.0.0.0:2019" ss -ltn'
 check "weekly image rebuild scheduled" 'systemctl is-active cic-image-rebuild.timer'
 check "site disks mount before docker" 'systemctl is-enabled cic-mounts.service && systemctl show docker -p After --value | grep -q cic-mounts.service'
+check "site disks use direct I/O" '[[ -z "$(losetup -l -n -O DIO,BACK-FILE | awk '"'"'$1 == 0 && $2 ~ /\/disk\.img$/'"'"')" ]]'
 check "tls gate refuses a stranger" '[[ "$(curl -s -o /dev/null -w %{http_code} "http://127.0.0.1:9440/tls-ask?domain=not-ours.example.com")" == "404" ]]'
 check "caddy has the tls gate"   'has "tls-ask" curl -s http://127.0.0.1:2019/config/apps/tls/automation'
 # The isolation claim that matters: a customer container must not be able to

@@ -41,6 +41,9 @@ type Config struct {
 type Manager struct {
 	cfg Config
 	mu  sync.Mutex // serialises writes to a customer's directory and to Caddy
+	// The disk under cfg.Root, for the per-site I/O ceilings (diskio.go);
+	// "" when it cannot be found.
+	ioDisk string
 }
 
 // Site is what the agent knows about one customer site. Every field is read
@@ -130,7 +133,7 @@ func New(cfg Config) (*Manager, error) {
 	if cfg.HostID == "" {
 		return nil, fmt.Errorf("empty host id")
 	}
-	return &Manager{cfg: cfg}, nil
+	return &Manager{cfg: cfg, ioDisk: diskUnder(cfg.Root)}, nil
 }
 
 func (m *Manager) HostID() string { return m.cfg.HostID }

@@ -635,8 +635,21 @@ fixed, deployed and verified (above). These remain - each needs the owner:
 - [ ] **Stronger sandbox** (gVisor, or user-namespace remapping): containers
       share the host kernel under plain runc. A real hardening, with a
       compatibility and performance cost to test first.
-- [ ] **Disk I/O limits per site**: needs each container recreated; to be
-      scheduled.
+- [x] **Disk I/O limits per site** (2026-09-25): 400/200 MB/s read/write,
+      10,000/5,000 IOPS, set on the host's physical disk - measured: the
+      kernel charges a site's I/O through its loop device to the site's
+      cgroup on the disk, and a loop device's number changes across reboots
+      while the disk's does not. Cost measured on the worst case (copying
+      vendor/ with caches dropped): +8%. Existing containers are recreated
+      by fleet:roll-image, which now treats a container with old run
+      settings (label `codeinchrome.runspec`) as outdated; the roll moved to
+      05:30 UTC, after the reboot window, so a reboot can never cut one off
+      between removing a container and starting its replacement.
+      Found while measuring: the site disks (loop devices) ran without direct
+      I/O, so every write was cached and flushed twice - 43 MB/s sustained
+      inside a site against 850 on the host's disk. Now on (cic-mount, live
+      without a remount; install-agent checks every site disk): 210 MB/s, and
+      copying vendor/ cold went from 5.0 s to 1.8 s.
 - [ ] **One provider for everything** (Hetzner): the control plane, every
       host, the backups and their replica. A second provider for the backup
       replica removes the single point of failure.
