@@ -243,6 +243,10 @@ func (m *Manager) RunCommand(ctx context.Context, id, tool string, args []string
 	default:
 		return res, fmt.Errorf("could not run the command: %w", runErr)
 	}
+	// What composer installed is what the scan exempts in vendor/ (dependencies.go).
+	if tool == "composer" && res.ExitCode == 0 {
+		m.rememberVendor(id)
+	}
 	return res, nil
 }
 

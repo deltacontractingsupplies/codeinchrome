@@ -51,6 +51,7 @@ class AbuseEnforcementTest extends TestCase
                     'encrypted' => Http::response(['ok' => true, 'findings' => [['path' => '/backup.zip', 'kind' => 'unscannable', 'detail' => 'Heuristics.Encrypted.Zip']], 'clean' => false]),
                     'phishing' => Http::response(['ok' => true, 'findings' => [['path' => '/public/p.html', 'kind' => 'phishing', 'detail' => 'sends data to a Telegram bot']], 'clean' => false]),
                     'cloned' => Http::response(['ok' => true, 'findings' => [['path' => '/demo/lib/x.php', 'kind' => 'malware_in_clone', 'detail' => 'Php.Malware.New FOUND (unchanged since it was cloned from a public repository)']], 'clean' => false]),
+                    'vendored' => Http::response(['ok' => true, 'findings' => [['path' => '/vendor/acme/lib/Hidden.php', 'kind' => 'unverified_dependency', 'detail' => 'eval - in a dependency folder, but not as composer installed it']], 'clean' => false]),
                     'leaked' => Http::response(['ok' => true, 'findings' => [['path' => '/public/debug.txt', 'kind' => 'published_secret', 'detail' => 'carried the value of DB_PASSWORD; moved out of public/']], 'clean' => false]),
                 };
             }
@@ -158,9 +159,9 @@ class AbuseEnforcementTest extends TestCase
         $this->assertNull($site->fresh()->scanned_clean_at);
     }
 
-    public function test_a_cloned_repositorys_own_file_or_a_published_secret_goes_to_a_person_not_a_ban(): void
+    public function test_a_cloned_or_uninstalled_dependency_file_or_a_published_secret_goes_to_a_person_not_a_ban(): void
     {
-        foreach (['cloned' => 20108, 'leaked' => 20109] as $answer => $port) {
+        foreach (['cloned' => 20108, 'leaked' => 20109, 'vendored' => 20110] as $answer => $port) {
             $user = User::factory()->create(['plan' => 'free']);
             $site = $this->siteFor($user, "site$answer", $port);
             $this->scanAnswer = $answer;

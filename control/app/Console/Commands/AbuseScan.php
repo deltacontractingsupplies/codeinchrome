@@ -43,7 +43,9 @@ class AbuseScan extends Command
             // already; the owner should hear, and nobody is banned for a leak.
             // And a cloned repository's own file, unchanged, flagged by a
             // signature added since it was cloned: someone else's code.
-            $review = ['unscannable', 'phishing', 'published_secret', 'malware_in_clone'];
+            // And code in vendor/ or node_modules/ that composer did not
+            // install: an app uploaded with its own vendor/ is honest.
+            $review = ['unscannable', 'phishing', 'published_secret', 'malware_in_clone', 'unverified_dependency'];
             $findings = array_values(array_filter($scan['findings'], fn ($f) => ! in_array($f['kind'] ?? '', $review, true)));
             $unscannable = array_values(array_filter($scan['findings'], fn ($f) => in_array($f['kind'] ?? '', $review, true)));
             if ($findings !== []) {
