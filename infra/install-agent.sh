@@ -347,7 +347,7 @@ if compgen -G "$CIC/caddy/sites/*.caddy" >/dev/null; then
     (( any == 0 )) # no sites yet: nothing to prove
   }
   check "a site answers through Cloudflare" 'site_through_cloudflare'
-  check "web ports closed to the world" '! ufw status | grep -E "^(80|443)(/tcp)? +ALLOW IN +Anywhere"' 
+  check "web ports closed to the world" '! ufw status | grep -qE "^(80|443)(/tcp)?( \(v6\))? +ALLOW( IN)? +Anywhere"' 
   check "caddy bound to :443 (vhosts exist)" 'has ":443" ss -ltn'
   check "caddy bound to :80 (vhosts exist)"  'has ":80" ss -ltn'
 else

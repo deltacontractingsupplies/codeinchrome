@@ -381,7 +381,9 @@ check "docker running"           'docker info'
 check "docker no-new-privileges" 'jq -e ".\"no-new-privileges\" == true" /etc/docker/daemon.json'
 check "caddy installed"          'command -v caddy'
 check "ufw active"               'has "Status: active" ufw status'
-check "nothing but SSH open to the world" '! ufw status | grep -E "ALLOW IN +Anywhere" | grep -vE "^22/tcp"'
+# That nothing but SSH is open to the world is checked by install-agent.sh,
+# AFTER it has put Cloudflare's rules in and taken the open ones out: checked
+# here, it failed on every host being moved over, before the move.
 check "no iptables snapshot to restore" '[[ ! -e /etc/iptables/rules.v4 ]]'
 # The egress policy, rule by rule (cic-egress). The old checks looked only for
 # four port rules; these cover what the policy is for.
