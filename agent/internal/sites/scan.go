@@ -136,8 +136,9 @@ var phishingRules = []struct {
 	name string
 	re   *regexp.Regexp
 }{
-	{"sends data to a Telegram bot", regexp.MustCompile(`(?i)api\.telegram\.org/bot`)},
-	{"sends data to a Discord webhook", regexp.MustCompile(`(?i)discord(app)?\.com/api/webhooks/`)},
+	// The host after "//", a quote or a space - never inside a longer host name.
+	{"sends data to a Telegram bot", regexp.MustCompile(`(?i)(^|[/"'\s])api\.telegram\.org/bot`)},
+	{"sends data to a Discord webhook", regexp.MustCompile(`(?i)(^|[/"'\s])(www\.)?discord(app)?\.com/api/webhooks/`)},
 	{"hides the page from security scanners", regexp.MustCompile(`(?is)(HTTP_USER_AGENT|REMOTE_ADDR|userAgent\(\)|->ip\(\)).{0,400}(phishtank|netcraft|safebrowsing|virustotal|urlscan|google-inspectiontool|codeinchrome)|(phishtank|netcraft|safebrowsing|virustotal|urlscan|google-inspectiontool|codeinchrome).{0,400}(HTTP_USER_AGENT|REMOTE_ADDR|userAgent\(\)|->ip\(\))`)},
 	{"asks for a card number beside a well-known brand", regexp.MustCompile(`(?is)(autocomplete=["']cc-(number|csc)["']|name=["'](cvv|cvc|card_?number|ccnum)["']).{0,1000}\b(paypal|apple ?id|microsoft|netflix|amazon|chase|wells fargo|bank of america|hsbc|barclays)\b|\b(paypal|apple ?id|microsoft|netflix|amazon|chase|wells fargo|bank of america|hsbc|barclays)\b.{0,1000}(autocomplete=["']cc-(number|csc)["']|name=["'](cvv|cvc|card_?number|ccnum)["'])`)},
 }
