@@ -3,8 +3,10 @@ package sites
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"net"
 	"net/http"
+	"os"
 	"time"
 )
 
@@ -13,14 +15,14 @@ import (
 // there was no answer. Used around a vhost rewrite: `caddy validate` accepts
 // a config whose expressions then fail on every request - which answered two
 // sites with 502 for a minute (2026-09-25).
-var edgeStatus = func(ctx context.Context, domain string) int {
+var edgeStatus = func(ctx context.Context, domain string, roots *x509.CertPool) int {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
-			// The origin certificate is Cloudflare's, trusted only by Cloudflare;
-			// this is the host talking to itself about a status code.
-			TLSClientConfig: &tls.Config{ServerName: domain, InsecureSkipVerify: true}, //nolint:gosec
+			// Verified: against this host's own origin certificate (which only
+			// Cloudflare trusts publicly), or the system's roots without one.
+			TLSClientConfig: &tls.Config{ServerName: domain, RootCAs: roots, MinVersion: tls.VersionTLS12},
 			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return dialer.DialContext(ctx, network, "127.0.0.1:443")
 			},
@@ -51,4 +53,22 @@ func brokenByReload(before, after map[string]int) []string {
 		}
 	}
 	return broken
+}
+
+// edgeRoots is what a probe of this host's own Caddy trusts: exactly the
+// origin certificate it serves (Go accepts a certificate that is itself in
+// the pool), or nil - the system's roots - on a host without one.
+func (m *Manager) edgeRoots() *x509.CertPool {
+	if m.cfg.OriginCert == "" {
+		return nil
+	}
+	pem, err := os.ReadFile(m.cfg.OriginCert)
+	if err != nil {
+		return nil
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		return nil
+	}
+	return pool
 }

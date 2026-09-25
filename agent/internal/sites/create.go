@@ -238,9 +238,10 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 	// so a rewrite that breaks it can be told apart from a site that was
 	// already failing.
 	before := map[string]int{}
+	roots := m.edgeRoots()
 	for _, s := range list {
 		if s.State == "running" && !s.Suspended && s.Domain != "" {
-			before[s.Domain] = edgeStatus(ctx, s.Domain)
+			before[s.Domain] = edgeStatus(ctx, s.Domain, roots)
 		}
 	}
 	probe := map[string]int{} // rewritten sites -> their status before
@@ -310,7 +311,7 @@ func (m *Manager) Reconcile(ctx context.Context) ([]string, error) {
 		// Caddy accepting a config is not the same as serving with it.
 		after := map[string]int{}
 		for domain := range probe {
-			after[domain] = edgeStatus(ctx, domain)
+			after[domain] = edgeStatus(ctx, domain, roots)
 		}
 		if broken := brokenByReload(probe, after); len(broken) > 0 {
 			for path, data := range previous {
