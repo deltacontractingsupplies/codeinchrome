@@ -120,17 +120,35 @@ Limits found (each one a thing a terminal agent never hits):
 - [ ] Every result is cut at 1,000 characters; test failures had to be
       filtered and paged with cic.show. A cic.test() that returns only the
       failing tests and their first line would save a round trip.
-- [ ] Tools a terminal has that cic lacks or names differently. Plan: one
-      `cic.sh` with the SAME names and flags as the shell, so an agent needs
-      nothing new: ls -la, cat, head/tail -n, grep -rnE (regex, file globs),
-      find -name/-type/-newer, wc, du -sh, tree, mkdir -p, cp -r, mv,
-      rm -rf (confirmed), sed -i (replaceAll), diff, touch, stat, and
-      `git` (status/diff/log over cic.history). Each measured against the
-      same command in a terminal here.
-- [ ] Bring in open-source Laravel apps both ways, and compare: `git clone`
-      / `composer create-project` of a public repository into a site (a
-      server-side clone - the browser cannot run git), timed against the
-      same clone in a terminal here.
+- [x] Tools a terminal has that cic lacks or names differently - DONE
+      2026-09-25: `cic.sh(line)` speaks the shell itself (resources/js/shell.js):
+      pipes, && || ;, > >> 2>&1, heredocs, globs, cd, and about 45 commands
+      (ls, cat, head, tail, wc, grep -rniEFwlLcov -A/-B/-C --include, find
+      -name/-type/-maxdepth/-newer/-mmin/-path, sed -n/-i/-E, diff -u, cp -r,
+      mv, rm -r, mkdir -p, touch, tree, du, sort, uniq, cut, tr, xargs, tee,
+      test, php artisan, composer, php -r, mysql -e, curl (this site only),
+      git log/diff/show over the saved versions). The host gained grep (RE2)
+      and find. Measured on production against the same commands in a terminal
+      here (BookStack, 1,961 PHP files):
+      | | terminal (local disk) | cic.sh (live site, from Chrome) |
+      |---|---|---|
+      | ls -la, cat 2 files, sed -n, tree, diff | 18-34 ms | 186-227 ms (one request) |
+      | grep -rn, grep -rniE --include, wc on a glob | 18-48 ms | 382-392 ms before, one request now |
+      | find -newer, du -sh 2 folders | 25-26 ms | 547 / 773 ms before, parallel now |
+      | php artisan route:list | - | 2.0 s (boots the app in its container) |
+      One request is ~186 ms from here to the host and back; every everyday
+      command is now one request (pinned by a test that counts them), and
+      the agent's own turn - seconds per tool call - still dominates.
+- [x] Bring in open-source Laravel apps both ways - DONE 2026-09-25:
+      `git clone [-b ref] https://github.com/owner/repo [folder]` in cic.sh.
+      The host fetches GitHub's archive (HTTPS, github.com/codeload only, no
+      other redirect, 100 MB cap), unpacks it into a NEW folder (never over
+      the site, never into public/), and scans every file as an upload is -
+      malware refuses all of it and bans, as for any upload. The rules found
+      nothing in BookStack's 1,961 PHP files. Terminal here: `git clone
+      --depth 1` of laravel/laravel 1.4 s (65 files), BookStack 2.8 s (2,615
+      files, 5.6 MB archive). LEFT: cloning OVER the running app (keep .env
+      and storage, back up first) so a cloned app can be the site itself.
 - [ ] A skill-creator style check: the skill tested with a fresh Claude in
       Chrome session (side panel, no terminal, no prior context) building
       the same store, timed, and every place it stalls fixed in the skill

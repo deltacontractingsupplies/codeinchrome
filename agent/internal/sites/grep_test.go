@@ -215,3 +215,16 @@ func TestGrepKeepsIndentationAndSearchTrims(t *testing.T) {
 		t.Fatalf("grep %+v, search %+v", g.Hits, s)
 	}
 }
+
+// du of a single file: find answers its size.
+func TestFindOnAFileCountsIt(t *testing.T) {
+	m, id := grepSite(t)
+	r, err := m.Find(context.Background(), id, FindOptions{Under: "/routes/web.php", All: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	info, _ := os.Stat(filepath.Join(m.appDir(id), "routes/web.php"))
+	if len(r.Entries) != 0 || r.Files != 1 || r.Bytes != info.Size() {
+		t.Fatalf("find on a file: %+v, want 1 file of %d bytes", r, info.Size())
+	}
+}

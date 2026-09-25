@@ -36,6 +36,9 @@ class FileManagerApiTest extends TestCase
                 : Http::response(['ok' => false, 'error' => 'needs_confirm', 'hint' => 'Pass confirm=1.'], 409),
             '127.0.0.1:944*/v1/sites/*/grep*' => Http::response(['ok' => true, 'hits' => [['path' => '/routes/web.php', 'line' => 3, 'text' => "Route::get('/')"]], 'truncated' => false]),
             '127.0.0.1:944*/v1/sites/*/find*' => Http::response(['ok' => true, 'entries' => [['path' => '/app/Models', 'dir' => true, 'size' => 96, 'mtime' => 1]], 'files' => 12, 'bytes' => 4096, 'truncated' => false]),
+            '127.0.0.1:944*/v1/sites/*/clone' => fn ($r) => str_contains($r['repository'], 'kit')
+                ? Http::response(['ok' => false, 'error' => 'malware', 'hint' => 'shell.php: webshell.', 'findings' => [['path' => '/kit/shell.php', 'rule' => 'webshell']]], 400)
+                : Http::response(['ok' => true, 'clone' => ['repository' => 'acme/demo', 'ref' => 'HEAD', 'into' => '/demo', 'files' => 3, 'bytes' => 99, 'ms' => 800]]),
             '127.0.0.1:944*/v1/sites/*/search*' => Http::response(['ok' => true, 'hits' => [['path' => '/routes/web.php', 'line' => 2, 'text' => 'checkout']]]),
             '127.0.0.1:944*/v1/sites/*/files/*' => Http::response(['ok' => true, 'done' => 'x']),
         ]);
@@ -151,5 +154,41 @@ class FileManagerApiTest extends TestCase
         foreach (['files.grep', 'files.find'] as $name) {
             $this->assertContains('throttle:search', app('router')->getRoutes()->getByName($name)->gatherMiddleware());
         }
+    }
+
+    public function test_git_clone_reaches_the_host_only_for_a_github_repository(): void
+    {
+        $as = $this->actingAs($this->owner);
+        $as->postJson($this->url('files.clone'), ['repository' => 'https://github.com/acme/demo.git', 'ref' => 'v1.2', 'into' => '/demo'])
+            ->assertOk()->assertJsonPath('clone.files', 3);
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/v1/sites/shop/clone')
+            && $r['repository'] === 'https://github.com/acme/demo.git' && $r['ref'] === 'v1.2' && $r['into'] === '/demo');
+
+        $this->withoutMiddleware(\Illuminate\Routing\Middleware\ThrottleRequests::class);
+        foreach (['https://gitlab.com/a/b', 'file:///etc/passwd', 'https://github.com/a', 'https://github.com@evil.example.com/a/b'] as $bad) {
+            $as->postJson($this->url('files.clone'), ['repository' => $bad])->assertStatus(422);
+        }
+        $as->postJson($this->url('files.clone'), ['repository' => 'acme/demo', 'ref' => '../x'])->assertStatus(422);
+    }
+
+    public function test_git_clone_is_limited_to_three_a_minute(): void
+    {
+        $as = $this->actingAs($this->owner);
+        foreach (range(1, 3) as $n) {
+            $as->postJson($this->url('files.clone'), ['repository' => 'acme/demo'])->assertOk();
+        }
+        $as->postJson($this->url('files.clone'), ['repository' => 'acme/demo'])->assertStatus(429);
+    }
+
+    public function test_cloning_malware_is_refused_like_any_upload(): void
+    {
+        $this->actingAs($this->owner)->postJson($this->url('files.clone'), ['repository' => 'acme/kit'])
+            ->assertStatus(403)->assertJsonPath('error', 'malware');
+    }
+
+    public function test_git_clone_refuses_someone_elses_site(): void
+    {
+        $this->actingAs(User::factory()->create())->postJson($this->url('files.clone'), ['repository' => 'acme/demo'])->assertNotFound();
+        Http::assertNothingSent();
     }
 }

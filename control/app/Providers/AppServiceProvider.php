@@ -102,6 +102,8 @@ class AppServiceProvider extends ServiceProvider
         // Read-only and capped at 20 s on the host, and cic.check's code
         // review makes several at once: it shared 'command' (20 a minute)
         // with artisan and failed on a busy session.
+        // Each clone downloads up to 100 MB from GitHub on the host's line.
+        RateLimiter::for('clone', fn (Request $r) => [Limit::perMinute(3)->by($by($r)), Limit::perHour(20)->by('h:'.$by($r))]);
         RateLimiter::for('search', fn (Request $r) => Limit::perMinute(90)->by($by($r)));
         RateLimiter::for('db', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
         // Completion fires as someone types: generous, but still bounded.

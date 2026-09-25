@@ -65,6 +65,7 @@ const SITE = {
   searchUrl: root.dataset.search,
   grepUrl: root.dataset.grep,
   findUrl: root.dataset.find,
+  cloneUrl: root.dataset.clone,
   uploadUrl: root.dataset.upload,
   downloadUrl: root.dataset.download,
   skillUrl: root.dataset.skill,
@@ -2353,6 +2354,11 @@ const shellIo = {
   eval: (code) => cicApi.eval(code),
   request: (path, options) => siteRequest(path, options),
   query: (sql, write) => apiAt(SITE.dbQueryUrl, 'POST', {}, { sql, write }),
+  clone: async (o) => {
+    const r = await apiAt(SITE.cloneUrl, 'POST', {}, o);
+    if (r.ok) (async () => { await reloadAround(o.into); })();
+    return r;
+  },
 };
 // Unset options left out, booleans as 1, a list as include[]=... (Laravel's form).
 function shellQuery(o) {

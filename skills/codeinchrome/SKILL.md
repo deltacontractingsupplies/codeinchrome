@@ -144,8 +144,9 @@ It speaks ls, cat, head, tail, wc, grep (-rniEFwlLcov, -A/-B/-C, --include), fin
 rm -r, mkdir -p, touch, tree, du, sort, uniq, cut, tr, xargs, tee, test/[ ], pipes, `&&`,
 `||`, `;`, `>`, `>>`, `2>&1`, heredocs and globs; `php artisan ...`, `composer ...`,
 `php -r 'code'` (in the booted app, like tinker), `mysql -e 'SQL'` (the site's own
-database) and `git log/diff/show -- FILE` over the saved versions (there is no git
-repository: every save is already a version). There are no `$VARIABLES` or `$(...)`: a `$`
+database), `git log/diff/show -- FILE` over the saved versions (there is no git
+repository: every save is already a version) and `git clone https://github.com/owner/repo
+[folder]` - a public GitHub repository into a new folder, scanned like any upload. There are no `$VARIABLES` or `$(...)`: a `$`
 is an ordinary character, so PHP in a heredoc arrives exactly as written. `cd` is
 remembered between calls. Deleting a folder, a destructive artisan command and a SQL write
 answer with a refusal that says to resend with `{ confirm: true }` - only with the person's

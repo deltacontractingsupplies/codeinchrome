@@ -536,6 +536,27 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"hits": res.Hits, "truncated": res.Truncated}))
 	})
+	// git clone of a public GitHub repository into a new folder of the site.
+	mux.HandleFunc("POST /v1/sites/{id}/clone", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Repository string `json:"repository"`
+			Ref        string `json:"ref"`
+			Into       string `json:"into"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("invalid_body", "send JSON: repository, ref, into"))
+			return
+		}
+		res, err := mgr.Clone(r.Context(), r.PathValue("id"), body.Repository, body.Ref, body.Into)
+		if err != nil {
+			if refusedMalware(w, err) {
+				return
+			}
+			writeJSON(w, http.StatusBadRequest, fail("cannot_clone", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"clone": res}))
+	})
 	mux.HandleFunc("GET /v1/sites/{id}/find", func(w http.ResponseWriter, r *http.Request) {
 		q := r.URL.Query()
 		limit, _ := strconv.Atoi(q.Get("limit"))
