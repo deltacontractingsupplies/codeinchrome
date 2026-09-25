@@ -618,7 +618,12 @@ fixed, deployed and verified (above). These remain - each needs the owner:
 - [ ] **Bot protection on sign-up and login** (Cloudflare Turnstile, Bot Fight
       Mode): our Cloudflare token has no permission for either. Owner: turn on
       Bot Fight Mode, and create a Turnstile widget (or give the token
-      Turnstile:Edit) - the forms are then wired to it.
+      Turnstile:Edit). The forms are WIRED (App\Auth\Turnstile): sign-up,
+      email sign-in and the reset mail, off until TURNSTILE_SITE_KEY and
+      TURNSTILE_SECRET are set; the CSP allows Cloudflare's origin only on
+      those pages; a token Cloudflare cannot confirm is refused (fails
+      closed); the e2e suite's reserved @codeinchrome.test addresses skip it.
+      Owner: a Managed widget for app.codeinchrome.com, and its two keys.
 - [x] **Free sites: how long, and how public** (owner, 2026-09-25):
       - a new free site sends `X-Robots-Tag: noindex, nofollow` for its first
         7 days (agent `PUT /v1/sites/{id}/indexing`; set by the Provisioner,

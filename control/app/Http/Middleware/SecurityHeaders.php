@@ -41,9 +41,13 @@ class SecurityHeaders
             // this request's nonce (resources/js/csp-nonce.js); inline style
             // from anywhere else is still refused. Scripts are never nonced.
             $styleNonce = $request->attributes->get('csp_style_nonce');
+            // Cloudflare Turnstile's script and frame, on the pages that
+            // render its widget (resources/views/auth/turnstile.blade.php).
+            $turnstile = $request->attributes->get('csp_turnstile') ? ' '.\App\Auth\Turnstile::ORIGIN : '';
             $response->headers->set('Content-Security-Policy', implode('; ', [
                 "default-src 'self'",
-                "script-src 'self'",
+                "script-src 'self'".$turnstile,
+                ...($turnstile ? ["frame-src$turnstile"] : []),
                 $styleNonce ? "style-src 'self' 'nonce-{$styleNonce}'" : "style-src 'self'",
                 // Monaco positions its lines and line numbers with style
                 // attributes in markup it builds. Attributes only: they

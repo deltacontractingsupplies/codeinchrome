@@ -24,7 +24,7 @@ class PasswordResetController extends Controller
     {
         abort_unless(config('fleet.mail_enabled'), 404);
         $request->merge(['email' => strtolower(trim((string) $request->input('email')))]);
-        $request->validate(['email' => ['required', 'email']]);
+        $request->validate(['email' => ['required', 'email']] + \App\Auth\Turnstile::rules($request->input('email')));
 
         // At most 3 an hour to one address, whoever asks from wherever: the
         // per-IP limit alone let someone flood a person's inbox from ours

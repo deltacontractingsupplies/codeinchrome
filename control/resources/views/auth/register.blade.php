@@ -23,6 +23,7 @@
                 @error($field)<p class="mt-1 text-sm text-red-400">{{ $message }}</p>@enderror
             </div>
         @endforeach
+        @include('auth.turnstile')
         <button class="w-full rounded-md bg-teal-500 px-4 py-2 font-medium text-neutral-950 hover:bg-teal-400">Create account</button>
     </form>
 

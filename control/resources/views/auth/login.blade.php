@@ -17,6 +17,7 @@
             <input id="password" name="password" type="password" autocomplete="current-password" required
                    class="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 text-neutral-100 focus:border-teal-500 focus:outline-none">
         </div>
+        @include('auth.turnstile')
         <button class="w-full rounded-md bg-teal-500 px-4 py-2 font-medium text-neutral-950 hover:bg-teal-400">Sign in</button>
     </form>
     @if (config('fleet.mail_enabled'))
