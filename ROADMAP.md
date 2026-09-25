@@ -4,6 +4,36 @@ What "done" means for codeinchrome, as a checklist. An item is ticked only when
 it is built, tested, deployed, and verified against production - not when the
 code exists.
 
+## Waiting on the owner (everything else is built)
+
+Each line: what to do, and what to hand over. The code for the first five is
+live and switched off; handing over the value switches it on, and it is then
+verified on production.
+
+1. **Heartbeat** - Healthchecks.io or Better Stack: a check, period 1 min,
+   grace 5 min. Hand over: its ping URL (`CIC_HEARTBEAT_URL`).
+2. **Bot protection** - Cloudflare dashboard: Security > Bots > Bot Fight Mode
+   on; Turnstile > add a Managed widget for app.codeinchrome.com. Hand over:
+   its site key and secret (`TURNSTILE_SITE_KEY`, `TURNSTILE_SECRET`).
+3. **Backup copy at a second provider** - a bucket at Cloudflare R2 or
+   Backblaze B2 with a lock/retention rule (the key must not be able to
+   delete), and an access key limited to that bucket. Hand over: endpoint,
+   bucket, key id, secret (`/opt/codeinchrome/etc/offsite.env`).
+4. **Mail provider** - Postmark or Resend, domain codeinchrome.com verified.
+   Hand over: its SMTP host, port, user and password (`MAIL_*`).
+5. **Cloudflare for SaaS** - Cloudflare dashboard: SSL/TLS > Custom Hostnames,
+   enable (free for 100). Then say so: custom domains are moved behind it
+   and switched on.
+6. **Lemon Squeezy** - finish identity verification; then say so: products are
+   copied to live mode and billing re-run with the live key.
+7. **Key rotation** - in each dashboard, roll the Lemon Squeezy API key and
+   webhook secret and the Cloudflare API token. Hand over the new values.
+8. **Sign in with Google** at app.codeinchrome.com in Chrome - proves Google
+   sign-in, and lets the Claude in Chrome test run on the editor.
+9. **Decisions** - the sandbox (gVisor or user-namespace remapping; measured
+   below), the operator's legal name and an abuse-response commitment for
+   the terms, and (deferred: "not now") a separate customer-site domain.
+
 ## Built and verified
 
 - [x] Host bootstrap with verified post-conditions, reboot-safe
