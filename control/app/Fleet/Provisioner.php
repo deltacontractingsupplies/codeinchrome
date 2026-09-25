@@ -52,6 +52,22 @@ class Provisioner
         if ($user->trialExpired()) {
             throw new RuntimeException('Your free trial has ended. Upgrade to Starter to keep building.');
         }
+        // A site paused by the abuse checks keeps its account from starting
+        // another: deleting it and creating a new one reset the pause (the
+        // second security audit, 2026-09-25).
+        if ($user->sites()->where('status', 'suspended')->whereIn('paused_reason', ['cpu', 'egress', 'abuse'])->exists()) {
+            throw new RuntimeException('One of your sites is paused by our abuse checks. Write to support before creating another.');
+        }
+        // An account from the network of an account banned in the last 30
+        // days waits for a person (App\Auth\ClientNet::signal).
+        if (! $user->isPaid() && $user->signup_net
+            && User::where('signup_net', $user->signup_net)->whereKeyNot($user->getKey())
+                ->where('banned_at', '>=', now()->subDays(30))->exists()) {
+            if (\Illuminate\Support\Facades\Cache::add("abuse.held.{$user->id}", true, now()->addDay())) {
+                app(\App\Abuse\Enforcer::class)->holdForReview($user, 'signed up from the same network as an account banned in the last 30 days');
+            }
+            throw new RuntimeException('Your account is being checked before it can create sites. We will be in touch by email.');
+        }
         if ($user->storage_over_at) {
             throw new RuntimeException(
                 "Your sites use more than the plan's {$plan['storage_gb']} GB of storage. ".

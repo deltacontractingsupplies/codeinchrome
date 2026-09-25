@@ -28,9 +28,13 @@ class PausedSite
     public function handle(Request $request, Closure $next): Response
     {
         $site = $request->route('site');
+        // A site paused by the abuse checks cannot be deleted by its owner:
+        // deleting it freed the plan's slot for a fresh one at once (the
+        // second security audit, 2026-09-25). Its work can still be taken away.
+        $abusePaused = $site instanceof Site && in_array($site->paused_reason, ['cpu', 'egress', 'abuse'], true);
         if (! $site instanceof Site || $site->status !== 'suspended'
             || $site->user_id !== $request->user()?->getKey()
-            || in_array($request->route()->getName(), self::OPEN, true)) {
+            || (in_array($request->route()->getName(), self::OPEN, true) && ! ($abusePaused && $request->route()->getName() === 'sites.destroy'))) {
             return $next($request);
         }
 

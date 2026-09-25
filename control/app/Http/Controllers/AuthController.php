@@ -44,6 +44,7 @@ class AuthController extends Controller
             'password' => Hash::make($data['password']),
             'plan' => 'free',
         ]);
+        $user->forceFill(['signup_net' => \App\Auth\ClientNet::signal($request->ip())])->save();
         $user->startTrial();
 
         Auth::login($user);

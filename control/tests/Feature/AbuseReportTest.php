@@ -23,6 +23,8 @@ class AbuseReportTest extends TestCase
         Site::create(['user_id' => $user->id, 'site_id' => 'bank-login', 'domain' => 'bank-login.codeinchrome.com',
             'host' => 'h1', 'status' => 'live', 'cpu_limit' => '0.5', 'memory_limit' => '384m', 'port' => 20200]);
         $this->sent = []; // the new-site email (OwnerNotifier) is not what these tests are about
+        // A report now triggers a link check of the site (after the response): a clean page here.
+        \Illuminate\Support\Facades\Http::fake(['*' => \Illuminate\Support\Facades\Http::response('<p>ok</p>', 200, ['Content-Type' => 'text/html'])]);
     }
 
     public function test_a_report_about_a_hosted_site_is_saved_and_mailed_to_the_owner(): void

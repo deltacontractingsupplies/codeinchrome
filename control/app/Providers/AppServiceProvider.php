@@ -71,20 +71,27 @@ class AppServiceProvider extends ServiceProvider
          * commands in one minute was throttled everywhere. Found by the
          * end-to-end suite, which does exactly that from one address.
          */
-        $by = fn (Request $r, string $suffix = '') => ($r->user()?->id ?? $r->ip()).$suffix;
+        // An IPv6 visitor holds a /64: keyed on the full address, a per-IP
+        // limit was no limit (App\Auth\ClientNet, the second security audit).
+        $ip = fn (Request $r) => \App\Auth\ClientNet::key($r->ip());
+        $by = fn (Request $r, string $suffix = '') => ($r->user()?->id ?? $ip($r)).$suffix;
 
         // Per address AND per IP: one attacker cannot lock a victim out by
         // failing their logins from elsewhere, and cannot spray many addresses
         // from one IP either (the per-IP ceiling).
         RateLimiter::for('login', fn (Request $r) => [
-            Limit::perMinute(10)->by(strtolower((string) $r->input('email')).'|'.$r->ip()),
-            Limit::perMinute(30)->by('ip:'.$r->ip()),
+            Limit::perMinute(10)->by(strtolower((string) $r->input('email')).'|'.$ip($r)),
+            Limit::perMinute(30)->by('ip:'.$ip($r)),
         ]);
-        RateLimiter::for('register', fn (Request $r) => Limit::perMinute(10)->by($r->ip()));
+        // Hourly and daily too: a free account is a free site, and the minute
+        // limit alone allowed thousands a day from one network.
+        RateLimiter::for('register', fn (Request $r) => [
+            Limit::perMinute(10)->by($ip($r)), Limit::perHour(20)->by('h:'.$ip($r)), Limit::perDay(50)->by('d:'.$ip($r)),
+        ]);
         // Public and unauthenticated: enough for a person, not for a flood.
-        RateLimiter::for('abuse-report', fn (Request $r) => [Limit::perMinute(3)->by($r->ip()), Limit::perHour(10)->by($r->ip())]);
+        RateLimiter::for('abuse-report', fn (Request $r) => [Limit::perMinute(3)->by($ip($r)), Limit::perHour(10)->by('h:'.$ip($r))]);
         RateLimiter::for('email-code', fn (Request $r) => Limit::perMinute(10)->by($by($r)));
-        RateLimiter::for('password-mail', fn (Request $r) => Limit::perMinute(5)->by($r->ip()));
+        RateLimiter::for('password-mail', fn (Request $r) => [Limit::perMinute(5)->by($ip($r)), Limit::perHour(20)->by('h:'.$ip($r))]);
         RateLimiter::for('account', fn (Request $r) => Limit::perMinute(10)->by($by($r)));
         RateLimiter::for('provision', fn (Request $r) => Limit::perMinute(10)->by($by($r)));
         RateLimiter::for('domains', fn (Request $r) => Limit::perMinute(20)->by($by($r)));
@@ -105,10 +112,10 @@ class AppServiceProvider extends ServiceProvider
         // Each check makes ~50 requests to the site from outside.
         RateLimiter::for('exposure', fn (Request $r) => Limit::perMinute(6)->by($by($r)));
         // The public demo source pages: generous for a reader, not for a scraper.
-        RateLimiter::for('demo-code', fn (Request $r) => Limit::perMinute(120)->by($r->ip()));
+        RateLimiter::for('demo-code', fn (Request $r) => Limit::perMinute(120)->by($ip($r)));
         RateLimiter::for('logs', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
         RateLimiter::for('billing', fn (Request $r) => Limit::perMinute(10)->by($by($r)));
-        RateLimiter::for('two-factor', fn (Request $r) => Limit::perMinute(30)->by($r->ip()));
+        RateLimiter::for('two-factor', fn (Request $r) => Limit::perMinute(30)->by($ip($r)));
 
         //
     }
