@@ -563,7 +563,7 @@ be hard to abuse. Every item is verified live, never assumed.
       never read as a spike.
 
 **Inbound / origin**
-- [ ] **Origin reachable only through Cloudflare** (80/443): needs custom domains
+- [x] **Origin reachable only through Cloudflare** (80/443): needs custom domains
       on Cloudflare for SaaS and the hosts' certificates renewed without direct
       access first - designed, not yet rolled out.
       DONE for the customer hosts 2026-09-25: h1, h3, h4 take 80/443 from
@@ -572,10 +572,14 @@ be hard to abuse. Every item is verified live, never assumed.
       revert armed); their own names use the origin certificate and are
       proxied, so DNS no longer publishes their addresses. Custom domains
       (none in production) are off until Cloudflare for SaaS carries them.
-      LEFT: the control host h2 - its backups endpoint takes restic uploads
-      larger than the proxy accepts, so it needs the hosts to reach it another
-      way (the SSH tunnels) first; and the addresses were public before, so
-      new ones (owner) would be the only way to make them unknown.
+      AND the control host h2 (2026-09-25): 80/443 from Cloudflare's ranges,
+      443 from the fleet's hosts (backups) only; the backups endpoint serves
+      the origin certificate and the hosts trust it explicitly (RESTIC_CACERT:
+      system roots + Cloudflare's origin roots, installed before the switch so
+      no backup ever failed). Verified: the app answers through Cloudflare and
+      not directly, all 3 hosts reach their repositories, SSH unchanged.
+      LEFT (owner): the addresses were public before - only new servers would
+      make them unknown again.
 
 **Research**
 - [x] **How Lovable, Replit, Vercel, Netlify, Render handle abuse** on free

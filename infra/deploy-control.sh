@@ -408,6 +408,27 @@ caddy validate --config /etc/caddy/Caddyfile >/dev/null 2>&1 || { echo 'Caddyfil
 systemctl reload caddy"
 ok "vhost written and caddy reloaded"
 
+say "web ports: Cloudflare and the fleet only"
+# The control plane is served through Cloudflare, and the backups endpoint
+# answers the fleet's hosts only (restic, direct: larger than the proxy takes).
+# Nothing else has any business on 80/443 here (2026-09-25); a request
+# straight to this address bypasses Cloudflare. Every vhost here uses the
+# Cloudflare origin certificate, so no certificate needs the world to reach
+# this host either. New rules in before the open ones come out: no gap.
+cf_ranges=$(curl -fsS --retry 3 https://api.cloudflare.com/client/v4/ips \
+  | python3 -c 'import json,sys; r=json.load(sys.stdin)["result"]; print(" ".join(r["ipv4_cidrs"] + r["ipv6_cidrs"]))')
+(( $(wc -w <<<"$cf_ranges") >= 15 )) || die "could not fetch Cloudflare's ranges; firewall left as it was"
+fleet_ips=""
+for entry in $CIC_HOSTS; do fleet_ips+=" ${entry##*:}"; done
+ssh_ "CF='$cf_ranges' FLEET='$fleet_ips' bash -s" <<'FW'
+set -Eeuo pipefail
+for cidr in $CF;    do ufw allow proto tcp from "$cidr" to any port 80,443 comment cloudflare >/dev/null; done
+for ip   in $FLEET; do ufw allow proto tcp from "$ip"   to any port 443    comment fleet      >/dev/null; done
+ufw delete allow 80/tcp  >/dev/null 2>&1 || true
+ufw delete allow 443/tcp >/dev/null 2>&1 || true
+FW
+ok "80/443 from Cloudflare's $(wc -w <<<"$cf_ranges") ranges and 443 from the fleet's hosts only"
+
 say "verifying"
 fails=0
 check() { if eval "$2" >/dev/null 2>&1; then ok "$1"; else printf '\033[33m  !!\033[0m %s\n' "$1"; fails=$((fails+1)); fi; }
@@ -426,7 +447,11 @@ check "the session cookie is __Host- (no sibling subdomain can set it)" "pub -sS
 # Hosts verify this certificate on every nightly upload. The proxy's origin
 # wildcard once took its place (Caddy prefers a loaded matching certificate),
 # which only Cloudflare trusts - backups would have failed that night.
-check "backups endpoint has a publicly trusted certificate" "[ \"\$(curl -s -o /dev/null -w %{http_code} --max-time 15 https://backups.$zone/)\" = 401 ]"
+# Hosts trust the origin certificate explicitly (setup-backups.sh); checked
+# from one, as restic sees it.
+bk_host=$(awk '{print $1}' <<<"$CIC_HOSTS"); bk_host=${bk_host##*:}
+check "web ports closed to the world" "ssh root@$ip '! ufw status | grep -qE \"^(80|443)(/tcp)?( \\(v6\\))? +ALLOW( IN)? +Anywhere\"'"
+check "backups endpoint answers the hosts over trusted TLS" "[ \"\$(ssh -n -o BatchMode=yes root@$bk_host 'curl -s -o /dev/null -w %{http_code} --max-time 15 --cacert /opt/codeinchrome/etc/restic-ca.pem https://backups.$zone/')\" = 401 ]"
 check "php-fpm running"        "ssh root@$ip 'systemctl is-active php$PHP_VERSION-fpm'"
 check "caddy can read the docroot" "ssh root@$ip 'sudo -u caddy test -r /srv/control/public/index.php'"
 check "caddy can reach the fpm socket" "ssh root@$ip 'sudo -u caddy test -w /run/php/codeinchrome.sock'"

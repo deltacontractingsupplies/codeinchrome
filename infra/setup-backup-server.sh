@@ -87,11 +87,12 @@ systemctl restart rest-server
 cat > /opt/codeinchrome/caddy/sites/_backups.caddy <<CADDY
 # restic rest-server, append-only. TLS here; the server itself binds loopback.
 $DOMAIN {
-	# A publicly trusted certificate of its own: hosts verify it when they
-	# upload. Without force_automate, Caddy serves the Cloudflare origin
-	# wildcard (loaded for the proxied sites) here instead, which only
-	# Cloudflare trusts - and every host's backup fails its TLS check.
-	tls force_automate
+	# The Cloudflare origin wildcard (2026-09-25), not a public certificate:
+	# renewing one needed this host's 80/443 open to the whole internet. The
+	# hosts trust it explicitly (setup-backups.sh: RESTIC_CACERT with
+	# Cloudflare's origin roots), and this name stays DNS-only because restic
+	# uploads are larger than Cloudflare's proxy accepts.
+	tls /etc/caddy/origin/cert.pem /etc/caddy/origin/key.pem
 	reverse_proxy 127.0.0.1:8000
 	request_body {
 		max_size 256MB
@@ -143,6 +144,9 @@ check "rest-server running"            "target 'systemctl is-active rest-server'
 check "listening on loopback only"     "target 'ss -Hltn | awk \"{print \\\$4}\" | grep -qx 127.0.0.1:8000' && ! target 'ss -Hltn | awk \"{print \\\$4}\" | grep -Eq \"^(0.0.0.0|\\\\*|\\\\[::\\\\]):8000\$\"'"
 check "append-only flag is live"       "target 'grep -q -- --append-only /proc/\$(systemctl show rest-server -p MainPID --value)/cmdline'"
 check "retention timer scheduled"      "target 'systemctl is-active cic-backup-maintain.timer'"
-check "anonymous access refused"       "[[ \$(curl -s -o /dev/null -w %{http_code} https://$domain/) == 401 ]]"
+# From a fleet host (the only callers once the control host takes web traffic
+# from Cloudflare and the fleet alone), trusting what restic trusts.
+first_host=$(awk '{print $1}' <<<"$CIC_HOSTS"); first_host=${first_host##*:}
+check "anonymous access refused"       "[[ \$(ssh -n -o BatchMode=yes root@$first_host 'curl -s -o /dev/null -w %{http_code} --cacert /opt/codeinchrome/etc/restic-ca.pem https://$domain/') == 401 ]]"
 (( fails )) && die "$fails check(s) failed"
 printf '\033[32mbackup server ready\033[0m  https://%s\n' "$domain"
