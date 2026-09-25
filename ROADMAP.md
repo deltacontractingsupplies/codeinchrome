@@ -673,9 +673,11 @@ fixed, deployed and verified (above). These remain - each needs the owner:
       first failure, a job every few minutes on its third in a row, once per
       incident, with recovery. Before, a job failing every run left a log line.
 - [ ] **A dead-man's switch for the scheduler itself**: if cron stopped,
-      monitoring (a scheduled job) would stop with it and say nothing. Needs
-      an outside heartbeat (Healthchecks.io, Better Stack) - owner: an account;
-      the ping is one line in the schedule.
+      monitoring (a scheduled job) would stop with it and say nothing. BUILT
+      (App\Fleet\Heartbeat): every fleet:monitor run pings
+      `CIC_HEARTBEAT_URL`; unset, it is off. Owner: create a check at
+      Healthchecks.io or Better Stack (period 1 minute, grace 5) and hand over
+      its ping URL - it goes in the control host's .env.
 - [ ] **Platform mail from its own IP** (the control host): a mail provider
       (Postmark, Resend) instead keeps the host's address out of every mail
       header and SPF record.

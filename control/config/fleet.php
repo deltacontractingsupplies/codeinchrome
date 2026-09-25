@@ -122,6 +122,13 @@ return [
     'alert_webhook' => env('CIC_ALERT_WEBHOOK'),
 
     /*
+     * An outside heartbeat (Healthchecks.io, Better Stack) pinged after every
+     * monitoring run, which alerts when the pings stop - the scheduler itself
+     * has died (App\Fleet\Heartbeat). Unset: no ping.
+     */
+    'heartbeat_url' => env('CIC_HEARTBEAT_URL'),
+
+    /*
      * Accounts that can see the operator status page. By address, from the
      * environment, so no one can make themselves an operator from inside the
      * application.
