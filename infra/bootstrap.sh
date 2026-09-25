@@ -250,6 +250,10 @@ e -p tcp -m multiport --dports 23,445,1433,3389,5900 -j CIC-REJECT
 # the day it shipped, before the weekly image rebuild ran).
 e -i br-+ -p udp --dport 53 -j CIC-REJECT
 e -i br-+ -p tcp -m multiport --dports 53,853 -j CIC-REJECT
+# What is left of UDP 53 is the default bridge's (builds): allowed, bounded,
+# as before - without this it fell through to "no other UDP" below (the
+# first fix restored nothing; its deploy check caught it).
+e -p udp --dport 53 -m hashlimit --hashlimit-upto 50/sec --hashlimit-burst 100 --hashlimit-mode srcip --hashlimit-name cic-dns -j RETURN
 for doh in 1.1.1.1 1.0.0.1 8.8.8.8 8.8.4.4 9.9.9.9 149.112.112.112 208.67.222.222 208.67.220.220 94.140.14.14 94.140.15.15; do
   e -d "$doh" -j CIC-REJECT
 done
