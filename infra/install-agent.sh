@@ -257,6 +257,33 @@ log "service"
 origin_flags=""
 if [[ -s /etc/caddy/origin/cert.pem && -s /etc/caddy/origin/key.pem ]]; then
   origin_flags="-platform-domain ${CIC_PLATFORM_DOMAIN:-codeinchrome.com} -origin-cert /etc/caddy/origin/cert.pem -origin-key /etc/caddy/origin/key.pem"
+  # Authenticated Origin Pulls (audit A33): only when deploy-host.sh has
+  # seen the zone setting ON (CIC_AOP=1) and shipped Cloudflare's CA -
+  # requiring the certificate before Cloudflare sends it would take every
+  # site down. The agent's own edge checks present a certificate from a CA
+  # made here, kept root-only; Caddy trusts both.
+  if [[ ${CIC_AOP:-0} == 1 && -s /etc/caddy/origin/cloudflare-origin-pull.pem ]]; then
+    probe=$CIC/etc/probe
+    mkdir -p "$probe" && chmod 0700 "$probe"
+    if [[ ! -s $probe/ca.pem || ! -s $probe/client.pem ]] || ! openssl x509 -checkend 2592000 -noout -in "$probe/client.pem" >/dev/null 2>&1; then
+      openssl req -x509 -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -days 3650 -subj "/CN=cic probe CA $(hostname)" \
+        -keyout "$probe/ca.key" -out "$probe/ca.pem" >/dev/null 2>&1
+      openssl req -newkey ec -pkeyopt ec_paramgen_curve:P-256 -nodes -subj "/CN=cic-agent edge probe" \
+        -keyout "$probe/client.key" -out "$probe/client.csr" >/dev/null 2>&1
+      printf 'extendedKeyUsage=clientAuth\n' > "$probe/ext"
+      openssl x509 -req -in "$probe/client.csr" -CA "$probe/ca.pem" -CAkey "$probe/ca.key" -CAcreateserial -days 825 \
+        -extfile "$probe/ext" -out "$probe/client.pem" >/dev/null 2>&1
+      rm -f "$probe/client.csr" "$probe/ext"
+    fi
+    chmod 0600 "$probe"/*.key
+    cat /etc/caddy/origin/cloudflare-origin-pull.pem "$probe/ca.pem" > /etc/caddy/origin/client-ca.pem.new
+    chown root:caddy /etc/caddy/origin/client-ca.pem.new && chmod 0640 /etc/caddy/origin/client-ca.pem.new
+    mv /etc/caddy/origin/client-ca.pem.new /etc/caddy/origin/client-ca.pem
+    origin_flags+=" -origin-client-ca /etc/caddy/origin/client-ca.pem -probe-cert $probe/client.pem -probe-key $probe/client.key"
+    ok "origin pulls authenticated: Cloudflare's certificate (and this host's probe) required"
+  else
+    ok "origin pulls not authenticated (the zone setting is off)"
+  fi
 fi
 cat > /etc/systemd/system/cic-agent.service <<UNIT
 [Unit]
@@ -311,6 +338,18 @@ check "agent accepts its token"  'has "\"ok\":true" curl -fsS -H "Authorization:
 check "agent not on public iface" '! has "0.0.0.0:9440" ss -ltn'
 check "token file is 0600"       '[[ "$(stat -c %a '"$CIC"'/etc/agent.env)" == "600" ]]'
 check "caddy active"             'systemctl is-active caddy'
+# Origin pulls (A33): a live platform site answers the probe's certificate
+# and refuses a connection without one. The agent rewrites every vhost as it
+# starts, so this waits for Caddy to have the new config.
+aop_site=$(grep -ho '^[a-z0-9-]*\.codeinchrome\.com' /opt/codeinchrome/caddy/sites/*.caddy 2>/dev/null | head -1)
+if [[ ${CIC_AOP:-0} == 1 && -n $aop_site ]]; then
+  # shellcheck disable=SC2120 # the probe's --cert/--key are passed in the eval'd checks below
+  aop_try() { curl -s -o /dev/null -w '%{http_code}' --max-time 8 --resolve "$aop_site:443:127.0.0.1" --cacert /etc/caddy/origin/cert.pem "$@" "https://$aop_site/"; }
+  for _ in $(seq 1 20); do [[ "$(aop_try)" == 000 ]] && break; sleep 3; done
+  check "origin pulls: a connection without Cloudflare's certificate is refused" '[[ "$(aop_try)" == 000 ]]'
+  check "origin pulls: the agent probe's certificate is accepted" '(( $(aop_try --cert '"$CIC"'/etc/probe/client.pem --key '"$CIC"'/etc/probe/client.key) > 0 && $(aop_try --cert '"$CIC"'/etc/probe/client.pem --key '"$CIC"'/etc/probe/client.key) < 500 ))'
+  check "origin pulls: the probe CA key is root-only" '[[ "$(stat -c %a '"$CIC"'/etc/probe/ca.key)" == 600 ]]'
+fi
 check "base image present"       'docker image inspect codeinchrome/laravel:8.3'
 check "caddy reload works"       'systemctl reload caddy'
 check "admin api loopback only"  '! has "0.0.0.0:2019" ss -ltn'

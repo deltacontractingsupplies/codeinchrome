@@ -15,14 +15,16 @@ import (
 // there was no answer. Used around a vhost rewrite: `caddy validate` accepts
 // a config whose expressions then fail on every request - which answered two
 // sites with 502 for a minute (2026-09-25).
-var edgeStatus = func(ctx context.Context, domain string, roots *x509.CertPool) int {
+var edgeStatus = func(ctx context.Context, domain string, roots *x509.CertPool, clientCerts []tls.Certificate) int {
 	dialer := &net.Dialer{Timeout: 5 * time.Second}
 	client := &http.Client{
 		Timeout: 10 * time.Second,
 		Transport: &http.Transport{
 			// Verified: against this host's own origin certificate (which only
 			// Cloudflare trusts publicly), or the system's roots without one.
-			TLSClientConfig: &tls.Config{ServerName: domain, RootCAs: roots, MinVersion: tls.VersionTLS12},
+			// With Authenticated Origin Pulls on, the probe shows this host's
+			// own client certificate, as Cloudflare shows its own.
+			TLSClientConfig: &tls.Config{ServerName: domain, RootCAs: roots, Certificates: clientCerts, MinVersion: tls.VersionTLS12},
 			DialContext: func(ctx context.Context, network, _ string) (net.Conn, error) {
 				return dialer.DialContext(ctx, network, "127.0.0.1:443")
 			},
@@ -71,4 +73,18 @@ func (m *Manager) edgeRoots() *x509.CertPool {
 		return nil
 	}
 	return pool
+}
+
+// edgeClient is the probe's client certificate, when origin pulls are
+// authenticated; nil otherwise (or unreadable: the probe then answers 0 -
+// "no answer" - and never "broken").
+func (m *Manager) edgeClient() []tls.Certificate {
+	if m.cfg.OriginClientCA == "" || m.cfg.ProbeCert == "" {
+		return nil
+	}
+	c, err := tls.LoadX509KeyPair(m.cfg.ProbeCert, m.cfg.ProbeKey)
+	if err != nil {
+		return nil
+	}
+	return []tls.Certificate{c}
 }
