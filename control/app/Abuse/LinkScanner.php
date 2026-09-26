@@ -3,6 +3,7 @@
 namespace App\Abuse;
 
 use App\Fleet\AgentClient;
+use App\Fleet\RenderHost;
 use App\Models\Site;
 use App\Support\BoundedSink;
 use Illuminate\Support\Facades\Cache;
@@ -263,11 +264,8 @@ class LinkScanner
     /** The page rendered on another host than the site's; null if that fails. */
     private function rendered(Site $site, string $url): ?string
     {
-        $hosts = array_keys(config('fleet.hosts', []));
-        $others = array_values(array_diff($hosts, [$site->host]));
-        $host = $others ? $others[crc32($site->site_id) % count($others)] : $site->host;
         try {
-            $dom = AgentClient::for($host)->render($url)['dom'] ?? '';
+            $dom = AgentClient::for(RenderHost::for($site))->render($url)['dom'] ?? '';
         } catch (\Throwable) {
             return null; // the raw read still counts; a renderer that failed proves nothing
         }

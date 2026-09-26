@@ -43,6 +43,7 @@
      data-github-link="{{ route('sites.github.link', $site) }}"
      data-github-push="{{ route('sites.github.push', $site) }}"
      data-sign-in-link="{{ route('sites.sign-in-link', $site) }}"
+     data-screens="{{ route('sites.screens', $site) }}"
      data-command-live="{{ route('console.live', $site) }}"
      data-db-snapshots="{{ route('db.snapshots', $site) }}"
      data-db-snapshot-restore="{{ route('db.snapshots.restore', [$site, '20000101T000000Z-name.sql.gz']) }}"
@@ -215,6 +216,14 @@
                 <p>Open a file from the explorer.</p>
                 <p class="hint">Save with <kbd>⌘S</kbd> / <kbd>Ctrl S</kbd>. An AI agent can drive this page through <code>window.cic</code> — run <code>cic.help()</code> in the console.</p>
             </div>
+            <section id="screens" class="screens" hidden aria-labelledby="screensTitle">
+                <div class="screens-bar">
+                    <span id="screensTitle">Every screen size</span>
+                    <span class="panel-spacer"></span>
+                    <button type="button" id="screensClose" title="Close (Esc)">✕</button>
+                </div>
+                <div id="screensRow" class="screens-row"></div>
+            </section>
             <section id="panel" class="panel" hidden>
                 <div class="panel-tabs" role="tablist">
                     <button type="button" id="ptTerminal" class="on" role="tab">Terminal</button>

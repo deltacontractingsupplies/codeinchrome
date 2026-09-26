@@ -452,6 +452,26 @@ class AgentClient
     }
 
     /** A hosted page's DOM after its scripts ran (agent render.go): ['dom' => ..., 'ms' => ...]. */
+    /**
+     * A platform page at phone, tablet and desktop size, as PNGs (base64).
+     *
+     * @return list<array{name: string, width: int, height: int, png: string}>
+     */
+    public function renderShots(string $url): array
+    {
+        try {
+            $response = Http::timeout(170)->acceptJson()->withToken($this->token)->post($this->baseUrl.'/v1/render/shots', ['url' => $url]);
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}] to show the page.", previous: $e);
+        }
+        $json = $response->json() ?? [];
+        if (($json['ok'] ?? false) !== true) {
+            throw new AgentRefused(sprintf('Agent on [%s] refused to show the page: %s (%s)', $this->host, $json['error'] ?? 'unknown_error', $json['hint'] ?? ''), detail: $json);
+        }
+
+        return $json['shots'] ?? [];
+    }
+
     public function render(string $url): array
     {
         try {

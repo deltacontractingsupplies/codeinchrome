@@ -373,3 +373,11 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg
 .snapshots li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .snapshots button { flex: none; font-size: 11px; padding: 1px 6px; }
 .snapshots .snap-empty { color: var(--desc); }
+
+/* Every screen size, side by side (editor.js showScreens). */
+.screens { position: absolute; inset: 0; z-index: 20; display: flex; flex-direction: column; background: var(--editor-bg); }
+.screens-bar { display: flex; align-items: center; gap: 8px; height: 30px; padding: 0 12px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--desc); }
+.screens-row { flex: 1; display: flex; gap: 16px; align-items: flex-start; padding: 16px; overflow: auto; }
+.screens-row figure { margin: 0; flex-basis: 0; min-width: 0; display: flex; flex-direction: column; gap: 6px; }
+.screens-row img { width: 100%; height: auto; border: 1px solid var(--border); border-radius: 4px; background: #fff; }
+.screens-row figcaption { font: 11px var(--mono); color: var(--desc); text-align: center; }

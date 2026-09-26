@@ -5,8 +5,11 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"io"
 	"net/url"
+	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -102,4 +105,104 @@ func (m *Manager) RenderURL(ctx context.Context, raw string) (RenderResult, erro
 		return RenderResult{}, fmt.Errorf("the page could not be rendered: %v", err)
 	}
 	return RenderResult{DOM: out.buf.String(), Truncated: out.truncated, Millis: time.Since(start).Milliseconds()}, nil
+}
+
+// Screen sizes a page is checked at (owner, 2026-09-26: every page must work
+// on every device): a phone, a tablet and a laptop, portrait.
+var ScreenSizes = []ScreenSize{{"phone", 390, 844}, {"tablet", 820, 1180}, {"desktop", 1440, 900}}
+
+// ScreenSize is one device's viewport.
+type ScreenSize struct {
+	Name   string `json:"name"`
+	Width  int    `json:"width"`
+	Height int    `json:"height"`
+}
+
+// Shot is a page as one screen size shows it.
+type Shot struct {
+	ScreenSize
+	PNG []byte `json:"png"` // base64 in JSON
+}
+
+const maxShotPNG = 8 << 20
+
+// RenderShots screenshots a hosted page at every screen size, in the same
+// locked-down container as RenderURL - one browser run per size, one at a
+// time. The container writes only the picture, into a directory of its own
+// that is removed afterwards.
+func (m *Manager) RenderShots(ctx context.Context, raw string) ([]Shot, error) {
+	target, err := m.renderable(raw)
+	if err != nil {
+		return nil, err
+	}
+	select {
+	case renderSlots <- struct{}{}:
+		defer func() { <-renderSlots }()
+	case <-time.After(20 * time.Second):
+		return nil, fmt.Errorf("the renderer is busy; try again shortly")
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+	if renderDocker(ctx, "network", "inspect", renderNetwork).Run() != nil {
+		_ = renderDocker(ctx, "network", "create", renderNetwork).Run()
+	}
+	out, err := os.MkdirTemp("", "cic-shot-")
+	if err != nil {
+		return nil, err
+	}
+	defer os.RemoveAll(out)
+	if err := os.Chown(out, 10001, 10001); err != nil && !os.IsPermission(err) {
+		return nil, err
+	}
+	var shots []Shot
+	for _, size := range ScreenSizes {
+		b := make([]byte, 6)
+		_, _ = rand.Read(b)
+		name := "cic-render-" + hex.EncodeToString(b)
+		runCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
+		cmd := renderDocker(runCtx, "run", "--rm", "--name", name, "--network", renderNetwork,
+			"--memory", "768m", "--memory-swap", "768m", "--cpus", "1", "--pids-limit", "256",
+			"--read-only", "--tmpfs", "/tmp:size=256m,mode=1777", "--cap-drop", "ALL",
+			"--security-opt", "no-new-privileges", "--user", "10001:10001",
+			"-v", out+":/out",
+			"-e", "HOME=/tmp", "-e", "XDG_CONFIG_HOME=/tmp", "-e", "XDG_CACHE_HOME=/tmp",
+			renderImage,
+			"--disable-crash-reporter", "--crash-dumps-dir=/tmp/crash", "--user-agent="+renderUA,
+			fmt.Sprintf("--window-size=%d,%d", size.Width, size.Height),
+			"--virtual-time-budget=8000", "--screenshot=/out/"+size.Name+".png", target)
+		runErr := cmd.Run()
+		_ = renderDocker(context.Background(), "rm", "-f", name).Run()
+		cancel()
+		png, err := readShot(filepath.Join(out, size.Name+".png"))
+		if err != nil {
+			return nil, fmt.Errorf("the page could not be shown at %s size: %v", size.Name, firstNonNil(err, runErr))
+		}
+		shots = append(shots, Shot{ScreenSize: size, PNG: png})
+	}
+	return shots, nil
+}
+
+func readShot(path string) ([]byte, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer f.Close()
+	b, err := io.ReadAll(io.LimitReader(f, maxShotPNG+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(b) > maxShotPNG || len(b) < 8 || string(b[1:4]) != "PNG" {
+		return nil, fmt.Errorf("no picture came back")
+	}
+	return b, nil
+}
+
+func firstNonNil(errs ...error) error {
+	for _, e := range errs {
+		if e != nil {
+			return e
+		}
+	}
+	return nil
 }
