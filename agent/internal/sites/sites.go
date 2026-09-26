@@ -108,6 +108,11 @@ type Site struct {
 	// page gains from being found.
 	NoIndex bool `json:"noIndex,omitempty"`
 
+	// RestrictedEgress: the same first week, the site reaches out only on
+	// the web's ports, with no UDP and about 8 Mbit/s (restrict.go) - what a
+	// throwaway account does in its first days is what this blocks.
+	RestrictedEgress bool `json:"restrictedEgress,omitempty"`
+
 	// PHP settings the owner chose (php.go). Zero values mean the image's
 	// defaults; anything set is written to an ini file the container mounts
 	// read-only, so the site's own code cannot change or widen it.

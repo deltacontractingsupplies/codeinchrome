@@ -17,6 +17,8 @@ class SitesIndexingTest extends TestCase
 
     private bool $hostDown = false;
 
+    private array $egress = [];
+
     protected function setUp(): void
     {
         parent::setUp();
@@ -29,6 +31,10 @@ class SitesIndexingTest extends TestCase
             $this->sent[explode('/', parse_url($r->url(), PHP_URL_PATH))[3]] = $r['noIndex'];
 
             return Http::response(['ok' => true, 'noIndex' => $r['noIndex']]);
+        }, '127.0.0.1:9441/v1/sites/*/egress' => function (ClientRequest $r) {
+            $this->egress[explode('/', parse_url($r->url(), PHP_URL_PATH))[3]] = $r['restricted'];
+
+            return Http::response(['ok' => true, 'restricted' => $r['restricted']]);
         }]);
     }
 
@@ -49,6 +55,8 @@ class SitesIndexingTest extends TestCase
 
         $this->assertSame(['week-old' => false, 'day-old' => true], $this->sent,
             'the young site is re-sent true, in case its host missed it; a site never hidden is not touched');
+        // The first week's egress limits go and stay exactly with the noindex.
+        $this->assertSame(['week-old' => false, 'day-old' => true], $this->egress);
         $this->assertNull($old->fresh()->noindex_until);
         $this->assertNotNull($young->fresh()->noindex_until);
         $this->assertNull($never->fresh()->noindex_until);

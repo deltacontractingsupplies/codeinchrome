@@ -168,10 +168,14 @@ class ProvisioningTest extends TestCase
         $this->assertEquals($now->copy()->addDays(7), $free->fresh()->noindex_until);
         Http::assertSent(fn ($r) => $r->method() === 'PUT'
             && str_ends_with($r->url(), '/v1/sites/fresh-cafe/indexing') && $r['noIndex'] === true);
+        // And its first week's restricted egress (agent restrict.go).
+        Http::assertSent(fn ($r) => $r->method() === 'PUT'
+            && str_ends_with($r->url(), '/v1/sites/fresh-cafe/egress') && $r['restricted'] === true);
 
         $paid = Provisioner::make()->provision(User::factory()->create(['plan' => 'starter']), 'paid-cafe');
         $this->assertNull($paid->fresh()->noindex_until);
         Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/v1/sites/paid-cafe/indexing'));
+        Http::assertNotSent(fn ($r) => str_ends_with($r->url(), '/v1/sites/paid-cafe/egress'));
     }
 
     public function test_a_host_that_misses_the_noindex_call_does_not_fail_the_site(): void

@@ -16,7 +16,7 @@ class SitesIndexing extends Command
 {
     protected $signature = 'sites:indexing';
 
-    protected $description = 'Let search engines index free sites after their first week';
+    protected $description = 'Lift a free site\'s first-week limits (noindex, restricted egress) once it is past them and clean';
 
     public function handle(): int
     {
@@ -28,7 +28,9 @@ class SitesIndexing extends Command
             $clean = $site->scanned_clean_at?->gte(now()->subDays(7)) && $site->links_clean_at?->gte(now()->subDays(7));
             $lift = ($site->noindex_until->isPast() || $site->user?->isPaid()) && $clean;
             try {
+                // The first week's egress limits end with it (agent restrict.go).
                 AgentClient::for($site->host)->setNoIndex($site->site_id, ! $lift);
+                AgentClient::for($site->host)->setRestrictedEgress($site->site_id, ! $lift);
             } catch (\Throwable $e) {
                 $failed++;
                 $this->warn("{$site->site_id}: ".$e->getMessage());
