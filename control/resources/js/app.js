@@ -20,3 +20,20 @@ createForm?.addEventListener('submit', () => {
     button.textContent = 'Creating...';
   }
 });
+
+// <button data-copy="#id">: copies that element's text (a deploy key, say)
+// and says so on the button for two seconds.
+document.addEventListener('click', async (e) => {
+  const button = e.target.closest('[data-copy]');
+  if (!button) return;
+  const source = document.querySelector(button.dataset.copy);
+  if (!source) return;
+  const label = button.textContent;
+  try {
+      await navigator.clipboard.writeText(source.textContent.trim());
+      button.textContent = 'copied';
+  } catch {
+      button.textContent = 'select it and copy';
+  }
+  setTimeout(() => { button.textContent = label; }, 2000);
+});

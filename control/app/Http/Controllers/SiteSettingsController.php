@@ -26,9 +26,24 @@ class SiteSettingsController extends Controller
     {
         $this->authorizeSite($request, $site);
 
+        // The GitHub link lives on the host; if the host cannot say, the page
+        // says so rather than showing an unlinked site.
+        try {
+            $github = $site->status === 'live' ? AgentClient::for($site->host)->github($site->site_id) : null;
+            $githubKnown = true;
+        } catch (\Throwable $e) {
+            // Whatever went wrong, the rest of the page still works.
+            if (! $e instanceof AgentRefused && ! $e instanceof AgentUnreachable) {
+                report($e);
+            }
+            [$github, $githubKnown] = [null, false];
+        }
+
         return view('sites.settings', [
             'site' => $site,
             'allowed' => (bool) ($request->user()->planConfig()['background'] ?? false),
+            'github' => $github,
+            'githubKnown' => $githubKnown,
         ]);
     }
 

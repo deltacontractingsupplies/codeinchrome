@@ -69,7 +69,13 @@ func (m *Manager) git(ctx context.Context, id string, args ...string) (string, e
 
 // gitIn is git with stdin.
 func (m *Manager) gitIn(ctx context.Context, id string, stdin io.Reader, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, historyTimeout)
+	return m.gitWith(ctx, id, stdin, nil, historyTimeout, args...)
+}
+
+// gitWith is git with stdin, extra environment (a push's GIT_SSH_COMMAND) and
+// its own time limit - the same hardening as every other call.
+func (m *Manager) gitWith(ctx context.Context, id string, stdin io.Reader, env []string, timeout time.Duration, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 	base := []string{
 		"-c", "core.hooksPath=/dev/null",
@@ -90,6 +96,7 @@ func (m *Manager) gitIn(ctx context.Context, id string, stdin io.Reader, args ..
 		"GIT_AUTHOR_NAME=codeinchrome", "GIT_AUTHOR_EMAIL=history@codeinchrome.com",
 		"GIT_COMMITTER_NAME=codeinchrome", "GIT_COMMITTER_EMAIL=history@codeinchrome.com",
 	}
+	cmd.Env = append(cmd.Env, env...)
 	var out, errb bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errb
 	if err := cmd.Run(); err != nil {
@@ -120,7 +127,10 @@ func (m *Manager) record(ctx context.Context, id, message string) {
 	// after its save succeeded must not cost that save its version.
 	if err := m.commit(context.WithoutCancel(ctx), id, message); err != nil {
 		slog.Warn("history: commit failed", "site", id, "err", err)
+		return
 	}
+	// Linked to GitHub: the new version goes there too (github.go).
+	m.scheduleGitHubPush(id)
 }
 
 func (m *Manager) commit(ctx context.Context, id, message string) error {

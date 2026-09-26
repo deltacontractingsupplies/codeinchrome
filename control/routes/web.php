@@ -149,6 +149,10 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::post('/sites/{site}/backups/restore', [BackupController::class, 'restore'])->middleware('throttle:6,1')->name('sites.backups.restore');
     Route::put('/sites/{site}/background', [SiteSettingsController::class, 'background'])->middleware('throttle:provision')->name('sites.background');
     Route::put('/sites/{site}/php', [SiteSettingsController::class, 'php'])->middleware('throttle:provision')->name('sites.php');
+    Route::get('/sites/{site}/github', [\App\Http\Controllers\GitHubController::class, 'show'])->middleware('throttle:logs')->name('sites.github');
+    Route::post('/sites/{site}/github', [\App\Http\Controllers\GitHubController::class, 'link'])->middleware('throttle:provision')->name('sites.github.link');
+    Route::post('/sites/{site}/github/push', [\App\Http\Controllers\GitHubController::class, 'push'])->middleware('throttle:provision')->name('sites.github.push');
+    Route::delete('/sites/{site}/github', [\App\Http\Controllers\GitHubController::class, 'unlink'])->middleware('throttle:provision')->name('sites.github.unlink');
     Route::get('/sites/{site}/domains', [DomainController::class, 'index'])->name('domains.index');
     Route::post('/sites/{site}/domains', [DomainController::class, 'store'])->middleware(['throttle:domains', VerifiedWhenMailEnabled::class])->name('domains.store');
     // Verification queries public DNS; throttled so it cannot be used to make
