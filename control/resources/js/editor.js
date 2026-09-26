@@ -2736,10 +2736,10 @@ const fromView = (text) => (typeof text === 'string' ? text.replaceAll('＝', '=
 // that can still run the old code - cic.request waits it out.
 let lastWriteAt = 0;
 
-function agentWrote(path, content, revision) {
+function agentWrote(path, content, revision, { created } = {}) {
   lastWriteAt = Date.now();
   seenRevision.set(path, revision);
-  noteAgentChange(path, content, revision);
+  noteAgentChange(path, content, revision, created);
   const t = tabs.get(path);
   if (t && !t.dirty && typeof content === 'string') {
     Object.assign(t, { content, saved: content, revision, conflict: null });
@@ -2818,10 +2818,12 @@ function inListing(path) {
 }
 
 // Before the tab or the tree learn of it: what it was, what it is now.
-function noteAgentChange(path, content, revision) {
+// created: the host's own answer (the write says whether the file is new);
+// only an older host leaves it out, and then the editor's own knowledge decides.
+function noteAgentChange(path, content, revision, created) {
   const t = tabs.get(path);
   const before = t && !t.preview ? t.saved : knownContent.get(path);
-  const existed = before !== undefined ? true : inListing(path);
+  const existed = typeof created === 'boolean' ? !created : (before !== undefined ? true : inListing(path));
   const lines = typeof content === 'string' ? changedLines(existed === false ? null : (before ?? null), content) : null;
   if (!changedFiles.has(path) || changedFiles.get(path) === 'D') changedFiles.set(path, existed === false ? 'A' : 'M');
   rememberContent(path, content);
@@ -3541,7 +3543,7 @@ const cicApi = {
       if (expect === '') {
         res.note = 'Written unconditionally: no revision was checked, so a concurrent change would have been overwritten. Read the file first, or pass expect.';
       }
-      agentWrote(path, content, res.revision);
+      agentWrote(path, content, res.revision, { created: res.created });
       await refreshAncestors(path);
       status(`Agent wrote ${path}`);
     }
@@ -3567,7 +3569,7 @@ const cicApi = {
       const bad = res.written.filter((w) => w.lint && w.lint !== 'ok');
       if (bad.length) res.syntaxErrors = Object.fromEntries(bad.map((w) => [norm(w.path), w.lint]));
       const byPath = new Map(list.map((f) => [f.path, f.content]));
-      for (const w of res.written) agentWrote(norm(w.path), byPath.get(norm(w.path)), w.revision);
+      for (const w of res.written) agentWrote(norm(w.path), byPath.get(norm(w.path)), w.revision, { created: w.created });
       // One refresh per folder, not per file, and in the background: the
       // files are saved, and the caller should not wait for the tree.
       const oneEach = new Map(list.map((f) => [f.path.slice(0, f.path.lastIndexOf('/')) || '/', f.path]));

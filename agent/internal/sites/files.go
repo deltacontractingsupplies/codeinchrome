@@ -322,55 +322,64 @@ func (m *Manager) WriteFile(ctx context.Context, id, rel, content string) error 
 // Written to a temporary file in the same directory and renamed, so a failure
 // part-way leaves the previous version intact rather than a truncated one.
 func (m *Manager) WriteFileIf(ctx context.Context, id, rel, content, expect string) (string, error) {
+	rev, _, err := m.WriteFileIfCreated(ctx, id, rel, content, expect)
+	return rev, err
+}
+
+// WriteFileIfCreated is WriteFileIf, also saying whether the file is new -
+// what the editor shows the person as "A" (added) rather than "M".
+func (m *Manager) WriteFileIfCreated(ctx context.Context, id, rel, content, expect string) (string, bool, error) {
 	// The same form as every other version message: site-relative, no leading slash.
 	return m.writeFileIf(ctx, id, rel, content, expect, "save "+strings.TrimPrefix(filepath.Clean("/"+rel), "/"))
 }
 
 // writeFileIf is WriteFileIf with the history message to record ("" records
 // nothing: the caller records its own, as a restore does).
-func (m *Manager) writeFileIf(ctx context.Context, id, rel, content, expect, note string) (string, error) {
-	rev, err := m.writeLocked(id, rel, content, expect)
+func (m *Manager) writeFileIf(ctx context.Context, id, rel, content, expect, note string) (string, bool, error) {
+	rev, created, err := m.writeLocked(id, rel, content, expect)
 	if err == nil && note != "" {
 		m.record(ctx, id, note)
 	}
-	return rev, err
+	return rev, created, err
 }
 
-func (m *Manager) writeLocked(id, rel, content, expect string) (string, error) {
+func (m *Manager) writeLocked(id, rel, content, expect string) (string, bool, error) {
 	// Held across check-and-rename, or two writers could both pass the check.
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	root, relAbs, err := m.checkWrite(id, rel, content, expect)
+	root, relAbs, existed, err := m.checkWrite(id, rel, content, expect)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
-	return writePrepared(root, relAbs, content)
+	rev, err := writePrepared(root, relAbs, content)
+	return rev, !existed, err
 }
 
 // checkWrite does everything a write needs to know before it touches the
 // disk: the size, the path, and the caller's expectation of what is there.
-// The caller holds m.mu until the write itself is done.
-func (m *Manager) checkWrite(id, rel, content, expect string) (root, relAbs string, err error) {
+// The caller holds m.mu until the write itself is done. existed: a file was
+// there already (it is replaced, not added).
+func (m *Manager) checkWrite(id, rel, content, expect string) (root, relAbs string, existed bool, err error) {
 	if len(content) > MaxFileSize {
-		return "", "", fmt.Errorf("content is %d bytes; the limit is %d", len(content), MaxFileSize)
+		return "", "", false, fmt.Errorf("content is %d bytes; the limit is %d", len(content), MaxFileSize)
 	}
 	// Encrypted or obfuscated PHP is refused before it is written (scan.go).
 	if bad := scanContent(rel, content); bad != nil {
-		return "", "", bad
+		return "", "", false, bad
 	}
 	// And PHP saved by hand into vendor/ gets the rules too (dependencies.go).
 	if err := refuseDependencyEdit(rel, content); err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 
 	abs, err := m.resolve(id, rel)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	root, err = m.realRoot(id)
 	if err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 	// Everything below goes through the *Beneath helpers, which re-check in
 	// the kernel what resolve() checked in user space: the site's own code
@@ -379,16 +388,17 @@ func (m *Manager) checkWrite(id, rel, content, expect string) (root, relAbs stri
 	relAbs = strings.TrimPrefix(abs, root)
 	// The site's own secrets never go where the world can read them.
 	if err := publishesSecret(root, relAbs, []byte(content)); err != nil {
-		return "", "", err
+		return "", "", false, err
 	}
 
 	var current []byte
 	exists := false
 	if f, oerr := openBeneath(root, relAbs); oerr == nil {
+		existed = true
 		info, serr := f.Stat()
 		if serr == nil && info.IsDir() {
 			f.Close()
-			return "", "", fmt.Errorf("that is a directory")
+			return "", "", false, fmt.Errorf("that is a directory")
 		}
 		if expect != "" {
 			current, oerr = io.ReadAll(io.LimitReader(f, MaxFileSize+1))
@@ -396,21 +406,21 @@ func (m *Manager) checkWrite(id, rel, content, expect string) (root, relAbs stri
 		}
 		f.Close()
 	} else if !errors.Is(oerr, os.ErrNotExist) {
-		return "", "", fmt.Errorf("cannot write there")
+		return "", "", false, fmt.Errorf("cannot write there")
 	}
 
 	if expect != "" {
 		switch {
 		case expect == "absent" && exists:
-			return "", "", ErrConflict
+			return "", "", false, ErrConflict
 		case expect != "absent" && !exists:
-			return "", "", ErrConflict
+			return "", "", false, ErrConflict
 		case expect != "absent" && Revision(current) != expect:
-			return "", "", ErrConflict
+			return "", "", false, ErrConflict
 		}
 	}
 
-	return root, relAbs, nil
+	return root, relAbs, existed, nil
 }
 
 func writePrepared(root, relAbs, content string) (string, error) {

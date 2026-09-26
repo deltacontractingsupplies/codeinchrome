@@ -177,3 +177,19 @@ func TestHistoryWorksWithLaravelsOwnGitignore(t *testing.T) {
 		}
 	}
 }
+
+// A write says whether the file is new: the editor marks it A (added), not M.
+func TestAWriteSaysWhetherTheFileIsNew(t *testing.T) {
+	m, id := historyManager(t)
+	ctx := context.Background()
+	if _, created, err := m.WriteFileIfCreated(ctx, id, "app/New.php", "<?php", ""); err != nil || !created {
+		t.Fatalf("new file: created=%v %v", created, err)
+	}
+	if _, created, _ := m.WriteFileIfCreated(ctx, id, "app/New.php", "<?php // 2", ""); created {
+		t.Fatal("an existing file was reported as new")
+	}
+	out, err := m.WriteMany(ctx, id, []FileWrite{{Path: "app/New.php", Content: "<?php // 3"}, {Path: "app/Other.php", Content: "<?php"}}, "")
+	if err != nil || len(out) != 2 || out[0].Created || !out[1].Created {
+		t.Fatalf("batch: %+v %v", out, err)
+	}
+}
