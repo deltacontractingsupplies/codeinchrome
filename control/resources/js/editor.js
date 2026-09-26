@@ -6,6 +6,7 @@ import { installTailwind } from './tailwind.js';
 import { installLaravelProviders } from './laravel.js';
 import { renderMarkdown } from './markdown.js';
 import { createShell, unifiedDiff } from './shell.js';
+import { changedLines, lineRanges, createActivity, latestOnly } from './activity.js';
 import { enabled as extensionOn, setEnabled as setExtension, listExtensions } from './extensions.js';
 
 // Which built-in extensions this editor loaded with (Extensions view): a
@@ -52,6 +53,7 @@ const SITE = {
   lspCloseUrl: root.dataset.lspClose,
   dbImportUrl: root.dataset.dbImport,
   commandUrl: root.dataset.command,
+  commandLiveUrl: root.dataset.commandLive,
   logsUrl: root.dataset.logs,
   historyUrl: root.dataset.history,
   binUrl: root.dataset.bin,
@@ -222,6 +224,17 @@ function dropModel(key) {
   models.get(key)?.dispose();
   models.delete(key);
 }
+
+/* The agent's live activity (the block "what the agent is doing, live" below):
+ * declared here, before anything that draws the tree or the panel can run. */
+const activity = createActivity();
+const changedFiles = new Map(); // path -> 'A' | 'M' | 'D', this session
+const knownContent = new Map(); // path -> the last content seen, to show what a write changed
+let followAgent = localStorage.getItem('cic.followAgent') !== 'off';
+let followTab = null;
+let agentLines = null;
+let agentPanelOpened = false;
+const renderActivity = latestOnly(() => drawActivity(), 100);
 
 /** path -> { content, saved, revision, dirty, conflict } */
 const tabs = new Map();
@@ -490,6 +503,15 @@ function nodeFor(entry, depth, chain = [entry]) {
     el.append(img);
   }
   el.append(name);
+  const change = changedFiles.get(entry.path);
+  if (change && !entry.dir) {
+    // What the agent did to it this session, as VS Code marks git changes.
+    const b = document.createElement('span');
+    b.className = `chg chg-${change}`;
+    b.textContent = change;
+    b.title = { A: 'Added by the agent', M: 'Changed by the agent', D: 'Deleted by the agent' }[change];
+    el.append(b);
+  }
   if (entry.path === '/public') {
     // The web root: the only folder the world can see.
     const pub = document.createElement('i');
@@ -1480,7 +1502,8 @@ function renderTabs() {
       sr.textContent = ' (unsaved)';
       name.append(sr);
     }
-    name.addEventListener('click', () => show(path));
+    if (t.agentPreview) el.classList.add('agent-preview');
+    name.addEventListener('click', () => { t.agentPreview = false; show(path); });
 
     const x = document.createElement('button');
     x.type = 'button';
@@ -1623,6 +1646,7 @@ async function openFile(path) {
   }
 
   seenRevision.set(path, res.revision);
+  rememberContent(path, res.content);
   const draft = loadDrafts()[path];
   const tab = { content: res.content, saved: res.content, revision: res.revision, dirty: false, conflict: null };
 
@@ -1851,6 +1875,7 @@ editor.onDidChangeModelContent(() => {
   if (!t || t.version) return;
   t.content = editor.getValue();
   t.dirty = t.content !== t.saved;
+  t.agentPreview = false; // typed in: it stays open
   saveDrafts();
   renderTabs();
   paint();
@@ -2183,8 +2208,11 @@ function showPanel(tab = panelTab) {
   $('panel').hidden = false;
   $('ptTerminal').classList.toggle('on', tab === 'terminal');
   $('ptLogs').classList.toggle('on', tab === 'logs');
+  $('ptAgent').classList.toggle('on', tab === 'agent');
   $('termView').hidden = tab !== 'terminal';
   $('logsView').hidden = tab !== 'logs';
+  $('agentView').hidden = tab !== 'agent';
+  if (tab === 'agent') renderActivity();
   if (tab === 'terminal') $('termArgs').focus();
   if (tab === 'logs' && !$('logOut').textContent) loadLogs();
 }
@@ -2242,24 +2270,62 @@ function splitArgs(line) {
  * destroys data; an agent calling cic.run gets the refusal and must resend
  * with { confirm: true } itself.
  */
+/*
+ * A command's output as it prints, like a terminal - not all at once at the
+ * end (owner, 2026-09-26). The run is named; its output is read by that name
+ * every 400 ms (console.live) while it runs, and when it ends only what was
+ * not shown yet is added. Offsets are bytes (the host's), so the rest is cut
+ * from the answer's bytes, never mid-character.
+ */
+function liveOutput() {
+  const key = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('') + 'x0';
+  let shown = 0;
+  let stopped = false;
+  const loop = (async () => {
+    while (!stopped) {
+      await new Promise((r) => setTimeout(r, 400));
+      if (stopped) break;
+      const r = await apiAt(SITE.commandLiveUrl, 'GET', { key, from: shown });
+      if (!r.ok) break;
+      if (r.output) {
+        appendAnsi($('termOut'), r.output);
+        shown = r.next;
+      }
+    }
+  })();
+  return {
+    key,
+    async rest(full) {
+      stopped = true;
+      await loop;
+      const bytes = new TextEncoder().encode(full || '');
+      return new TextDecoder().decode(bytes.slice(Math.min(shown, bytes.length)));
+    },
+  };
+}
+
 async function runCommand(tool, args, { confirm = false, interactive = true } = {}) {
   showPanel('terminal');
   termLine(`$ ${tool} ${args.join(' ')}`, 't-cmd');
-  let res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm }, {
+  let live = liveOutput();
+  let res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm, live: live.key }, {
     onBusy: () => termLine('Another command is running; waiting for it to finish…', 't-dim'),
   });
 
   if (res.status === 409 && res.error === 'needs_confirm' && interactive) {
+    await live.rest('');
     const yes = await ask(`"${tool} ${args[0]}" destroys data in this site. Run it?`, { okLabel: 'Run it' });
     if (!yes) {
       termLine('Not run.', 't-dim');
       return res;
     }
-    res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm: true });
+    live = liveOutput();
+    res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm: true, live: live.key });
   }
 
+  const rest = await live.rest(res.result?.output);
   if (res.result) {
-    appendAnsi($('termOut'), res.result.output || '');
+    appendAnsi($('termOut'), rest);
     const r = res.result;
     termLine(`${r.timedOut ? 'stopped at the time limit' : `exit ${r.exitCode}`} · ${(r.elapsedMs / 1000).toFixed(1)} s${r.truncated ? ' · output truncated' : ''}`,
       r.exitCode === 0 ? 't-dim' : 't-err');
@@ -2303,6 +2369,7 @@ async function loadLogs(source = $('logSource').value, lines = 300) {
 $('sbPanel').addEventListener('click', () => ($('panel').hidden ? showPanel() : ($('panel').hidden = true)));
 $('ptTerminal').addEventListener('click', () => showPanel('terminal'));
 $('ptLogs').addEventListener('click', () => showPanel('logs'));
+$('ptAgent').addEventListener('click', () => showPanel('agent'));
 $('ptClose').addEventListener('click', () => { $('panel').hidden = true; });
 $('logRefresh').addEventListener('click', () => loadLogs());
 $('logSource').addEventListener('change', () => loadLogs());
@@ -2672,6 +2739,7 @@ let lastWriteAt = 0;
 function agentWrote(path, content, revision) {
   lastWriteAt = Date.now();
   seenRevision.set(path, revision);
+  noteAgentChange(path, content, revision);
   const t = tabs.get(path);
   if (t && !t.dirty && typeof content === 'string') {
     Object.assign(t, { content, saved: content, revision, conflict: null });
@@ -2680,6 +2748,133 @@ function agentWrote(path, content, revision) {
   }
   if (t && path === active) show(path);
 }
+
+/* ───────── what the agent is doing, live (activity.js) ─────────
+ * Every write, edit, delete and command the agent makes through window.cic
+ * shows here the moment it happens: a step in the Agent panel, a letter on
+ * the file in the explorer (A added, M changed, D deleted), and - while
+ * "Follow" is on - the file itself, opened in one preview tab with the lines
+ * it changed highlighted. The next file replaces that tab unless the person
+ * clicked it or typed in it. Throttled: a 500-file write redraws ~10 times a
+ * second, not 500. */
+
+function rememberContent(path, content) {
+  if (typeof content !== 'string') return;
+  knownContent.delete(path);
+  knownContent.set(path, content);
+  if (knownContent.size > 200) knownContent.delete(knownContent.keys().next().value);
+}
+
+function agentStep(entry) {
+  const item = activity.add(entry);
+  // Shown once, the first time the agent acts on this page; closed after
+  // that, it stays closed.
+  if (!agentPanelOpened) {
+    agentPanelOpened = true;
+    showPanel('agent');
+  }
+  renderActivity();
+  return item;
+}
+
+function agentStepDone(item, ok, detail = '') {
+  activity.finish(item.id, { ok, detail });
+  renderActivity();
+}
+
+function drawActivity() {
+  if ($('agentView').hidden) return;
+  const items = activity.items();
+  const ol = $('agentLog');
+  ol.replaceChildren(...items.map((i) => {
+    const li = document.createElement('li');
+    li.className = `step step-${i.kind} ${i.state}`;
+    const time = document.createElement('time');
+    time.textContent = new Date(i.at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    const text = document.createElement(i.path ? 'button' : 'span');
+    text.className = 'step-text';
+    text.textContent = i.text; // textContent: paths and commands are data, never markup
+    if (i.path) {
+      text.type = 'button';
+      text.addEventListener('click', () => openFile(i.path));
+    }
+    const meta = document.createElement('span');
+    meta.className = 'step-meta';
+    meta.textContent = [i.detail, i.ms !== null ? `${(i.ms / 1000).toFixed(1)} s` : ''].filter(Boolean).join(' · ');
+    li.append(time, text, meta);
+    return li;
+  }));
+  ol.lastElementChild?.scrollIntoView({ block: 'nearest' });
+  const files = [...changedFiles.values()];
+  $('agentMeta').textContent = files.length
+    ? `${files.filter((c) => c === 'A').length} added · ${files.filter((c) => c === 'M').length} changed · ${files.filter((c) => c === 'D').length} deleted`
+    : '';
+}
+
+function inListing(path) {
+  const dir = path.slice(0, path.lastIndexOf('/')) || '/';
+  const listing = listings.get(dir);
+  return listing?.entries ? listing.entries.some((e) => e.path === path) : null;
+}
+
+// Before the tab or the tree learn of it: what it was, what it is now.
+function noteAgentChange(path, content, revision) {
+  const t = tabs.get(path);
+  const before = t && !t.preview ? t.saved : knownContent.get(path);
+  const existed = before !== undefined ? true : inListing(path);
+  const lines = typeof content === 'string' ? changedLines(existed === false ? null : (before ?? null), content) : null;
+  if (!changedFiles.has(path) || changedFiles.get(path) === 'D') changedFiles.set(path, existed === false ? 'A' : 'M');
+  rememberContent(path, content);
+  paintChangeBadge(path);
+  if (lines) followWrite(path, content, revision, lines);
+}
+
+function paintChangeBadge(path) {
+  const node = document.querySelector(`#tree .node[data-path="${CSS.escape(path)}"]`);
+  if (!node) return;
+  node.querySelector('.chg')?.remove();
+  const change = changedFiles.get(path);
+  if (!change) return;
+  const b = document.createElement('span');
+  b.className = `chg chg-${change}`;
+  b.textContent = change;
+  node.append(b);
+}
+
+const followWrite = latestOnly((path, content, revision, lines) => {
+  if (!followAgent || previewKind(path)) return;
+  if (!tabs.has(path)) {
+    const prev = followTab && tabs.get(followTab);
+    if (prev && prev.agentPreview && !prev.dirty) {
+      tabs.delete(followTab);
+      dropModel(followTab);
+    }
+    tabs.set(path, { content, saved: content, revision, dirty: false, conflict: null, agentPreview: true });
+    followTab = path;
+    revealInTree(path);
+  }
+  show(path);
+  renderTabs();
+  agentLines?.clear();
+  agentLines = editor.createDecorationsCollection(lineRanges(lines.added).map(([a, b]) => ({
+    range: new monaco.Range(a, 1, b, 1),
+    options: { isWholeLine: true, className: 'agent-line', linesDecorationsClassName: 'agent-gutter' },
+  })));
+  if (lines.added.length) editor.revealLineInCenterIfOutsideViewport(lines.added[0]);
+}, 150);
+
+$('agentFollow').checked = followAgent;
+$('agentFollow').addEventListener('change', (e) => {
+  followAgent = e.target.checked;
+  localStorage.setItem('cic.followAgent', followAgent ? 'on' : 'off');
+});
+$('agentClear').addEventListener('click', () => {
+  activity.clear();
+  changedFiles.clear();
+  document.querySelectorAll('#tree .chg').forEach((b) => b.remove());
+  agentLines?.clear();
+  renderActivity();
+});
 
 /* cic.request: the site as a visitor sees it, with a cookie jar. */
 const cookieJar = new Map();
@@ -3235,7 +3430,10 @@ const cicApi = {
 
   async read(path) {
     const res = await api('GET', { read: 1, path: norm(path) });
-    if (res.ok) seenRevision.set(norm(path), res.revision);
+    if (res.ok) {
+      seenRevision.set(norm(path), res.revision);
+      rememberContent(norm(path), res.content);
+    }
     return res;
   },
 
@@ -3280,6 +3478,7 @@ const cicApi = {
     const res = await api('GET', { read: 1, path: norm(path) });
     if (!res.ok) return res;
     seenRevision.set(norm(path), res.revision);
+    rememberContent(norm(path), res.content);
     const lines = res.content.split('\n');
     const re = match ? (match instanceof RegExp ? match : new RegExp(String(match), 'i')) : null;
     const out = [];
@@ -3319,6 +3518,7 @@ const cicApi = {
     results.forEach((res, i) => {
       if (res.ok) {
         seenRevision.set(list[i], res.revision);
+        rememberContent(list[i], res.content);
         files[list[i]] = res.content;
       } else {
         errors[list[i]] = res.hint ?? res.error;
@@ -3390,7 +3590,9 @@ const cicApi = {
     if (res.ok) {
       const t = tabs.get(path);
       seenRevision.set(path, res.revision);
-      if (t) {
+      // An open tab must show the change; with "Follow the agent" on, a
+      // closed file opens too, with the lines the edit changed highlighted.
+      if (t || followAgent) {
         const fresh = await api('GET', { read: 1, path });
         if (fresh.ok) agentWrote(path, fresh.content, fresh.revision);
       }
@@ -3597,6 +3799,38 @@ const cicApi = {
   },
 };
 
+// The calls that change something are steps in the Agent panel as they run
+// (reads are not: they would bury what matters).
+const count = (files) => (Array.isArray(files) ? files.length : Object.keys(files ?? {}).length);
+const STEPS = {
+  write: ([p]) => ({ kind: 'write', text: `Write ${norm(p)}`, path: norm(p) }),
+  writeMany: ([files]) => ({ kind: 'write', text: `Write ${count(files)} file${count(files) === 1 ? '' : 's'}` }),
+  edit: ([p]) => ({ kind: 'edit', text: `Edit ${norm(p)}`, path: norm(p) }),
+  rm: ([p]) => ({ kind: 'delete', text: `Delete ${norm(p)}`, target: norm(p) }),
+  rmdir: ([p]) => ({ kind: 'delete', text: `Delete folder ${norm(p)}` }),
+  mv: ([a, b]) => ({ kind: 'move', text: `Move ${norm(a)} → ${norm(b)}`, path: norm(b) }),
+  cp: ([a, b]) => ({ kind: 'write', text: `Copy ${norm(a)} → ${norm(b)}`, path: norm(b) }),
+  mkdir: ([p]) => ({ kind: 'write', text: `New folder ${norm(p)}` }),
+  restore: ([p]) => ({ kind: 'edit', text: `Restore an earlier version of ${norm(p)}`, path: norm(p) }),
+  run: ([tool, args]) => ({ kind: 'run', text: `${tool} ${[].concat(args ?? []).join(' ')}`.slice(0, 300) }),
+  sh: ([line]) => ({ kind: 'run', text: `$ ${String(line ?? '')}`.slice(0, 300) }),
+  eval: () => ({ kind: 'run', text: 'Run PHP in the app (eval)' }),
+  clone: ([url]) => ({ kind: 'write', text: `Clone ${String(url ?? '')}`.slice(0, 300) }),
+};
+// What a call's answer says about how it went: {ok}, an exit code, or cic.sh's
+// "[exit N · ...]" line.
+function outcome(r) {
+  if (typeof r === 'string') {
+    const code = /\[exit (\d+)/.exec(r)?.[1];
+    return code === undefined ? { ok: true, detail: '' } : { ok: code === '0', detail: `exit ${code}` };
+  }
+  const exit = r?.result?.exitCode ?? r?.exitCode;
+  if (r?.ok === false) return { ok: false, detail: String(r.hint ?? r.error ?? 'failed').slice(0, 200) };
+  if (exit !== undefined) return { ok: exit === 0, detail: `exit ${exit}` };
+  if (Array.isArray(r?.written)) return { ok: true, detail: `${r.written.length} written` };
+  return { ok: true, detail: '' };
+}
+
 // Every call marks the page as agent-driven (markAgent), then runs as written.
 window.cic = Object.freeze(Object.fromEntries(Object.entries(cicApi).map(([name, value]) => [
   name,
@@ -3606,7 +3840,25 @@ window.cic = Object.freeze(Object.fromEntries(Object.entries(cicApi).map(([name,
     // failed on the live site until the e2e suite caught it.
     ? Object.assign(function cicCall(...args) {
       markAgent(name);
-      return value.apply(cicApi, args);
+      const entry = STEPS[name]?.(args);
+      if (!entry) return value.apply(cicApi, args);
+      const step = agentStep(entry);
+      let result;
+      try {
+        result = value.apply(cicApi, args);
+      } catch (e) {
+        agentStepDone(step, false, String(e?.message ?? e).slice(0, 200));
+        throw e;
+      }
+      Promise.resolve(result).then((r) => {
+        const o = outcome(r);
+        agentStepDone(step, o.ok, o.detail);
+        if (o.ok && entry.target) {
+          changedFiles.set(entry.target, 'D');
+          paintChangeBadge(entry.target);
+        }
+      }, (e) => agentStepDone(step, false, String(e?.message ?? e).slice(0, 200)));
+      return result;
     }, value)
     : value,
 ])));

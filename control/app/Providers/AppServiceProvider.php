@@ -2,8 +2,19 @@
 
 namespace App\Providers;
 
+use App\Auth\ClientNet;
+use App\Auth\Device;
+use App\Auth\TestSuite;
+use App\Billing\Capacity;
+use App\Billing\Sales;
+use App\Fleet\Monitoring;
 use App\Fleet\Stock;
+use App\Models\User;
+use App\Support\FileIcons;
+use Illuminate\Auth\Events\Login;
 use Illuminate\Cache\RateLimiting\Limit;
+use Illuminate\Console\Events\ScheduledTaskFailed;
+use Illuminate\Console\Events\ScheduledTaskFinished;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Event;
 use Illuminate\Support\Facades\RateLimiter;
@@ -19,8 +30,8 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->singleton(\App\Billing\Capacity::class);
-        $this->app->singleton(\App\Support\FileIcons::class);
+        $this->app->singleton(Capacity::class);
+        $this->app->singleton(FileIcons::class);
         //
     }
 
@@ -34,18 +45,18 @@ class AppServiceProvider extends ServiceProvider
         // Failed: so success is Finished with exit 0, failure is Failed.
         // Every sign-in, by any route (password, Google, Apple, a passkey),
         // records the browser it came from (App\Auth\Device, audit A19).
-        Event::listen(\Illuminate\Auth\Events\Login::class, function ($e) {
-            if ($e->user instanceof \App\Models\User && app()->bound('request')) {
-                $e->user->forceFill(['last_device' => \App\Auth\Device::signal(request())])->saveQuietly();
+        Event::listen(Login::class, function ($e) {
+            if ($e->user instanceof User && app()->bound('request')) {
+                $e->user->forceFill(['last_device' => Device::signal(request())])->saveQuietly();
             }
         });
-        Event::listen(\Illuminate\Console\Events\ScheduledTaskFinished::class, function ($e) {
+        Event::listen(ScheduledTaskFinished::class, function ($e) {
             if ((int) $e->task->exitCode === 0) {
-                app(\App\Fleet\Monitoring::class)->recordJob($e->task, true, 'last run succeeded in '.$e->runtime.' s');
+                app(Monitoring::class)->recordJob($e->task, true, 'last run succeeded in '.$e->runtime.' s');
             }
         });
-        Event::listen(\Illuminate\Console\Events\ScheduledTaskFailed::class, function ($e) {
-            app(\App\Fleet\Monitoring::class)->recordJob($e->task, false,
+        Event::listen(ScheduledTaskFailed::class, function ($e) {
+            app(Monitoring::class)->recordJob($e->task, false,
                 'last run failed: '.mb_substr($e->exception->getMessage(), 0, 300));
         });
 
@@ -61,7 +72,7 @@ class AppServiceProvider extends ServiceProvider
         View::composer(['partials.plans', 'billing'], function ($view) {
             $stock = app(Stock::class);
             $user = auth()->user();
-            $view->with('stock', collect(\App\Billing\Sales::plans())
+            $view->with('stock', collect(Sales::plans())
                 ->map(fn ($p, $key) => $p['price'] > 0
                     ? ($user ? $stock->availableFor($user, $key) : $stock->available($key))
                     : null)
@@ -80,7 +91,7 @@ class AppServiceProvider extends ServiceProvider
          */
         // An IPv6 visitor holds a /64: keyed on the full address, a per-IP
         // limit was no limit (App\Auth\ClientNet, the second security audit).
-        $ip = fn (Request $r) => \App\Auth\ClientNet::key($r->ip());
+        $ip = fn (Request $r) => ClientNet::key($r->ip());
         $by = fn (Request $r, string $suffix = '') => ($r->user()?->id ?? $ip($r)).$suffix;
 
         // Per address AND per IP: one attacker cannot lock a victim out by
@@ -95,7 +106,7 @@ class AppServiceProvider extends ServiceProvider
         // The platform's own end-to-end suite (a signed request, App\Auth\TestSuite)
         // creates dozens of test accounts a day from one address: exempt, or
         // the caps below stop it testing sign-up at all (found 2026-09-25).
-        RateLimiter::for('register', fn (Request $r) => \App\Auth\TestSuite::isRequest($r) ? Limit::none() : [
+        RateLimiter::for('register', fn (Request $r) => TestSuite::isRequest($r) ? Limit::none() : [
             Limit::perMinute(10)->by($ip($r)), Limit::perHour(20)->by('h:'.$ip($r)), Limit::perDay(50)->by('d:'.$ip($r)),
         ]);
         // Public and unauthenticated: enough for a person, not for a flood.
@@ -130,6 +141,8 @@ class AppServiceProvider extends ServiceProvider
         // The public demo source pages: generous for a reader, not for a scraper.
         RateLimiter::for('demo-code', fn (Request $r) => Limit::perMinute(120)->by($ip($r)));
         RateLimiter::for('logs', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
+        // A running command's output, polled every ~400 ms while it runs.
+        RateLimiter::for('command-live', fn (Request $r) => Limit::perMinute(240)->by($by($r)));
         RateLimiter::for('billing', fn (Request $r) => Limit::perMinute(10)->by($by($r)));
         RateLimiter::for('two-factor', fn (Request $r) => Limit::perMinute(30)->by($ip($r)));
 

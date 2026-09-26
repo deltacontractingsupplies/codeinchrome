@@ -338,3 +338,29 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg
 }
 .ext-reload[hidden] { display: none; }
 .ext-reload button { flex: none; padding: 3px 10px; border-radius: 3px; background: var(--accent); color: var(--on-accent); }
+
+/* What the agent is doing, live (editor.js "what the agent is doing"). */
+.agent-log { flex: 1; overflow: auto; margin: 0; padding: 4px 0; list-style: none; font: 12px/1.5 var(--ui); }
+.agent-log .step { display: grid; grid-template-columns: 5.5em 1fr auto; gap: 8px; align-items: baseline; padding: 1px 12px; }
+.agent-log .step:hover { background: var(--list-hover); }
+.agent-log time { color: var(--desc); font: 11px var(--mono); }
+.agent-log .step-text { font: 12px var(--mono); color: var(--editor-fg); text-align: left; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; background: none; border: 0; padding: 0; cursor: default; }
+.agent-log button.step-text { cursor: pointer; color: var(--link); }
+.agent-log button.step-text:hover { text-decoration: underline; }
+.agent-log .step-meta { color: var(--desc); font-size: 11px; white-space: nowrap; }
+.agent-log .running .step-text::before { content: "◌ "; color: var(--link); }
+.agent-log .done .step-text::before { content: "✓ "; color: var(--ok); }
+.agent-log .failed .step-text::before { content: "✕ "; color: var(--err); }
+.agent-log .failed .step-meta { color: var(--err); }
+.agent-follow { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--desc); }
+.node .chg { margin-left: auto; padding: 0 6px 0 4px; font: 600 11px var(--mono); }
+.node .chg-A { color: var(--ok); }
+.node .chg-M { color: var(--warn-fg); }
+.node .chg-D { color: var(--err); }
+.tab.agent-preview .tab-name { font-style: italic; }
+.monaco-editor .agent-line { background: color-mix(in srgb, var(--ok) 14%, transparent); }
+.monaco-editor .agent-gutter { background: var(--ok); width: 3px !important; margin-left: 3px; }
+@media (prefers-reduced-motion: no-preference) {
+  .agent-log .running .step-text::before { display: inline-block; animation: agent-spin 1s linear infinite; }
+  @keyframes agent-spin { to { transform: rotate(360deg); } }
+}

@@ -216,6 +216,39 @@ test('a person and an agent can both edit a real site, without erasing each othe
     await expectShown(page, /edited by the agent/);
   });
 
+  await test.step('the person sees each file the agent writes as it is written, not at the end', async () => {
+    // A file that is NOT open: following the agent opens it in a preview tab,
+    // with the lines it wrote highlighted, and the step is in the Agent panel.
+    const res = await page.evaluate(() => window.cic.write('/app/Support/LiveProof.php', "<?php\n\nnamespace App\\Support;\n\nclass LiveProof {}\n"));
+    expect(res.ok, res.hint).toBe(true);
+    await expect(page.locator('#tabs .tab.agent-preview .tab-name', { hasText: 'LiveProof.php' })).toBeVisible();
+    await expectShown(page, /class LiveProof/);
+    await expect(page.locator('.monaco-editor .agent-line').first()).toBeVisible();
+    await expect(page.locator('#agentView')).toBeVisible();
+    await expect(page.locator('#agentLog .step.done', { hasText: 'Write /app/Support/LiveProof.php' })).toBeVisible();
+    await expect(page.locator('#tree .node[data-path="/app/Support/LiveProof.php"] .chg-A')).toHaveText('A');
+
+    // The next file replaces the preview tab (no pile of tabs from a big write),
+    // and an edit highlights only what it changed.
+    await page.evaluate(() => window.cic.writeMany({ '/app/Support/LiveProof2.php': "<?php\n// two\n" }));
+    await expect(page.locator('#tabs .tab-name', { hasText: 'LiveProof2.php' })).toBeVisible();
+    await expect(page.locator('#tabs .tab-name', { hasText: /^LiveProof\.php$/ })).toHaveCount(0);
+    const edited = await page.evaluate(() => window.cic.edit('/app/Support/LiveProof2.php', { find: '// two', replace: '// two, edited' }));
+    expect(edited.ok, edited.hint).toBe(true);
+    await expect(page.locator('#agentLog .step.done', { hasText: 'Edit /app/Support/LiveProof2.php' })).toBeVisible();
+    await expect(page.locator('.monaco-editor .agent-line')).toHaveCount(1);
+
+    // A command is a step with its exit code; a deletion is marked D.
+    await page.evaluate(() => window.cic.rm('/app/Support/LiveProof.php'));
+    await page.evaluate(() => window.cic.rm('/app/Support/LiveProof2.php'));
+    await expect(page.locator('#agentLog .step.done', { hasText: 'Delete /app/Support/LiveProof.php' })).toBeVisible();
+
+    // Following is the person's choice, and it is remembered.
+    await page.locator('#agentFollow').uncheck();
+    expect(await page.evaluate(() => localStorage.getItem('cic.followAgent'))).toBe('off');
+    await page.locator('#agentFollow').check();
+  });
+
   await test.step('a stale save is refused and the person is told, not overwritten', async () => {
     // The person starts typing...
     await toEnd(page);
@@ -341,9 +374,25 @@ test('a person and an agent can both edit a real site, without erasing each othe
     }
   });
 
-  await test.step('composer require works inside the plan memory limit', async () => {
-    const res = await page.evaluate(() => window.cic.run('composer', ['require', 'spatie/array-to-xml']));
+  await test.step('composer require works inside the plan memory limit, its output shown as it prints', async () => {
+    // Not awaited: while composer runs, its output reaches the terminal -
+    // the person sees it working, not a silent wait and then all of it.
+    await page.evaluate(() => {
+      window.__composerDone = false;
+      window.__composer = window.cic.run('composer', ['require', 'spatie/array-to-xml']).finally(() => { window.__composerDone = true; });
+    });
+    // composer takes seconds here; its first lines must be on screen before it ends.
+    await expect.poll(() => page.evaluate(() => ({
+      shown: /Using version|has been updated|Loading composer|Updating dependencies/.test(document.querySelector('#termOut').textContent),
+      done: window.__composerDone,
+    })), { timeout: 60_000, intervals: [200] }).toMatchObject({ shown: true });
+    expect(await page.evaluate(() => window.__composerDone), 'output appeared only when composer had finished').toBe(false);
+    const res = await page.evaluate(() => window.__composer);
     expect(res.ok, res.result?.output?.slice(-2000)).toBe(true);
+    // Nothing shown twice: the live part and the rest add up to the output once.
+    const text = await page.locator('#termOut').textContent();
+    expect(text.split('./composer.json has been updated').length - 1).toBeLessThanOrEqual(1);
+    expect(text).toContain('spatie/array-to-xml');
     const lock = await page.evaluate(() => window.cic.read('/composer.json'));
     expect(lock.content).toContain('spatie/array-to-xml');
   });

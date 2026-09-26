@@ -25,6 +25,7 @@ class ConsoleTest extends TestCase
             '127.0.0.1:944*/v1/sites/*/command' => fn () => Http::response($this->agentBody
                 ?? ['ok' => true, 'result' => ['exitCode' => 0, 'output' => 'Nothing to migrate.', 'truncated' => false, 'timedOut' => false]], $this->agentStatus),
             '127.0.0.1:944*/v1/sites/*/logs*' => Http::response(['ok' => true, 'log' => ['source' => 'app', 'lines' => 'x', 'truncated' => false]]),
+            '127.0.0.1:944*/v1/sites/*/command/live*' => Http::response(['ok' => true, 'live' => ['running' => true, 'output' => "Migrating: create_items\n", 'next' => 24]]),
         ]);
         $this->owner = User::factory()->create(['plan' => 'starter']);
         $this->site = Site::create(['user_id' => $this->owner->id, 'site_id' => 'shop', 'domain' => 'shop.codeinchrome.com',
@@ -81,6 +82,24 @@ class ConsoleTest extends TestCase
             ->assertNotFound();
 
         Http::assertNothingSent();
+    }
+
+    public function test_a_running_commands_output_is_read_while_it_runs_by_its_own_run_only(): void
+    {
+        // The run is named when it starts...
+        $this->actingAs($this->owner)->postJson(route('console.run', $this->site), ['tool' => 'artisan', 'args' => ['migrate'], 'live' => 'k8s2Qp9xL0'])
+            ->assertOk();
+        Http::assertSent(fn ($r) => str_ends_with($r->url(), '/v1/sites/shop/command') && $r['live'] === 'k8s2Qp9xL0');
+
+        // ...and read by that name, from an offset, while it runs.
+        $this->actingAs($this->owner)->getJson(route('console.live', $this->site).'?key=k8s2Qp9xL0&from=0')
+            ->assertOk()->assertJsonPath('running', true)->assertJsonPath('output', "Migrating: create_items\n")->assertJsonPath('next', 24);
+        Http::assertSent(fn ($r) => str_contains($r->url(), '/v1/sites/shop/command/live') && str_contains($r->url(), 'key=k8s2Qp9xL0'));
+
+        // Not someone else's site, and never a malformed name.
+        $this->actingAs(User::factory()->create())->getJson(route('console.live', $this->site).'?key=k8s2Qp9xL0&from=0')->assertNotFound(); // as for any site not theirs: not even its existence
+        $this->actingAs($this->owner)->getJson(route('console.live', $this->site).'?key=../../x&from=0')->assertStatus(422);
+        $this->actingAs($this->owner)->postJson(route('console.run', $this->site), ['tool' => 'artisan', 'args' => ['migrate'], 'live' => 'a b'])->assertStatus(422);
     }
 
     public function test_a_log_mark_asks_the_agent_for_only_what_came_after_it(): void

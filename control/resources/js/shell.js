@@ -349,7 +349,12 @@ const splitLines = (text) => {
 const joinLines = (lines) => (lines.length ? `${lines.join('\n')}\n` : '');
 
 /* Unified diff (Myers, O((N+M)D)) with three lines of context. */
-export function unifiedDiff(a, b, nameA, nameB, context = 3) {
+/**
+ * The line-by-line edit script from a to b (Myers): [[' ' | '-' | '+', line]],
+ * or null when the texts are too different to align usefully. Shared by
+ * unifiedDiff and the editor's highlight of what an agent changed.
+ */
+export function diffOps(a, b) {
   const A = splitLines(a);
   const B = splitLines(b);
   const n = A.length;
@@ -367,7 +372,7 @@ export function unifiedDiff(a, b, nameA, nameB, context = 3) {
       v.set(k, x);
       if (x >= n && y >= m) { found = true; break; }
     }
-    if (d > 20000) return null; // too different to show usefully
+    if (d > 20000) return null; // too different to align usefully
   }
   // Walk back to an edit script: ' ', '-', '+'.
   const ops = [];
@@ -386,6 +391,12 @@ export function unifiedDiff(a, b, nameA, nameB, context = 3) {
     }
   }
   ops.reverse();
+  return ops;
+}
+
+export function unifiedDiff(a, b, nameA, nameB, context = 3) {
+  const ops = diffOps(a, b);
+  if (ops === null) return null; // too different to show usefully
   if (!ops.some(([o]) => o !== ' ')) return '';
   // Group into hunks.
   const out = [`--- ${nameA}`, `+++ ${nameB}`];
