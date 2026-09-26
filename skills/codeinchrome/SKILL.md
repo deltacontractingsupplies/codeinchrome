@@ -75,10 +75,11 @@ A page in a route closure, or HTML in a PHP string, is a failure, not a shortcut
   tested the same way. Never trust an id, a price or a role sent by the browser.
 - **Validation is tested too**: a test posts bad input and gets the errors back.
 - **Tests run on the test database only, each rolled back** (Step 4) - this site is live.
-- **Every screen size.** `await cic.screens('/cart')` shows the page at phone 390×844,
-  tablet 820×1180 and desktop 1440×900 side by side over the editor: take ONE screenshot
-  of the editor tab and check all three - nothing cut off, no sideways scroll, buttons big
-  enough to tap. Fix, then look again. Behind the app's login: `cic.screens('/admin', { as: 1 })`
+- **Every screen size.** `await cic.screens('/cart')` shows the page as a phone (390×844),
+  a tablet (820×1180) and a laptop (1440×900) show it, side by side over the editor, and
+  MEASURES it: `overflow` lists every size where the content is wider than the screen
+  (sideways scroll) - it must be empty. Then take ONE screenshot of the editor tab and
+  check all three by eye: nothing cut off, buttons big enough to tap. Fix, then look again. Behind the app's login: `cic.screens('/admin', { as: 1 })`
   shows it signed in as the app's user 1 (no password).
 
 If a senior Laravel reviewer would reject it, it is not done. `cic.check()` reports

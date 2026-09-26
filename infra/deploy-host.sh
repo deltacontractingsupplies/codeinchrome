@@ -60,7 +60,7 @@ ssh_ 'cd /opt/codeinchrome/images/laravel-8.3 && docker build -q -t codeinchrome
 # The link scanner's page renderer (audit A15): Chromium, run by the agent
 # in a throwaway container with every privilege taken away (render.go).
 ssh_ 'mkdir -p /opt/codeinchrome/images/render'
-scp -q infra/images/render/Dockerfile "root@$ip:/opt/codeinchrome/images/render/"
+scp -q infra/images/render/Dockerfile infra/images/render/shots.py "root@$ip:/opt/codeinchrome/images/render/"
 ssh_ 'cd /opt/codeinchrome/images/render && docker build -q -t codeinchrome/render:1 . >/dev/null && echo "  renderer image built"'
 
 say "installing the agent"

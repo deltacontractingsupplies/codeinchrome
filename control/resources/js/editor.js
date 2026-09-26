@@ -2192,14 +2192,23 @@ async function showScreens(path = '/', { as, guard } = {}) {
     img.style.aspectRatio = `${s.width} / ${s.height}`;
     const cap = document.createElement('figcaption');
     cap.textContent = `${s.name} · ${s.width}×${s.height}`;
+    if (s.overflow) {
+      // Measured, not guessed: the content is wider than the screen.
+      cap.textContent += ` · scrolls sideways: content ${s.contentWidth} px wide`;
+      cap.classList.add('overflow');
+      fig.classList.add('overflow');
+    }
     fig.style.flexGrow = String(s.width);
     fig.append(img, cap);
     return fig;
   }));
   $('screens').hidden = false;
   status(`${path} at every screen size`);
-  return { ok: true, url: r.url, sizes: r.shots.map((s) => `${s.name} ${s.width}×${s.height}`),
-    hint: 'Shown side by side over the editor: take ONE screenshot of this tab to see all three.' };
+  const overflow = r.shots.filter((s) => s.overflow).map((s) => ({ size: s.name, screenWidth: s.width, contentWidth: s.contentWidth }));
+  return { ok: true, url: r.url, sizes: r.shots.map((s) => `${s.name} ${s.width}×${s.height}`), overflow,
+    hint: overflow.length
+      ? `Scrolls sideways on ${overflow.map((o) => `${o.size} (${o.contentWidth} px on ${o.screenWidth})`).join(', ')}: fix the widest element, then check again. Take ONE screenshot of this tab to see all three.`
+      : 'Fits every screen. Shown side by side over the editor: take ONE screenshot of this tab to see all three.' };
 }
 $('screensClose').addEventListener('click', () => { $('screens').hidden = true; });
 document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('screens').hidden) $('screens').hidden = true; });
