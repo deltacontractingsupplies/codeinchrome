@@ -39,6 +39,7 @@
      data-lsp-close="{{ url('/sites/'.$site->site_id.'/lsp') }}"
      data-db-import="{{ route('db.import', $site) }}"
      data-command="{{ route('console.run', $site) }}"
+     data-command-live="{{ route('console.live', $site) }}"
      data-logs="{{ route('console.logs', $site) }}"
      data-history="{{ route('history.index', $site) }}"
      data-bin="{{ route('history.bin', $site) }}"

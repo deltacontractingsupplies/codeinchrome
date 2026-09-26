@@ -15,6 +15,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 )
 
 // Commands and logs for the editor.
@@ -93,12 +94,15 @@ type CommandResult struct {
 
 // cappedBuffer keeps the first N bytes and counts the rest.
 type cappedBuffer struct {
+	mu        sync.Mutex // Write runs as the command prints; Since reads it meanwhile
 	buf       bytes.Buffer
 	limit     int
 	truncated bool
 }
 
 func (c *cappedBuffer) Write(p []byte) (int, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	room := c.limit - c.buf.Len()
 	if room <= 0 {
 		c.truncated = true
@@ -110,6 +114,85 @@ func (c *cappedBuffer) Write(p []byte) (int, error) {
 		return len(p), nil
 	}
 	return c.buf.Write(p)
+}
+
+// Since is what was written from byte `from` on, at most max bytes, and the
+// offset to ask from next - cut on a character boundary, so a chunk never
+// ends in half a UTF-8 character.
+func (c *cappedBuffer) Since(from, max int) (string, int) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	b := c.buf.Bytes()
+	if from < 0 || from > len(b) {
+		from = len(b)
+	}
+	end := len(b)
+	if end-from > max {
+		end = from + max
+	}
+	// Cut inside the buffer: back off to the start of that character.
+	for end > from && end < len(b) && !utf8.RuneStart(b[end]) {
+		end--
+	}
+	// At the end: the command may be half-way through printing a character;
+	// leave it for the next call.
+	if end == len(b) && end > from {
+		start := end - 1
+		for start > from && end-start < utf8.UTFMax && !utf8.RuneStart(b[start]) {
+			start--
+		}
+		if !utf8.FullRune(b[start:end]) {
+			end = start
+		}
+	}
+	return string(b[from:end]), end
+}
+
+// liveCommands: each site's running command's output, readable while it
+// runs (CommandLive), so the editor shows it line by line like a terminal
+// instead of all at once at the end (owner, 2026-09-26). Keyed by the run:
+// the caller names its run (WithLiveKey), and only that name reads it - a
+// command queued behind another never shows the other's output as its own.
+var liveCommands sync.Map // site id -> liveRun
+
+type liveRun struct {
+	key string
+	out *cappedBuffer
+}
+
+type liveKeyCtx struct{}
+
+var liveKeyRe = regexp.MustCompile(`^[A-Za-z0-9]{8,64}$`)
+
+// WithLiveKey names a command run so its output can be read while it runs.
+// A key that is not 8-64 letters and digits is ignored.
+func WithLiveKey(ctx context.Context, key string) context.Context {
+	if !liveKeyRe.MatchString(key) {
+		return ctx
+	}
+	return context.WithValue(ctx, liveKeyCtx{}, key)
+}
+
+// LiveOutput is a running command's output from an offset on.
+type LiveOutput struct {
+	Running bool   `json:"running"`
+	Output  string `json:"output"`
+	Next    int    `json:"next"`
+}
+
+// CommandLive is what the site's run `key` printed from byte `from` on (64 KB
+// at most a call). Not running (or another run): nothing, and the caller
+// takes the rest from the command's own answer.
+func (m *Manager) CommandLive(id, key string, from int) (LiveOutput, error) {
+	if err := ValidID(id); err != nil {
+		return LiveOutput{}, err
+	}
+	v, ok := liveCommands.Load(id)
+	if !ok || key == "" || v.(liveRun).key != key {
+		return LiveOutput{Next: from}, nil
+	}
+	out, next := v.(liveRun).out.Since(from, 64<<10)
+	return LiveOutput{Running: true, Output: out, Next: next}, nil
 }
 
 func validateCommand(tool string, args []string) ([]string, time.Duration, error) {
@@ -216,6 +299,10 @@ func (m *Manager) RunCommand(ctx context.Context, id, tool string, args []string
 	cmd := exec.CommandContext(ctx, "docker", full...)
 	out := &cappedBuffer{limit: maxCommandOutput}
 	cmd.Stdout, cmd.Stderr = out, out
+	if key, _ := ctx.Value(liveKeyCtx{}).(string); key != "" {
+		liveCommands.Store(id, liveRun{key: key, out: out})
+		defer liveCommands.Delete(id)
+	}
 
 	started := time.Now()
 	runErr := cmd.Run()

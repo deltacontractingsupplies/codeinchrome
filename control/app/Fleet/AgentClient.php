@@ -119,9 +119,22 @@ class AgentClient
      * returned as a result with ok=false, NOT thrown: the output is what the
      * caller needs to see.
      */
-    public function runCommand(string $id, string $tool, array $args, bool $confirm = false): array
+    /** $live names the run, so commandLive() can read its output while it runs. */
+    public function runCommand(string $id, string $tool, array $args, bool $confirm = false, ?string $live = null): array
     {
-        return $this->sendRaw('post', "/v1/sites/$id/command", ['tool' => $tool, 'args' => array_values($args), 'confirm' => $confirm]);
+        return $this->sendRaw('post', "/v1/sites/$id/command", ['tool' => $tool, 'args' => array_values($args), 'confirm' => $confirm]
+            + ($live !== null ? ['live' => $live] : []));
+    }
+
+    /**
+     * What the site's running command has printed from byte $from on, while it
+     * runs (the editor shows it line by line).
+     *
+     * @return array{running: bool, output: string, next: int}
+     */
+    public function commandLive(string $id, string $key, int $from): array
+    {
+        return $this->send('get', "/v1/sites/$id/command/live", query: ['key' => $key, 'from' => $from])['live'] ?? ['running' => false, 'output' => '', 'next' => $from];
     }
 
     /** @param  array{since?: int, file?: string}  $mark  only what the app log gained after this */

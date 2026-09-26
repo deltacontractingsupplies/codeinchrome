@@ -834,18 +834,31 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 
 	// ── Commands and logs ────────────────────────────────────────────────
 
+	// What the site's running command has printed so far, from a byte offset:
+	// the editor polls it to show output line by line, as a terminal does.
+	mux.HandleFunc("GET /v1/sites/{id}/command/live", func(w http.ResponseWriter, r *http.Request) {
+		from, _ := strconv.Atoi(r.URL.Query().Get("from"))
+		o, err := mgr.CommandLive(r.PathValue("id"), r.URL.Query().Get("key"), from)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("invalid", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"live": o}))
+	})
+
 	mux.HandleFunc("POST /v1/sites/{id}/command", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			Tool    string   `json:"tool"`
 			Args    []string `json:"args"`
 			Confirm bool     `json:"confirm"`
+			Live    string   `json:"live"` // names the run, to read its output while it runs
 		}
 		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
 			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {tool: artisan|composer, args: [...], confirm?}"))
 			return
 		}
 		started := time.Now().Add(-time.Second)
-		res, err := mgr.RunCommand(r.Context(), r.PathValue("id"), body.Tool, body.Args, body.Confirm)
+		res, err := mgr.RunCommand(sites.WithLiveKey(r.Context(), body.Live), r.PathValue("id"), body.Tool, body.Args, body.Confirm)
 		if err == nil {
 			// What the command wrote is held to the same rules as a save.
 			if bad := mgr.ScanChangedSince(r.PathValue("id"), started); bad != nil {

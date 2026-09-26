@@ -193,6 +193,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
 
     // Commands can run for minutes and cost CPU on a shared host.
     Route::post('/sites/{site}/command', [ConsoleController::class, 'run'])->middleware('throttle:command')->name('console.run');
+    Route::get('/sites/{site}/command/live', [ConsoleController::class, 'live'])->middleware('throttle:command-live')->name('console.live');
     Route::get('/sites/{site}/logs', [ConsoleController::class, 'logs'])->middleware('throttle:logs')->name('console.logs');
 
     // The database browser. Queries are throttled harder than file reads:

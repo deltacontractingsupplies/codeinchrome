@@ -374,9 +374,25 @@ test('a person and an agent can both edit a real site, without erasing each othe
     }
   });
 
-  await test.step('composer require works inside the plan memory limit', async () => {
-    const res = await page.evaluate(() => window.cic.run('composer', ['require', 'spatie/array-to-xml']));
+  await test.step('composer require works inside the plan memory limit, its output shown as it prints', async () => {
+    // Not awaited: while composer runs, its output reaches the terminal -
+    // the person sees it working, not a silent wait and then all of it.
+    await page.evaluate(() => {
+      window.__composerDone = false;
+      window.__composer = window.cic.run('composer', ['require', 'spatie/array-to-xml']).finally(() => { window.__composerDone = true; });
+    });
+    // composer takes seconds here; its first lines must be on screen before it ends.
+    await expect.poll(() => page.evaluate(() => ({
+      shown: /Using version|has been updated|Loading composer|Updating dependencies/.test(document.querySelector('#termOut').textContent),
+      done: window.__composerDone,
+    })), { timeout: 60_000, intervals: [200] }).toMatchObject({ shown: true });
+    expect(await page.evaluate(() => window.__composerDone), 'output appeared only when composer had finished').toBe(false);
+    const res = await page.evaluate(() => window.__composer);
     expect(res.ok, res.result?.output?.slice(-2000)).toBe(true);
+    // Nothing shown twice: the live part and the rest add up to the output once.
+    const text = await page.locator('#termOut').textContent();
+    expect(text.split('./composer.json has been updated').length - 1).toBeLessThanOrEqual(1);
+    expect(text).toContain('spatie/array-to-xml');
     const lock = await page.evaluate(() => window.cic.read('/composer.json'));
     expect(lock.content).toContain('spatie/array-to-xml');
   });

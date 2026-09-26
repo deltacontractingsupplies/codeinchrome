@@ -53,6 +53,7 @@ const SITE = {
   lspCloseUrl: root.dataset.lspClose,
   dbImportUrl: root.dataset.dbImport,
   commandUrl: root.dataset.command,
+  commandLiveUrl: root.dataset.commandLive,
   logsUrl: root.dataset.logs,
   historyUrl: root.dataset.history,
   binUrl: root.dataset.bin,
@@ -2269,24 +2270,62 @@ function splitArgs(line) {
  * destroys data; an agent calling cic.run gets the refusal and must resend
  * with { confirm: true } itself.
  */
+/*
+ * A command's output as it prints, like a terminal - not all at once at the
+ * end (owner, 2026-09-26). The run is named; its output is read by that name
+ * every 400 ms (console.live) while it runs, and when it ends only what was
+ * not shown yet is added. Offsets are bytes (the host's), so the rest is cut
+ * from the answer's bytes, never mid-character.
+ */
+function liveOutput() {
+  const key = Array.from(crypto.getRandomValues(new Uint8Array(12)), (b) => (b % 36).toString(36)).join('') + 'x0';
+  let shown = 0;
+  let stopped = false;
+  const loop = (async () => {
+    while (!stopped) {
+      await new Promise((r) => setTimeout(r, 400));
+      if (stopped) break;
+      const r = await apiAt(SITE.commandLiveUrl, 'GET', { key, from: shown });
+      if (!r.ok) break;
+      if (r.output) {
+        appendAnsi($('termOut'), r.output);
+        shown = r.next;
+      }
+    }
+  })();
+  return {
+    key,
+    async rest(full) {
+      stopped = true;
+      await loop;
+      const bytes = new TextEncoder().encode(full || '');
+      return new TextDecoder().decode(bytes.slice(Math.min(shown, bytes.length)));
+    },
+  };
+}
+
 async function runCommand(tool, args, { confirm = false, interactive = true } = {}) {
   showPanel('terminal');
   termLine(`$ ${tool} ${args.join(' ')}`, 't-cmd');
-  let res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm }, {
+  let live = liveOutput();
+  let res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm, live: live.key }, {
     onBusy: () => termLine('Another command is running; waiting for it to finish…', 't-dim'),
   });
 
   if (res.status === 409 && res.error === 'needs_confirm' && interactive) {
+    await live.rest('');
     const yes = await ask(`"${tool} ${args[0]}" destroys data in this site. Run it?`, { okLabel: 'Run it' });
     if (!yes) {
       termLine('Not run.', 't-dim');
       return res;
     }
-    res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm: true });
+    live = liveOutput();
+    res = await apiAt(SITE.commandUrl, 'POST', {}, { tool, args, confirm: true, live: live.key });
   }
 
+  const rest = await live.rest(res.result?.output);
   if (res.result) {
-    appendAnsi($('termOut'), res.result.output || '');
+    appendAnsi($('termOut'), rest);
     const r = res.result;
     termLine(`${r.timedOut ? 'stopped at the time limit' : `exit ${r.exitCode}`} · ${(r.elapsedMs / 1000).toFixed(1)} s${r.truncated ? ' · output truncated' : ''}`,
       r.exitCode === 0 ? 't-dim' : 't-err');
