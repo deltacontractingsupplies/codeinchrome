@@ -100,6 +100,22 @@ setting tls_1_3 on
 cf PATCH "/zones/$CLOUDFLARE_ZONE_ID/settings/browser_cache_ttl" '{"value":0}' | python3 -c 'import json,sys; assert json.load(sys.stdin)["success"]'
 ok "zone: SSL Full (strict), HTTPS always, TLS 1.2 minimum, TLS 1.3 on"
 
+# ── rate limiting at the edge (audit A48) ────────────────────────────────────
+# The app throttles every auth route itself; this stops a password-guessing
+# or sign-up script at Cloudflare before it costs the control host anything.
+# 10 POSTs per 10 s per address, then 10 s blocked (the Free plan's one rule
+# and its fixed 10 s windows) - a person never comes near it. The app only:
+# customer sites have their own /login and are not ours to limit. PUT
+# replaces the phase's rules: this script owns them. Needs Zone WAF: Edit.
+ratelimit=$(python3 -c 'import json,sys; z=sys.argv[1]; print(json.dumps({"rules":[{
+  "description": "codeinchrome app: sign-in, sign-up, reset and 2FA - 10 POSTs per 10 s per IP (audit A48)",
+  "expression": "(http.host eq \"app.%s\" and http.request.method eq \"POST\" and http.request.uri.path in {\"/login\" \"/register\" \"/forgot-password\" \"/reset-password\" \"/two-factor-challenge\" \"/email/verify-code\"})" % z,
+  "action": "block", "enabled": True,
+  "ratelimit": {"characteristics": ["ip.src", "cf.colo.id"], "period": 10, "requests_per_period": 10, "mitigation_timeout": 10}}]}))' "$zone")
+cf PUT "/zones/$CLOUDFLARE_ZONE_ID/rulesets/phases/http_ratelimit/entrypoint" "$ratelimit" \
+  | python3 -c 'import json,sys; d=json.load(sys.stdin); assert d["success"] and len(d["result"]["rules"]) == 1'
+ok "edge: auth POSTs on app.$zone rate-limited (10 per 10 s per address)"
+
 [[ ${1:-} == --dns ]] || { echo "certificate and settings ready; run deploy-host.sh / deploy-control.sh, then: $0 --dns"; exit 0; }
 
 # ── proxy the records ────────────────────────────────────────────────────────
