@@ -79,4 +79,31 @@ class AgentInstructionsTest extends TestCase
             // Hidden until an agent really calls window.cic.
             ->assertSee('<span id="agentBadge" class="agent-badge" role="status" hidden>', false);
     }
+    public function test_the_skill_installs_as_a_claude_plugin_from_the_public_repository(): void
+    {
+        // "Customize > Plugins > Add marketplace > owner/repo": the repository is
+        // the marketplace, its root the plugin, and the skill already in it.
+        $market = json_decode((string) file_get_contents(base_path('../.claude-plugin/marketplace.json')), true, flags: JSON_THROW_ON_ERROR);
+        $this->assertSame('codeinchrome', $market['name']);
+        $this->assertNotEmpty($market['owner']['name']);
+        $this->assertCount(1, $market['plugins']);
+        [$plugin] = $market['plugins'];
+        $this->assertSame(['codeinchrome', './'], [$plugin['name'], $plugin['source']]);
+
+        // The plugin's skill is the one this site serves, named as its folder.
+        $skill = (string) file_get_contents(base_path('../skills/codeinchrome/SKILL.md'));
+        $this->assertMatchesRegularExpression('/\A---\nname: codeinchrome\ndescription: .{40,1024}\n---\n/s', $skill);
+
+        // A plugin at the repository root would also load these; there must be none.
+        foreach (['agents', 'commands', 'hooks', '.mcp.json'] as $extra) {
+            $this->assertFileDoesNotExist(base_path("../$extra"), "$extra at the repository root would ship inside the plugin");
+        }
+
+        // The editor tells the person the name to add.
+        $user = User::factory()->create();
+        $site = Site::create(['user_id' => $user->id, 'site_id' => 'plug', 'domain' => 'plug.codeinchrome.com',
+            'host' => 'h1', 'status' => 'live', 'cpu_limit' => '0.5', 'memory_limit' => '384m', 'port' => 20004]);
+        $this->actingAs($user)->get(route('sites.edit', $site))
+            ->assertOk()->assertSee('Add marketplace')->assertSee('<code>deltacontractingsupplies/codeinchrome</code>', false);
+    }
 }

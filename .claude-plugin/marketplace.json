@@ -1,0 +1,19 @@
+{
+  "name": "codeinchrome",
+  "owner": {
+    "name": "codeinchrome",
+    "url": "https://codeinchrome.com"
+  },
+  "description": "The codeinchrome skill: build and change a live Laravel site from its in-browser editor.",
+  "plugins": [
+    {
+      "name": "codeinchrome",
+      "source": "./",
+      "description": "Build or change a Laravel site hosted on codeinchrome.com through its in-browser editor (window.cic): fast, tested, secure, every screen size.",
+      "version": "1.0.0",
+      "homepage": "https://codeinchrome.com",
+      "repository": "https://github.com/deltacontractingsupplies/codeinchrome",
+      "license": "FSL-1.1-ALv2"
+    }
+  ]
+}

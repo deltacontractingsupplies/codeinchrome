@@ -40,12 +40,13 @@ Every item is built on what exists (checked first, so nothing is duplicated),
 tested, and verified on production before it is ticked.
 
 **Free that feels like the real thing, and uses every idle core**
-- [ ] F1. Free sites feel slow. Free already has Starter's 0.5 CPU / 384 MB, but
+- [x] F1. Free sites feel slow. Free already has Starter's 0.5 CPU / 384 MB, but
       as a hard cap. Let every site burst into idle host CPU (a higher cap with
       CPU weights: paid sites win when the host is busy, free sites get the
       rest). The kernel rebalances instantly, so free gets full power while
       the host is quiet and shrinks only when paid sites need it. Measure a
       page's p50/p95 before and after on a free site.
+      DONE 2026-09-26 (#75, agent 0.44.0): every site bursts to 2 CPUs (half a host), --cpu-shares free 256 / paid 1024, applied live with no restart. Measured on the free store on h1: artisan route:list 478-503 ms before, 229-284 ms after.
 - [ ] F2. Show how many free trial places are left (from measured capacity:
       config fleet.stock), on the home and pricing pages.
 - [ ] F3. When free sites crowd paid ones (measured, not guessed), the free
@@ -93,13 +94,17 @@ tested, and verified on production before it is ticked.
 **The skill**
 - [ ] S1. Testing first: every feature ships with tests and a browser check
       (T1/T2), responsiveness checked at three widths.
-- [ ] S2. Security: roles and permissions for every route, no data exposed to
+      PART 2026-09-26: the skill asks for tests first and a check at phone, tablet and desktop widths (browser window resize + screenshot); T2 will make that one call.
+- [x] S2. Security: roles and permissions for every route, no data exposed to
       the wrong user, checked by a test; no secrets anywhere public.
-- [ ] S3. DRY: before building, search the app for an existing feature or
+      DONE 2026-09-26 in the skill: a Policy per model action, a test that a guest is sent to log in and another user gets 403/404 on someone else's record, never trusting an id, price or role from the browser.
+- [x] S3. DRY: before building, search the app for an existing feature or
       component that already does it and extend it; never duplicate. Keep a
       todo list for multi-step work and tick it off.
+      DONE 2026-09-26 in the skill: look for an existing model, controller, component or layout first and extend it; markup used twice is a component; a todo list ticked only when built and tested.
 - [ ] S4. Claude in Chrome knows the skill in every chat - find the simplest
       way to load it in the extension (research: skills, shortcuts).
+      BUILT 2026-09-26: the public repository is a Claude plugin marketplace (.claude-plugin/marketplace.json, the skill already in it); in Claude: Customize > Plugins > Add marketplace > deltacontractingsupplies/codeinchrome, and every chat - the Chrome side panel included - has the skill. The editor says so. LEFT (owner): add it once on a paid Claude account to confirm.
 
 **Speed and polish everywhere**
 - [ ] P1. The editor and dashboard fast and polished on every device (measure
