@@ -59,7 +59,7 @@ before it is ticked.
 - [x] **A14 [high]** The egress watch counts only distinct hosts and ports in a conntrack snapshot, so SSH brute force, single-target floods or credential stuffing, and RST-answered port scans go unnoticed - FIXED 2026-09-25: new SSH/FTP connections limited to 6 a minute per destination (verified live: 6 connected, 2 refused), and a site's logged refusals are counted (agent /v1/egress) and reported to the owner at 30 in 10 minutes. And the busiest single destination per site is reported (agent 0.31.3): 200+ open connections to one host:port is emailed for review (a flood or credential stuffing); tested.
 - [x] **A15 [high]** The phishing/link scanner can be cloaked (fixed User-Agent, control-host source) and never sees unlinked or JS-rendered pages, yet Explore trusts its result - PART DONE 2026-09-25: a browser User-Agent and headers, a probe mark the edge strips before the app (agent 0.31.0) so a kit cannot cloak on it, every parameterless GET route crawled (route:list), 30 pages, and Explore lists only sites past their first week. DONE 2026-09-26: JS-rendered pages - the first 3 pages of a scan are also read as a browser has them once their scripts ran (headless Chromium), and checked by the same rules; findings only the rendered page shows say "after its scripts ran". Chromium runs in a throwaway container with every privilege taken away (non-root, no capabilities, read-only root, 768 MB, 1 CPU, 256 processes, its own br-* network behind the egress chain) and renders only the platform's own site names; rebuilt weekly with the site image. It renders on ANOTHER host than the site's (a kit can learn its own host's address and hide from it) with a browser's own User-Agent (a kit looks for "HeadlessChrome"); the fleet's addresses are not counted as visits. Once a day per site on the hourly scan, always for a report. Measured first on h4: a script-inserted link appears in the rendered DOM (1.5 s), a live site renders in 1.9 s. The control host's address as the plain fetch's source stays (it is behind Cloudflare, and the render comes from elsewhere).
 - [x] **A16 [high]** The control host h2 answers on 80/443 to the whole internet: an old iptables snapshot, restored at boot, undid the Cloudflare-only firewall, and the deploy check still reports the ports as closed - FIXED 2026-09-25 (#21): the snapshot and unit retired, ufw rebuilt, and the deploy now checks the live ruleset and a direct request from outside.
-- [ ] **A17 [medium]** No CSP or Service-Worker restriction at the edge: page scripts can register a Service Worker and make blob: downloads that never pass through Caddy - PART DONE 2026-09-25: Service Worker registration refused at the edge (verified live); blob: downloads by page script remain (a sandbox CSP would also block legitimate downloads - owner decision). DETECTED 2026-09-26 without blocking anything honest: the link scanner bans a page whose script builds a program download (a Blob or download of an .exe/.msi/.apk..., or an installer's MIME type) or carries a Windows program inline (base64 "TVqQ..."), and now also reads the site's own script files (up to 5 a scan) with the same checks and the clipboard-command check; a CSV export built the same way is not flagged (tested). Blocking them outright stays the owner's decision.
+- [ ] **A17 [medium]** No CSP or Service-Worker restriction at the edge: page scripts can register a Service Worker and make blob: downloads that never pass through Caddy - PART DONE 2026-09-25: Service Worker registration refused at the edge (verified live); blob: downloads by page script remain (a sandbox CSP would also block legitimate downloads - owner decision). DETECTED 2026-09-26 without blocking anything honest: the link scanner bans a page whose script builds a program download (a Blob or download of an .exe/.msi/.apk..., or an installer's MIME type) or carries a Windows program inline (base64 "TVqQ..."), and now also reads the site's own script files (up to 5 a scan) with the same checks and the clipboard-command check; a CSV export built the same way is not flagged (tested). Blocking them outright stays the owner's decision. The dry run before it went on put EVERY page of every site up for review: Cloudflare adds its Web Analytics beacon (static.cloudflareinsights.com) to proxied pages at the edge, so it is on pages no site wrote. It is an allowed host now (tested); the live scan after the deploy: every site clean.
 - [x] **A18 [medium]** The link scanner is blind to JS navigation and iframes, uses a self-identifying User-Agent from the control host, only reviews offsite meta refreshes, and checks only the path extension - FIXED 2026-09-25: the link check reads iframes, script sources and script redirects (reviewed when offsite), and an offsite meta refresh is a ban like the edge's redirect rule; it sends a browser's headers; tested.
 - [ ] **A19 [medium]** A banned person can come straight back: no network/device link between accounts, no daily sign-up cap, Turnstile off - PART DONE 2026-09-25: the sign-up network is kept as a keyed hash (IPv4 /24, IPv6 /48); an account from the network of one banned in the last 30 days is held before it can create a site (owner emailed once), and a ban email names other accounts from the same network; tested. DONE 2026-09-26: a device cookie - a random id in a long-lived, encrypted, httpOnly cookie; accounts keep a keyed hash of the browser they were made in (signup_device) and last signed in from (last_device, on every sign-in by any route); a free account from the browser of one banned in the last 30 days is held for a person, even from another network, and a ban email names accounts from the same browser; a forged cookie cannot be read and is replaced. Still open: Turnstile keys (owner).
 - [x] **A20 [medium]** No per-site outbound bandwidth cap or byte-volume watch - PART DONE 2026-09-25: the agent reports each site's bytes sent (its bridge counter, agent 0.31.2), and a free site sending over 1 GB in ten minutes is paused and reported (a paid one reported); tested with a counter reset. DONE 2026-09-26: every container sends to the internet at most ~100 Mbit/s (12 MB/s, 24 MB burst): a byte-rate hashlimit as the first rule of the container egress chain, established connections included - safer than tc on each bridge, in the chain every deploy already builds and proves. Measured on h4 first: a 100 MB upload 720-835 Mbit/s without it, 108-157 with it (the burst lifts short runs); a site's answers to its visitors never cross that chain (18-22 Gbit/s to the host either way). The 1 GB/10 min watch still fires under the cap (up to 7.5 GB).
@@ -263,10 +263,22 @@ frame-ancestors none; no postMessage listener; every route checks the owner.
       Accepted by design, and what eval writes is held to the same rules
       afterwards (malware scan, secrets swept out of public/).
 
-- [ ] A skill-creator style check: the skill tested with a fresh Claude in
+- [x] A skill-creator style check: the skill tested with a fresh Claude in
       Chrome session (side panel, no terminal, no prior context) building
       the same store, timed, and every place it stalls fixed in the skill
-      or the API.
+      or the API. DONE 2026-09-26: a fresh agent given only "add an FAQ page
+      with seeded questions" on the live store found the skill from the
+      editor's banner, and shipped migration, model, seeder, controller,
+      Blade view (the store's layout) and a feature test - its tests and
+      the site's whole suite green, /faq live - in 4 min 40 s and 33
+      browser calls. The store was backed up first and restored after.
+      Where it stalled: a page read sent in the same batch as its navigate
+      read the blank tab (the tool's order, not ours; one retry); cic.view
+      pages are ~900 characters and `to` only narrows them (now said in
+      the skill, with `match` and `chars: Infinity`); the refusals it met -
+      an edit whose text appears twice, a seeder run without confirm - were
+      the intended ones, and it recovered from both in one call. The
+      restore afterwards found a real bug (below: backups and moves).
 
 ## Built and verified
 
@@ -817,6 +829,14 @@ be hard to abuse. Every item is verified live, never assumed.
 - [x] **Found by the link scanner, fixed**: the edge guard sent every header of
       an allowed redirect twice (Location, Set-Cookie) - copy_response_headers
       on top of copy_response. Agent 0.26.9; checked on production.
+- [x] **Found by the skill test, fixed** (2026-09-26): a whole-site restore
+      left a Laravel site answering EVERY page with a 500 ("Please provide a
+      valid cache path"). Backups and host moves leave out the compiled views
+      and the file cache, and nothing put their directories back. The live
+      store was fixed by hand within minutes; cic-backup and the move's
+      unpack now recreate them (agent 0.43.1), and the backups e2e asks for
+      a page Laravel renders - it only fetched a static file, which is why
+      this passed. Every other live site checked: none was missing them.
 
 **Outbound abuse (Hetzner suspends servers for these)**
       DONE: App\Abuse\Enforcer - banned, signed out, cannot sign in by password or Google/Apple, every site taken down (nothing deleted), a payment never lifts it; abuse:ban (with a reason) and abuse:unban; the owner is emailed each ban with the evidence.
@@ -927,6 +947,15 @@ fixed, deployed and verified (above). These remain - each needs the owner:
       User-namespace remapping has no such runtime cost but is daemon-wide:
       every site disk and the MySQL container re-owned, every container
       recreated. Owner: which, if either - the measurements are here.
+      **What runc leaves reachable, measured 2026-09-26** (Docker 29.8.1,
+      kernel 5.15, inside a site container, as root and as uid 33): the
+      kernel's usual escape surfaces are refused - io_uring, userfaultfd,
+      keyctl/add_key, bpf, perf_event_open, unshare(NEWUSER), mount,
+      kexec_load, open_by_handle_at, pidfd_getfd. Reachable: ptrace and
+      process_vm_readv, which only ever reach processes in the SAME
+      container (its own PID namespace) - a site reading its own memory.
+      So the case for gVisor is a kernel bug in what remains, not a known
+      open door.
 - [x] **Disk I/O limits per site** (2026-09-25): 400/200 MB/s read/write,
       10,000/5,000 IOPS, set on the host's physical disk - measured: the
       kernel charges a site's I/O through its loop device to the site's
