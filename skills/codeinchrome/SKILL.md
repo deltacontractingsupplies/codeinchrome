@@ -186,20 +186,27 @@ await cic.sh('php artisan migrate && php artisan test --filter=Cart')
 await cic.sh('curl -s -o /dev/null -w "%{http_code}" /cart')     // this site only
 ```
 
-It speaks ls, cat, head, tail, wc, grep (-rniEFwlLcov, -A/-B/-C, --include), find (-name,
--type, -maxdepth, -newer, -mmin), sed (-n, -i, -E; s///g, ranges, d, p), diff -u, cp -r, mv,
-rm -r, mkdir -p, touch, tree, du, sort, uniq, cut, tr, xargs, tee, test/[ ], pipes, `&&`,
-`||`, `;`, `>`, `>>`, `2>&1`, heredocs and globs; `php artisan ...`, `composer ...`,
-`php -r 'code'` (in the booted app, like tinker), `mysql -e 'SQL'` (the site's own
-database), `git log/diff/show -- FILE` over the saved versions (there is no git
-repository: every save is already a version) and `git clone https://github.com/owner/repo
-[folder]` - a public GitHub repository into a new folder, scanned like any upload.
+It speaks ls, cat, head, tail, wc, grep (-rniEFPwlLcov, -A/-B/-C, --include), find (-name,
+-type, -maxdepth, -newer, -mmin, -exec CMD {} \; or {} +, -delete), sed (-n, -i, -i '', -E;
+s///g, ranges, a, i, d, p), perl -pi -e 's///' (and -pe, -ne, -0 for whole files - with
+lookahead), awk (-F, -v, patterns, BEGIN/END, arrays, printf, sub/gsub/split), patch -p1 and
+git apply (a unified diff, all hunks or none), diff -u, cp -r, mv, rm -r, mkdir -p, touch,
+tree, du, sort, uniq, cut, tr, seq, xargs, tee, test/[ ]/[[ ]], pipes, `&&`, `||`, `;`, `>`,
+`>>`, `2>&1`, heredocs and globs; variables (`X=1`, `$X`, `${X:-default}`, `$?`), `$(cmd)`,
+`$((i+1))`, `{a,b}` and `{1..5}`, `for`/`while`/`until`/`if` with `read`, `break`,
+`continue` and `set -e`; `php artisan ...`, `composer ...`, `php -r 'code'` (in the booted
+app, like tinker), `php -l FILE...` (the site's own PHP parser), `mysql -e 'SQL'` (the site's
+own database), `git log/diff/show -- FILE` over the saved versions (there is no git
+repository: every save is already a version; `git add`/`commit` do nothing, `git grep`
+and `git mv` do what they say) and `git clone https://github.com/owner/repo [folder]` - a
+public GitHub repository into a new folder, scanned like any upload.
 `git clone URL /` makes the whole site that repository (an open-source Laravel app run as
 the site): it is checked and scanned, the site is backed up, its `.env` and `storage/` are
 kept, then `composer install`. It asks for confirmation - only with the person's agreement -
-and `git clone --status` follows it. Then `php artisan migrate`. There are no `$VARIABLES` or `$(...)`: a `$`
-is an ordinary character, so PHP in a heredoc arrives exactly as written. `cd` is
-remembered between calls. Deleting a folder, a destructive artisan command and a SQL write
+and `git clone --status` follows it. Then `php artisan migrate`. A here-document's body is
+never expanded, and a `$name` the shell has no value for stays as written - so PHP in a
+heredoc or in double quotes arrives exactly as sent. `cd` and variables are remembered
+between calls. Deleting a folder, a destructive artisan command and a SQL write
 answer with a refusal that says to resend with `{ confirm: true }` - only with the person's
 agreement. `cic.sh.more(2)` shows the next part of a long answer; `{ raw: true }` returns
 `{ code, stdout, stderr, ms }` unshaped. `cic.sh('help')` lists everything.
@@ -212,6 +219,29 @@ data than text: `cic.grep(pattern, { under, include })`, `cic.find({ under, name
 
 Everything else in this skill still holds: `cic.sh` is the same API underneath, so a
 `writeMany` of twenty files is still one call where twenty `cat >` heredocs are twenty.
+
+### As fast as a terminal
+
+Measured on the same refactor (rename a model across 29 files, rename routes, add a
+column): a terminal agent took 5 calls; a browser agent reading files one call at a time
+took 14. The difference was reading, not writing. Work the way the terminal agent did:
+
+- **Change many files in one command**, never file by file:
+  `cic.sh("grep -rlw Product app routes tests | xargs perl -pi -e 's/\\bProduct\\b/Coffee/g'")`,
+  `cic.sh('git mv app/Models/Product.php app/Models/Coffee.php')`,
+  `cic.sh('for f in $(grep -rl "cart\\." resources); do sed -i "s/cart\\./bag./g" $f; done')`.
+  A multi-line change you can describe as a diff: `git apply <<'EOF'` ... `EOF` (all hunks or none).
+- **Count before you read**: `grep -rc`, `grep -rl`, `wc -l` answer in a few lines what
+  reading every file answers in many calls. `cd` into the folder first so paths are short.
+- **Several pages in one round trip**: your browser tool shows about 1,000 characters per
+  result, but `browser_batch` runs several `javascript_tool` calls at once - put
+  `cic.sh(...)`, `cic.sh.more(2)`, `cic.sh.more(3)` (or several `cic.view` calls) in ONE
+  batch and read them all together.
+- **Check in the same call**: end the line with the proof - `&& php -l $(grep -rl Coffee app)
+  && grep -rn "Product::" app | wc -l`.
+- `cic.find({ under, name, type })` answers `{ entries: [{ path, dir, size, mtime }] }`; the
+  output of `cic.sh` is already safe to return (paths are shown, secrets and long keys are
+  not) - do not escape it yourself, and do not reach for `{ raw: true }` to read it.
 
 ## Step 2 - know the app (1 call)
 

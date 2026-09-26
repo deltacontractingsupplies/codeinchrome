@@ -275,6 +275,24 @@ Limits found (each one a thing a terminal agent never hits):
       backup - no backup, no replace - then the swap, keeping the site's
       .env and storage/, then composer install; `git clone --status` or
       cic.operation() follows it. Needs confirm; audited.
+- [x] **Head to head, the same refactor, two fresh agents** (owner,
+      2026-09-26): rename a model across 29 files, rename three routes, add a
+      column, prove it with grep. A terminal agent: 44.7 s, 5 calls (grep -rl
+      | xargs perl -pi with lookahead, git mv, perl -0pi, a for loop of php -l).
+      A Claude in Chrome agent: 154 s, 14 calls - both right. The gap was
+      reading and the missing idioms, not the network (one command ~220 ms
+      from far away, 186 ms of it the trip):
+      | what the browser agent hit | now |
+      |---|---|
+      | paths shown as "[long value hidden]" (base64 rule matched a/b/c/Dir) | paths shown; keys and hashes still hidden |
+      | php -l refused, breaking && | the site's own parser (TOKEN_PARSE), all files in one call |
+      | no $VAR, $(cmd), for/while/if - and $X, $(...), {a,b} silently literal | sh's expansions and loops; heredocs never expanded, unset $name kept for PHP |
+      | no perl -pi, awk, find -exec, grep -P, patch | all there (awk.js; JS regex = Perl's lookaround) |
+      | sed -i '' (BSD) took '' as the script | the empty suffix |
+      | grep -c left out files with 0 | listed, as grep does |
+      | ~8 grep lines per 1,000-character result | the skill: count first, cd for short paths, browser_batch several pages per round trip |
+      Of 94 terminal idioms tried live, 74 ran before; the rest now do, or
+      say why not (python, node, jq: there is none on a site).
 - [x] **The same power as JavaScript calls**, not only as a shell (owner,
       2026-09-25): cic.grep, cic.find, cic.clone and cic.diff return data
       (browser-safe text) through the same endpoints cic.sh uses; every other
