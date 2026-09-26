@@ -2,7 +2,7 @@ package sites
 
 import (
 	"context"
-	"os"
+	"encoding/json"
 	"os/exec"
 	"strings"
 	"sync"
@@ -73,65 +73,76 @@ func TestTheRendererRunsLockedDownAndIsAlwaysRemoved(t *testing.T) {
 	}
 }
 
-// A page at every screen size: one locked-down browser run per size, at that
-// window size, its picture read from a directory removed afterwards.
-func TestAPageIsShotAtEveryScreenSizeLockedDown(t *testing.T) {
-	m := &Manager{cfg: Config{PlatformDomain: "codeinchrome.com"}}
-	png := "\x89PNG\r\n\x1a\n-fake-image-bytes"
+// fakeShots stands in for the renderer: docker run prints what shots.py
+// would, for the sizes and addresses it was given; the spec it got is kept.
+func fakeShots(t *testing.T, lines func(spec []map[string]any) string) *[]string {
+	t.Helper()
 	var runs []string
-	var outDir string
 	orig := renderDocker
 	t.Cleanup(func() { renderDocker = orig })
 	renderDocker = func(ctx context.Context, args ...string) *exec.Cmd {
 		if args[0] != "run" {
 			return exec.CommandContext(ctx, "true")
 		}
-		joined := strings.Join(args, " ")
-		runs = append(runs, joined)
-		// Where the browser would write: the host side of -v, and --screenshot's name.
-		var host, file string
-		for i, a := range args {
-			if a == "-v" {
-				host = strings.SplitN(args[i+1], ":", 2)[0]
-			}
-			if strings.HasPrefix(a, "--screenshot=/out/") {
-				file = strings.TrimPrefix(a, "--screenshot=/out/")
-			}
-		}
-		outDir = host
-		return exec.CommandContext(ctx, "sh", "-c", `printf '%s' "$1" > "$2"`, "sh", png, host+"/"+file)
+		runs = append(runs, strings.Join(args, " "))
+		var spec []map[string]any
+		json.Unmarshal([]byte(args[len(args)-1]), &spec)
+		return exec.CommandContext(ctx, "printf", "%s", lines(spec))
 	}
+	return &runs
+}
+
+func shotLine(name string, content int, png string) string {
+	b, _ := json.Marshal(map[string]any{"name": name, "contentWidth": content, "png": []byte(png)})
+	return string(b) + "\n"
+}
+
+const fakePNG = "\x89PNG\r\n\x1a\n-fake"
+
+// Every screen size, as devices show it, in ONE locked-down browser run, and
+// how wide the content is at each: wider than the screen is sideways scroll.
+func TestAPageIsShotAtEverySizeInOneLockedDownRunAndMeasured(t *testing.T) {
+	m := &Manager{cfg: Config{PlatformDomain: "codeinchrome.com"}}
+	runs := fakeShots(t, func(spec []map[string]any) string {
+		out := ""
+		for _, s := range spec {
+			w := int(s["width"].(float64))
+			if s["name"] == "phone" {
+				w = 608 // a 600 px element on a 390 px phone
+			}
+			out += shotLine(s["name"].(string), w, fakePNG)
+		}
+		return out
+	})
 	shots, err := m.RenderShots(context.Background(), "https://shop.codeinchrome.com/cart")
 	if err != nil || len(shots) != 3 {
-		t.Fatalf("%v %v", len(shots), err)
+		t.Fatalf("%d %v", len(shots), err)
 	}
-	for i, want := range []string{"--window-size=390,844", "--window-size=820,1180", "--window-size=1440,900"} {
-		if !strings.Contains(runs[i], want) || !strings.Contains(runs[i], "--read-only") || !strings.Contains(runs[i], "--cap-drop ALL") ||
-			!strings.Contains(runs[i], "--user 10001:10001") || !strings.HasSuffix(runs[i], "https://shop.codeinchrome.com/cart") {
-			t.Errorf("run %d: %s", i, runs[i])
+	if len(*runs) != 1 {
+		t.Fatalf("%d browser runs, want one for every size", len(*runs))
+	}
+	run := (*runs)[0]
+	for _, want := range []string{"--read-only", "--cap-drop ALL", "--user 10001:10001", "--network cic-render", "--entrypoint python3", renderImage + " " + shotsDriver,
+		`"width":390`, `"width":820`, `"width":1440`, `"url":"https://shop.codeinchrome.com/cart"`} {
+		if !strings.Contains(run, want) {
+			t.Errorf("run is missing %q:\n%s", want, run)
 		}
 	}
-	if shots[0].Name != "phone" || shots[2].Width != 1440 || string(shots[1].PNG) != png {
-		t.Fatalf("shots %+v", shots[0].ScreenSize)
+	if strings.Contains(run, " -v ") {
+		t.Error("the renderer was given a host directory")
 	}
-	if _, err := os.Stat(outDir); !os.IsNotExist(err) {
-		t.Fatal("the pictures' directory was left behind")
+	if !shots[0].Overflow || shots[0].ContentWidth != 608 || shots[1].Overflow || shots[2].Overflow || string(shots[1].PNG) != fakePNG {
+		t.Fatalf("measurements %+v %+v %+v", shots[0].ContentWidth, shots[1].Overflow, shots[2].Overflow)
 	}
+}
 
-	// Anything that is not a picture is refused, not passed on.
-	renderDocker = func(ctx context.Context, args ...string) *exec.Cmd {
-		if args[0] != "run" {
-			return exec.CommandContext(ctx, "true")
-		}
-		for i, a := range args {
-			if a == "-v" {
-				return exec.CommandContext(ctx, "sh", "-c", `echo '<script>' > "$1/phone.png"`, "sh", strings.SplitN(args[i+1], ":", 2)[0])
-			}
-		}
-		return exec.CommandContext(ctx, "true")
-	}
+func TestOnlyPicturesOfOurSizesComeBack(t *testing.T) {
+	m := &Manager{cfg: Config{PlatformDomain: "codeinchrome.com"}}
+	fakeShots(t, func([]map[string]any) string {
+		return shotLine("phone", 390, fakePNG) + shotLine("tablet", 820, "<script>") + shotLine("huge", 9, fakePNG) + "not json\n"
+	})
 	if _, err := m.RenderShots(context.Background(), "https://shop.codeinchrome.com/"); err == nil {
-		t.Fatal("a non-PNG came back as a shot")
+		t.Fatal("a missing size, a non-PNG and an unknown size were passed on")
 	}
 	if _, err := m.RenderShots(context.Background(), "https://evil.example/"); err == nil {
 		t.Fatal("another site was shot")
@@ -141,31 +152,21 @@ func TestAPageIsShotAtEveryScreenSizeLockedDown(t *testing.T) {
 // Behind the app's login: a sign-in link per size (each is used once).
 func TestEachScreenSizeCanHaveItsOwnAddress(t *testing.T) {
 	m := &Manager{cfg: Config{PlatformDomain: "codeinchrome.com"}}
-	var targets []string
-	orig := renderDocker
-	t.Cleanup(func() { renderDocker = orig })
-	renderDocker = func(ctx context.Context, args ...string) *exec.Cmd {
-		if args[0] != "run" {
-			return exec.CommandContext(ctx, "true")
+	var got []string
+	fakeShots(t, func(spec []map[string]any) string {
+		out := ""
+		for _, s := range spec {
+			got = append(got, s["url"].(string))
+			out += shotLine(s["name"].(string), int(s["width"].(float64)), fakePNG)
 		}
-		targets = append(targets, args[len(args)-1])
-		var host, file string
-		for i, a := range args {
-			if a == "-v" {
-				host = strings.SplitN(args[i+1], ":", 2)[0]
-			}
-			if strings.HasPrefix(a, "--screenshot=/out/") {
-				file = strings.TrimPrefix(a, "--screenshot=/out/")
-			}
-		}
-		return exec.CommandContext(ctx, "sh", "-c", `printf '\211PNGfake' > "$1"`, "sh", host+"/"+file)
-	}
+		return out
+	})
 	links := []string{"https://shop.codeinchrome.com/__codeinchrome/sign-in?n=1", "https://shop.codeinchrome.com/__codeinchrome/sign-in?n=2", "https://shop.codeinchrome.com/__codeinchrome/sign-in?n=3"}
 	if _, err := m.RenderShotsEach(context.Background(), links); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Join(targets, " ") != strings.Join(links, " ") {
-		t.Fatalf("each size did not get its own link: %v", targets)
+	if strings.Join(got, " ") != strings.Join(links, " ") {
+		t.Fatalf("each size did not get its own link: %v", got)
 	}
 	if _, err := m.RenderShotsEach(context.Background(), links[:2]); err == nil {
 		t.Fatal("two addresses for three sizes were accepted")

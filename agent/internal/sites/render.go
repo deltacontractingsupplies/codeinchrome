@@ -4,12 +4,10 @@ import (
 	"context"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
-	"io"
 	"net/url"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 )
@@ -118,18 +116,27 @@ type ScreenSize struct {
 	Height int    `json:"height"`
 }
 
-// Shot is a page as one screen size shows it.
+// Shot is a page as one screen size shows it, and how wide its content is:
+// wider than the screen means it scrolls sideways there (Overflow).
 type Shot struct {
 	ScreenSize
-	PNG []byte `json:"png"` // base64 in JSON
+	PNG          []byte `json:"png"` // base64 in JSON
+	ContentWidth int    `json:"contentWidth"`
+	Overflow     bool   `json:"overflow"`
 }
 
-const maxShotPNG = 8 << 20
+const (
+	maxShotPNG    = 8 << 20
+	maxShotsOut   = 48 << 20 // three screenshots, base64
+	shotsDriver   = "/opt/cic/shots.py"
+	shotsDeadline = 90 * time.Second
+)
 
 // RenderShots screenshots a hosted page at every screen size, in the same
-// locked-down container as RenderURL - one browser run per size, one at a
-// time. The container writes only the picture, into a directory of its own
-// that is removed afterwards.
+// locked-down container as RenderURL, as those DEVICES show it: Chromium's
+// own window cannot be narrower than 500 px, so the image's driver (shots.py)
+// uses its DevTools device emulation - a phone is a real 390 px layout - and
+// measures the width the content takes. One browser run for every size.
 func (m *Manager) RenderShots(ctx context.Context, raw string) ([]Shot, error) {
 	return m.RenderShotsEach(ctx, []string{raw})
 }
@@ -141,8 +148,12 @@ func (m *Manager) RenderShotsEach(ctx context.Context, raws []string) ([]Shot, e
 	if len(raws) != 1 && len(raws) != len(ScreenSizes) {
 		return nil, fmt.Errorf("one address, or one for each of the %d screen sizes", len(ScreenSizes))
 	}
-	targets := make([]string, len(ScreenSizes))
-	for i := range ScreenSizes {
+	type job struct {
+		ScreenSize
+		URL string `json:"url"`
+	}
+	jobs := make([]job, len(ScreenSizes))
+	for i, size := range ScreenSizes {
 		raw := raws[0]
 		if len(raws) > 1 {
 			raw = raws[i]
@@ -151,8 +162,9 @@ func (m *Manager) RenderShotsEach(ctx context.Context, raws []string) ([]Shot, e
 		if err != nil {
 			return nil, err
 		}
-		targets[i] = t
+		jobs[i] = job{size, t}
 	}
+	spec, _ := json.Marshal(jobs)
 	select {
 	case renderSlots <- struct{}{}:
 		defer func() { <-renderSlots }()
@@ -164,57 +176,51 @@ func (m *Manager) RenderShotsEach(ctx context.Context, raws []string) ([]Shot, e
 	if renderDocker(ctx, "network", "inspect", renderNetwork).Run() != nil {
 		_ = renderDocker(ctx, "network", "create", renderNetwork).Run()
 	}
-	out, err := os.MkdirTemp("", "cic-shot-")
-	if err != nil {
-		return nil, err
-	}
-	defer os.RemoveAll(out)
-	if err := os.Chown(out, 10001, 10001); err != nil && !os.IsPermission(err) {
-		return nil, err
-	}
+	b := make([]byte, 6)
+	_, _ = rand.Read(b)
+	name := "cic-render-" + hex.EncodeToString(b)
+	runCtx, cancel := context.WithTimeout(ctx, shotsDeadline)
+	defer cancel()
+	defer func() { _ = renderDocker(context.Background(), "rm", "-f", name).Run() }()
+	cmd := renderDocker(runCtx, "run", "--rm", "--name", name, "--network", renderNetwork,
+		"--memory", "768m", "--memory-swap", "768m", "--cpus", "1", "--pids-limit", "256",
+		"--read-only", "--tmpfs", "/tmp:size=256m,mode=1777", "--cap-drop", "ALL",
+		"--security-opt", "no-new-privileges", "--user", "10001:10001",
+		"-e", "HOME=/tmp", "-e", "XDG_CONFIG_HOME=/tmp", "-e", "XDG_CACHE_HOME=/tmp",
+		"--entrypoint", "python3", renderImage, shotsDriver, string(spec))
+	out := &cappedBuffer{limit: maxShotsOut}
+	cmd.Stdout = out
+	runErr := cmd.Run()
 	var shots []Shot
-	for i, size := range ScreenSizes {
-		target := targets[i]
-		b := make([]byte, 6)
-		_, _ = rand.Read(b)
-		name := "cic-render-" + hex.EncodeToString(b)
-		runCtx, cancel := context.WithTimeout(ctx, 45*time.Second)
-		cmd := renderDocker(runCtx, "run", "--rm", "--name", name, "--network", renderNetwork,
-			"--memory", "768m", "--memory-swap", "768m", "--cpus", "1", "--pids-limit", "256",
-			"--read-only", "--tmpfs", "/tmp:size=256m,mode=1777", "--cap-drop", "ALL",
-			"--security-opt", "no-new-privileges", "--user", "10001:10001",
-			"-v", out+":/out",
-			"-e", "HOME=/tmp", "-e", "XDG_CONFIG_HOME=/tmp", "-e", "XDG_CACHE_HOME=/tmp",
-			renderImage,
-			"--disable-crash-reporter", "--crash-dumps-dir=/tmp/crash", "--user-agent="+renderUA,
-			fmt.Sprintf("--window-size=%d,%d", size.Width, size.Height),
-			"--virtual-time-budget=8000", "--screenshot=/out/"+size.Name+".png", target)
-		runErr := cmd.Run()
-		_ = renderDocker(context.Background(), "rm", "-f", name).Run()
-		cancel()
-		png, err := readShot(filepath.Join(out, size.Name+".png"))
-		if err != nil {
-			return nil, fmt.Errorf("the page could not be shown at %s size: %v", size.Name, firstNonNil(err, runErr))
+	for _, line := range strings.Split(strings.TrimSpace(out.buf.String()), "\n") {
+		var got struct {
+			Name         string `json:"name"`
+			PNG          []byte `json:"png"`
+			ContentWidth int    `json:"contentWidth"`
 		}
-		shots = append(shots, Shot{ScreenSize: size, PNG: png})
+		if line == "" || json.Unmarshal([]byte(line), &got) != nil {
+			continue
+		}
+		size, ok := sizeNamed(got.Name)
+		if !ok || len(got.PNG) < 8 || len(got.PNG) > maxShotPNG || string(got.PNG[1:4]) != "PNG" {
+			continue // only a picture of one of OUR sizes is passed on
+		}
+		shots = append(shots, Shot{ScreenSize: size, PNG: got.PNG, ContentWidth: got.ContentWidth,
+			Overflow: got.ContentWidth > size.Width+1})
+	}
+	if len(shots) != len(ScreenSizes) {
+		return nil, fmt.Errorf("the page could not be shown at every size (%d of %d): %v", len(shots), len(ScreenSizes), firstNonNil(runErr, fmt.Errorf("no picture came back")))
 	}
 	return shots, nil
 }
 
-func readShot(path string) ([]byte, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
+func sizeNamed(name string) (ScreenSize, bool) {
+	for _, s := range ScreenSizes {
+		if s.Name == name {
+			return s, true
+		}
 	}
-	defer f.Close()
-	b, err := io.ReadAll(io.LimitReader(f, maxShotPNG+1))
-	if err != nil {
-		return nil, err
-	}
-	if len(b) > maxShotPNG || len(b) < 8 || string(b[1:4]) != "PNG" {
-		return nil, fmt.Errorf("no picture came back")
-	}
-	return b, nil
+	return ScreenSize{}, false
 }
 
 func firstNonNil(errs ...error) error {
