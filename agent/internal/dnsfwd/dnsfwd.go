@@ -23,6 +23,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -89,12 +90,38 @@ func Upstreams(resolvConf string) []string {
 }
 
 // Forwarder relays questions to Upstreams and logs them to Log.
+//
+// Every site on the host can reach it, so what one site can make it hold is
+// capped: MaxInflight UDP questions waiting on an upstream and MaxConns TCP
+// connections. Past a cap a question is dropped - what a busy resolver does,
+// and the client asks again - instead of costing the host a goroutine and a
+// 64 KB buffer per packet, which a flood would turn into all of its memory.
 type Forwarder struct {
-	Upstreams []string
-	Log       io.Writer
-	Timeout   time.Duration
+	Upstreams   []string
+	Log         io.Writer
+	Timeout     time.Duration
+	MaxInflight int // UDP questions waiting on an upstream (default 256)
+	MaxConns    int // open TCP connections (default 64)
 
-	mu sync.Mutex
+	mu       sync.Mutex
+	once     sync.Once
+	udpSlots chan struct{}
+	tcpSlots chan struct{}
+	inflight atomic.Int64
+	dropped  atomic.Int64
+}
+
+func (f *Forwarder) slots() {
+	f.once.Do(func() {
+		n, c := f.MaxInflight, f.MaxConns
+		if n <= 0 {
+			n = 256
+		}
+		if c <= 0 {
+			c = 64
+		}
+		f.udpSlots, f.tcpSlots = make(chan struct{}, n), make(chan struct{}, c)
+	})
 }
 
 func (f *Forwarder) record(src net.Addr, msg []byte) {
@@ -141,6 +168,7 @@ func (f *Forwarder) exchangeUDP(msg []byte) ([]byte, error) {
 
 // ServeUDP answers until ctx ends.
 func (f *Forwarder) ServeUDP(ctx context.Context, pc net.PacketConn) error {
+	f.slots()
 	go func() { <-ctx.Done(); pc.Close() }()
 	buf := make([]byte, 65535)
 	for {
@@ -151,9 +179,17 @@ func (f *Forwarder) ServeUDP(ctx context.Context, pc net.PacketConn) error {
 			}
 			continue
 		}
+		select {
+		case f.udpSlots <- struct{}{}:
+		default:
+			f.dropped.Add(1) // full: dropped unanswered and unlogged
+			continue
+		}
 		msg := append([]byte(nil), buf[:n]...)
 		f.record(src, msg)
+		f.inflight.Add(1)
 		go func() {
+			defer func() { f.inflight.Add(-1); <-f.udpSlots }()
 			if ans, err := f.exchangeUDP(msg); err == nil {
 				_, _ = pc.WriteTo(ans, src)
 			}
@@ -164,6 +200,7 @@ func (f *Forwarder) ServeUDP(ctx context.Context, pc net.PacketConn) error {
 // ServeTCP answers length-prefixed queries (a truncated answer is re-asked
 // over TCP) until ctx ends.
 func (f *Forwarder) ServeTCP(ctx context.Context, l net.Listener) error {
+	f.slots()
 	go func() { <-ctx.Done(); l.Close() }()
 	for {
 		c, err := l.Accept()
@@ -173,7 +210,17 @@ func (f *Forwarder) ServeTCP(ctx context.Context, l net.Listener) error {
 			}
 			continue
 		}
-		go f.handleTCP(c)
+		select {
+		case f.tcpSlots <- struct{}{}:
+		default:
+			f.dropped.Add(1)
+			c.Close()
+			continue
+		}
+		go func() {
+			defer func() { <-f.tcpSlots }()
+			f.handleTCP(c)
+		}()
 	}
 }
 

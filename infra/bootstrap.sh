@@ -309,11 +309,25 @@ fi
 # The sites' DNS forwarder (cic-dns, audit A21) answers on the default
 # bridge's gateway; site bridges and that bridge may reach its port 53 there
 # and nothing else new (ufw refuses the rest of what arrives from a bridge).
+# Rate-limited per container like DNS on the way out (50 a second, burst
+# 100): this traffic arrives through INPUT, which the egress chain never
+# sees, and without a limit one site could flood the forwarder every site on
+# the host resolves through. TCP: new connections limited, their segments not.
 dns_gw=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 172.17.0.1)
+chain CIC-DNSFWD
+iptables -A CIC-DNSFWD -p udp -m hashlimit --hashlimit-upto 50/sec --hashlimit-burst 100 --hashlimit-mode srcip \
+  --hashlimit-name cic-dnsfwd -j ACCEPT
+iptables -A CIC-DNSFWD -p udp -j DROP
+iptables -A CIC-DNSFWD -p tcp --syn -m hashlimit --hashlimit-upto 10/sec --hashlimit-burst 20 --hashlimit-mode srcip \
+  --hashlimit-name cic-dnsfwd-tcp -j ACCEPT
+iptables -A CIC-DNSFWD -p tcp --syn -j DROP
+iptables -A CIC-DNSFWD -p tcp -j ACCEPT
 for dev in 'br-+' docker0; do
   for proto in udp tcp; do
-    iptables -C INPUT -i "$dev" -d "$dns_gw" -p "$proto" --dport 53 -j ACCEPT 2>/dev/null \
-      || iptables -I INPUT -i "$dev" -d "$dns_gw" -p "$proto" --dport 53 -j ACCEPT
+    iptables -C INPUT -i "$dev" -d "$dns_gw" -p "$proto" --dport 53 -j CIC-DNSFWD 2>/dev/null \
+      || iptables -I INPUT -i "$dev" -d "$dns_gw" -p "$proto" --dport 53 -j CIC-DNSFWD
+    # The unlimited rule this replaced (hosts bootstrapped before 2026-09-26).
+    while iptables -D INPUT -i "$dev" -d "$dns_gw" -p "$proto" --dport 53 -j ACCEPT 2>/dev/null; do :; done
   done
 done
 
