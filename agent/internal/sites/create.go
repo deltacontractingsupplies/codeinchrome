@@ -904,6 +904,9 @@ func (m *Manager) SetLimits(ctx context.Context, id string, o LimitsOpts) (map[s
 	}
 	applied := map[string]string{}
 
+	// A memory limit the site already has is not a change: re-applying the
+	// same plan (fleet:apply-limits does, to every site) must not restart it.
+	memChanged := o.MemLimit != "" && o.MemLimit != site.MemLimit
 	if o.CPULimit != "" || o.CPUWeight != 0 || o.MemLimit != "" {
 		args := []string{"update"}
 		if o.CPULimit != "" || o.CPUWeight != 0 {
@@ -934,7 +937,7 @@ func (m *Manager) SetLimits(ctx context.Context, id string, o LimitsOpts) (map[s
 				site.MemLimit = o.MemLimit
 			}
 			applied["cpuMemory"] = "applied"
-			if o.MemLimit != "" {
+			if memChanged {
 				// The database cap follows the memory (see sizing.go), and
 				// the container restarts so Apache re-sizes its workers to
 				// the new limit - a few seconds, on a plan change only.
@@ -943,7 +946,7 @@ func (m *Manager) SetLimits(ctx context.Context, id string, o LimitsOpts) (map[s
 				} else {
 					applied["dbConnections"] = strconv.Itoa(ConnectionsFor(o.MemLimit, site.background()))
 				}
-				if _, err := run(ctx, 60*time.Second, "docker", "restart", "-t", "10", m.container(id)); err != nil {
+				if _, err := runDocker(ctx, 60*time.Second, "restart", "-t", "10", m.container(id)); err != nil {
 					applied["workers"] = "restart failed: " + err.Error()
 				} else {
 					applied["workers"] = strconv.Itoa(WorkersFor(o.MemLimit, site.background()))
