@@ -84,12 +84,14 @@ tested, and verified on production before it is ticked.
 - [ ] T2. A headless browser for the agent: visit pages as a visitor, click
       through a flow, and take screenshots at phone, tablet and desktop widths
       (responsiveness) - built on the renderer the link scanner already uses.
-- [ ] T3. Tests never touch live data: the site's tests run on their own
+- [x] T3. Tests never touch live data: the site's tests run on their own
       database with every test rolled back; RefreshDatabase, migrate:fresh,
       db:wipe and friends are refused by the platform, not only discouraged.
-- [ ] T4. Database history: a snapshot before every migration and seeder the
+      DONE (verified 2026-09-26, already enforced by the platform): `artisan test` runs with APP_ENV=testing on an in-memory SQLite database and the MySQL host pointed at nothing (agent commandEnv, tested) - RefreshDatabase in a site's tests can only ever wipe that. migrate:refresh, migrate:reset and db:wipe are not on the allow-list at all; migrate:fresh, migrate:rollback and db:seed need an explicit confirm. cic.eval stays the owner's own PHP, by design.
+- [x] T4. Database history: a snapshot before every migration and seeder the
       agent runs, plus frequent automatic snapshots, restorable from the
       backups page - so a database is never lost, free or paid.
+      DONE 2026-09-26 (agent 0.46.0): a snapshot of the database before every import, migrate, migrate:rollback, migrate:fresh and db:seed - and if it cannot be taken, nothing runs. The newest 10 (1 GB at most) per site, outside the site's own files; listed in the Database view and by cic.db.snapshots(), put back by cic.db.restore(name, { confirm: true }) or a click, and a restore snapshots what it replaces first. The nightly backups keep the long history.
 
 **The skill**
 - [ ] S1. Testing first: every feature ships with tests and a browser check

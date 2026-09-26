@@ -364,3 +364,12 @@ kbd, code { font-family: var(--mono); font-size: 11px; background: var(--code-bg
   .agent-log .running .step-text::before { display: inline-block; animation: agent-spin 1s linear infinite; }
   @keyframes agent-spin { to { transform: rotate(360deg); } }
 }
+
+/* Database snapshots in the database sidebar. */
+.snap-note { margin: 0 12px 6px; font-size: 11px; color: var(--desc); }
+.snapshots { list-style: none; margin: 0; padding: 0 8px 8px; font-size: 12px; }
+.snapshots li { display: flex; align-items: center; gap: 6px; justify-content: space-between; padding: 2px 4px; }
+.snapshots li:hover { background: var(--list-hover); }
+.snapshots li span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.snapshots button { flex: none; font-size: 11px; padding: 1px 6px; }
+.snapshots .snap-empty { color: var(--desc); }

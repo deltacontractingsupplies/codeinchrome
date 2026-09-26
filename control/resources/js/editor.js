@@ -54,6 +54,8 @@ const SITE = {
   dbImportUrl: root.dataset.dbImport,
   commandUrl: root.dataset.command,
   commandLiveUrl: root.dataset.commandLive,
+  dbSnapshotsUrl: root.dataset.dbSnapshots,
+  dbSnapshotRestoreUrl: root.dataset.dbSnapshotRestore,
   logsUrl: root.dataset.logs,
   historyUrl: root.dataset.history,
   binUrl: root.dataset.bin,
@@ -1931,6 +1933,7 @@ function setMode(next) {
     $('preview').hidden = true;
     $('empty').hidden = true;
     if (!dbLoaded) loadTables();
+    loadSnapshots();
     $('sql').focus();
   } else {
     show(active);
@@ -2118,6 +2121,54 @@ async function runSql(sql, { write = false, interactive = true } = {}) {
 
 $('modeFiles').addEventListener('click', () => setMode('files'));
 $('modeDb').addEventListener('click', () => setMode('db'));
+
+/* Database snapshots (agent dbsnapshots.go): taken by the host before every
+ * import, migration and seeder; listed here, each one a click (and a
+ * confirmation) from being put back - and what it replaces is saved first. */
+const SNAP_REASON = { 'before-import': 'before an import', 'before-migrate': 'before migrate',
+  'before-migrate-rollback': 'before migrate:rollback', 'before-migrate-fresh': 'before migrate:fresh', 'before-db-seed': 'before db:seed' };
+
+async function loadSnapshots() {
+  const r = await apiAt(SITE.dbSnapshotsUrl, 'GET');
+  const ol = $('dbSnapshots');
+  if (!r.ok) {
+    ol.replaceChildren(Object.assign(document.createElement('li'), { className: 'snap-empty', textContent: r.hint ?? 'Snapshots are not available.' }));
+    return r;
+  }
+  ol.replaceChildren(...(r.snapshots.length ? r.snapshots.map((s) => {
+    const li = document.createElement('li');
+    const what = document.createElement('span');
+    what.textContent = `${when(s.at)} · ${SNAP_REASON[s.reason] ?? s.reason.replace(/-/g, ' ')} · ${Math.max(1, Math.round(s.bytes / 1024))} KB`;
+    const restore = document.createElement('button');
+    restore.type = 'button';
+    restore.textContent = 'Restore';
+    restore.addEventListener('click', () => restoreSnapshot(s.name));
+    li.append(what, restore);
+    return li;
+  }) : [Object.assign(document.createElement('li'), { className: 'snap-empty', textContent: 'None yet.' })]));
+  return r;
+}
+
+async function restoreSnapshot(name, { confirm = false, interactive = true } = {}) {
+  if (!confirm) {
+    if (!interactive) {
+      return { ok: false, error: 'needs_confirm', hint: 'Restoring replaces the database (what it holds now is saved first as a snapshot). Pass { confirm: true }.' };
+    }
+    if (!await ask(`Put the database back as it was in snapshot ${name}? What it holds now is saved first.`, { okLabel: 'Restore' })) {
+      return { ok: false, error: 'cancelled' };
+    }
+  }
+  status('Restoring the database…');
+  const r = await apiAt(SITE.dbSnapshotRestoreUrl.replace('20000101T000000Z-name.sql.gz', encodeURIComponent(name)), 'POST', {}, { confirm: true });
+  status(r.ok ? `Database restored from ${name}` : (r.hint ?? 'The restore failed.'), !r.ok);
+  if (r.ok) {
+    dbLoaded = false;
+    if (mode === 'db') loadTables();
+    loadSnapshots();
+  }
+  return r;
+}
+
 $('modeHistory').addEventListener('click', () => setMode('history'));
 $('modeExt').addEventListener('click', () => setMode('ext'));
 $('btnExtReload').addEventListener('click', () => { saveDrafts(); location.reload(); });
@@ -2680,6 +2731,9 @@ false. Nothing is paraphrased.
                                Refused with "needs_confirm" unless confirm: true. The current
                                database is saved first; it can be downloaded from the
                                Database view to undo the import.
+  cic.db.snapshots()           the database as it was before each import, migration and seeder
+  cic.db.restore(name, { confirm }) put one back (refused without confirm: true); what is
+                               there now is saved first, so a restore is undoable too.
 
   Limits: text files only (binary files are refused rather than corrupted), 2 MB per file,
   paths are confined to this site. Anything outside it is refused with one vague message.
@@ -3732,6 +3786,10 @@ const cicApi = {
       if (mode !== 'db') setMode('db');
       return importDb(file, { confirm: options.confirm === true, interactive: false });
     },
+    // Snapshots taken before every import, migration and seeder, newest first.
+    snapshots: () => loadSnapshots(),
+    // Put one back ({ confirm: true }); what the database holds now is saved first.
+    restore: (name, options = {}) => restoreSnapshot(String(name ?? ''), { confirm: options.confirm === true, interactive: false }),
     query: (sql, options = {}) => {
       if (typeof sql !== 'string') return Promise.resolve({ ok: false, error: 'invalid', hint: 'sql must be a string' });
       if (HIDDEN_MARKER.test(sql)) return Promise.resolve(hiddenRefusal('cic.db.query'));

@@ -28,9 +28,9 @@ import (
 // where `ps` on the host would show it.
 //
 // An import replaces data, so before loading anything the current database is
-// exported to the site's host directory (db-before-import.sql.gz, one file,
-// replaced each time). It is outside the app volume: the site's code cannot
-// read or delete it, and a bad import is always one import away from undone.
+// saved as a snapshot (dbsnapshots.go) in the site's host directory, outside
+// the app volume: the site's code cannot read or delete it, and a bad import
+// is always one restore away from undone.
 
 const (
 	mysqlContainer = "cic-mysql"
@@ -40,7 +40,6 @@ const (
 	// into an unbounded load on the shared MySQL server (a "zip bomb").
 	maxImportExpanded = 4 << 30
 	dbTransferTimeout = 30 * time.Minute
-	beforeImportFile  = "db-before-import.sql.gz"
 )
 
 // mysqlTool builds the docker exec for a MySQL client tool. A variable so the
@@ -165,7 +164,8 @@ func (m *Manager) ImportDB(ctx context.Context, id string, r io.Reader) error {
 	}
 	defer lock.(*sync.Mutex).Unlock()
 
-	if err := m.saveBeforeImport(ctx, id); err != nil {
+	saved, err := m.SnapshotDB(ctx, id, "before-import")
+	if err != nil {
 		return fmt.Errorf("nothing was imported: the current database could not be saved first (%v)", err)
 	}
 
@@ -192,42 +192,23 @@ func (m *Manager) ImportDB(ctx context.Context, id string, r io.Reader) error {
 	stderr := &cappedBuffer{limit: 8 << 10}
 	cmd.Stdout, cmd.Stderr = io.Discard, stderr
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("import stopped: %s. The database as it was before is saved; import it back to undo", firstLine(stderr.buf.String(), err))
+		return fmt.Errorf("import stopped: %s. The database as it was before is saved as snapshot %s; restore it (or import it back) to undo", firstLine(stderr.buf.String(), err), saved.Name)
 	}
 	return nil
 }
 
-func (m *Manager) saveBeforeImport(ctx context.Context, id string) error {
-	dir := m.dir(id)
-	tmp, err := os.CreateTemp(dir, ".before-import-*")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(tmp.Name())
-	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := m.ExportDB(ctx, id, tmp); err != nil {
-		tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
-	}
-	return os.Rename(tmp.Name(), filepath.Join(dir, beforeImportFile))
-}
-
 // BeforeImport opens the copy saved by the last import, if there is one.
 func (m *Manager) BeforeImport(id string) (*os.File, error) {
-	if err := ValidID(id); err != nil {
+	list, err := m.DBSnapshots(id)
+	if err != nil {
 		return nil, err
 	}
-	f, err := os.Open(filepath.Join(m.dir(id), beforeImportFile))
-	if err != nil {
-		return nil, fmt.Errorf("no import has been made, so there is no earlier copy")
+	for _, snap := range list {
+		if snap.Reason == "before-import" {
+			return m.openSnapshot(id, snap.Name)
+		}
 	}
-	return f, nil
+	return nil, fmt.Errorf("no import has been made, so there is no earlier copy")
 }
 
 // firstLine is the useful part of a MySQL client's stderr: the first line

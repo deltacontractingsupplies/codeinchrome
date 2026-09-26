@@ -284,6 +284,14 @@ func (m *Manager) RunCommand(ctx context.Context, id, tool string, args []string
 	}
 	defer lock.(*sync.Mutex).Unlock()
 
+	// A migration or seeder rewrites the live database: it is saved first
+	// (dbsnapshots.go), and if it cannot be saved nothing runs.
+	if tool == "artisan" && snapshotBefore[args[0]] && m.hasDB(id) {
+		if _, err := m.SnapshotDB(ctx, id, "before-"+args[0]); err != nil {
+			return CommandResult{}, fmt.Errorf("nothing was run: the database could not be saved first (%v)", err)
+		}
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
 

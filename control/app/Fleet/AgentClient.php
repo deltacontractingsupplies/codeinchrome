@@ -696,6 +696,35 @@ class AgentClient
         return $json;
     }
 
+    /**
+     * The site database's snapshots, newest first: taken before every import,
+     * migration and seeder (agent dbsnapshots.go).
+     *
+     * @return list<array{name: string, reason: string, at: string, bytes: int}>
+     */
+    public function dbSnapshots(string $id): array
+    {
+        return $this->send('get', "/v1/sites/$id/db/snapshots")['snapshots'] ?? [];
+    }
+
+    /** Load a snapshot back; what it replaces is snapshotted first. */
+    public function dbRestoreSnapshot(string $id, string $name): array
+    {
+        try {
+            $response = Http::timeout(1900)->acceptJson()->withToken($this->token)
+                ->post($this->baseUrl."/v1/sites/$id/db/snapshots/".rawurlencode($name).'/restore', ['confirm' => true]);
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}]. Whether the restore took effect is UNKNOWN.", previous: $e);
+        }
+        $json = $response->json() ?? [];
+        if (($json['ok'] ?? false) !== true) {
+            throw new AgentRefused(sprintf('Agent on [%s] refused the restore: %s (%s)', $this->host,
+                $json['error'] ?? 'unknown_error', $json['hint'] ?? 'no hint given'), detail: $json);
+        }
+
+        return $json;
+    }
+
     /** @return array{database: string, tables: array} */
     public function dbTables(string $id): array
     {
