@@ -187,5 +187,5 @@ func (m *Manager) RestoreDBSnapshot(ctx context.Context, id, name string) error 
 		return err
 	}
 	defer f.Close()
-	return m.ImportDB(ctx, id, f)
+	return m.importDB(ctx, id, f, true)
 }

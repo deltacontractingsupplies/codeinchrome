@@ -115,3 +115,56 @@ func TestAMigrationRunsOnlyAfterTheDatabaseIsSaved(t *testing.T) {
 		t.Fatalf("migrate:status took a snapshot: %+v", again)
 	}
 }
+
+// A restore puts the database back EXACTLY: tables made after the snapshot
+// are dropped first (after what is there is saved). An import merges, as
+// before. (The e2e suite on production found the table a migration made
+// still there after restoring the snapshot from before it.)
+func TestARestoreEmptiesTheDatabaseFirstAndAnImportDoesNot(t *testing.T) {
+	m, id := withDB(t)
+	calls, _ := fakeMySQL(t, "-- snapshot\n", false)
+	stepClock(t)
+	snap, _ := m.SnapshotDB(context.Background(), id, "before-migrate")
+
+	count := func() (dumps, mysqls int) {
+		for _, c := range *calls {
+			switch {
+			case strings.Contains(c, " mysqldump "):
+				dumps++
+			case strings.Contains(c, " mysql "):
+				mysqls++
+			}
+		}
+		return
+	}
+	*calls = nil
+	if err := m.RestoreDBSnapshot(context.Background(), id, snap.Name); err != nil {
+		t.Fatal(err)
+	}
+	// Saved (a dump), emptied (mysql), loaded (mysql) - in that order.
+	if d, q := count(); d != 1 || q != 2 {
+		t.Fatalf("restore: %d dumps, %d mysql runs\n%s", d, q, strings.Join(*calls, "\n"))
+	}
+	var order []string
+	for _, c := range *calls {
+		if strings.Contains(c, " mysqldump ") {
+			order = append(order, "save")
+		} else if strings.Contains(c, " mysql ") {
+			order = append(order, "mysql")
+		}
+	}
+	if strings.Join(order, ",") != "save,mysql,mysql" {
+		t.Fatalf("order %v", order)
+	}
+	if !strings.Contains(emptyDBSQL, "table_schema = DATABASE()") || !strings.Contains(emptyDBSQL, "DROP TABLE") {
+		t.Fatal("the emptying is not confined to the connection's own database")
+	}
+
+	*calls = nil
+	if err := m.ImportDB(context.Background(), id, strings.NewReader("INSERT INTO t VALUES (1);\n")); err != nil {
+		t.Fatal(err)
+	}
+	if d, q := count(); d != 1 || q != 1 {
+		t.Fatalf("an import emptied the database: %d dumps, %d mysql runs", d, q)
+	}
+}
