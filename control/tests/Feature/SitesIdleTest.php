@@ -191,4 +191,15 @@ class SitesIdleTest extends TestCase
         $this->assertSame('suspended', $idle->fresh()->status, 'a ban is lifted only by abuse:unban');
         $this->assertSame([], $this->suspends);
     }
+
+    public function test_the_fleets_own_addresses_are_not_counted_as_visitors(): void
+    {
+        // The link scanner's renderer reads sites like a browser, from a
+        // fleet host: the agent is told those addresses so they are no visit.
+        $this->site('quiet');
+        $this->artisan('sites:idle')->assertSuccessful();
+        Http::assertSent(fn (ClientRequest $r) => parse_url($r->url(), PHP_URL_PATH) === '/v1/visits'
+            && str_contains((string) parse_url($r->url(), PHP_URL_QUERY), 'ignore=10.0.0.1'));
+    }
 }
+

@@ -397,9 +397,26 @@ class AgentClient
     }
 
     /** When a person last loaded each site on this host (agent sites/visits.go): {sites: [{site, last}]}. */
-    public function visits(): array
+    /** $ignore: the fleet's own addresses (its page renderer is not a visitor). */
+    public function visits(array $ignore = []): array
     {
-        return $this->send('get', '/v1/visits');
+        return $this->send('get', '/v1/visits'.($ignore ? '?'.implode('&', array_map(fn ($ip) => 'ignore='.rawurlencode($ip), $ignore)) : ''));
+    }
+
+    /** A hosted page's DOM after its scripts ran (agent render.go): ['dom' => ..., 'ms' => ...]. */
+    public function render(string $url): array
+    {
+        try {
+            $response = Http::timeout(70)->acceptJson()->withToken($this->token)->post($this->baseUrl.'/v1/render', ['url' => $url]);
+        } catch (ConnectionException $e) {
+            throw new AgentUnreachable("Cannot reach the agent on [{$this->host}] to render a page.", previous: $e);
+        }
+        $json = $response->json() ?? [];
+        if (($json['ok'] ?? false) !== true) {
+            throw new AgentRefused(sprintf('Agent on [%s] refused to render: %s (%s)', $this->host, $json['error'] ?? 'unknown_error', $json['hint'] ?? ''), detail: $json);
+        }
+
+        return $json['render'] ?? [];
     }
 
     /** Keep a site out of search engines (agent: X-Robots-Tag at the edge), or not. */
