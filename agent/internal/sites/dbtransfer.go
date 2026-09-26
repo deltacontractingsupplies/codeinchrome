@@ -104,6 +104,27 @@ func (m *Manager) ExportDB(ctx context.Context, id string, w io.Writer) error {
 // or a dropped connection would arrive as a truncated script and leave the
 // database half-loaded.
 func (m *Manager) ImportDB(ctx context.Context, id string, r io.Reader) error {
+	return m.importDB(ctx, id, r, false)
+}
+
+// emptyDBSQL drops every table and view in the connection's own database
+// (the site's user can reach no other): what a snapshot restore does first,
+// so tables made after the snapshot do not survive it. Names are quoted
+// with their backticks doubled.
+const emptyDBSQL = `SET SESSION group_concat_max_len = 1048576;
+SET FOREIGN_KEY_CHECKS = 0;
+SET @v = (SELECT GROUP_CONCAT(CONCAT(CHAR(96), REPLACE(table_name, CHAR(96), CONCAT(CHAR(96), CHAR(96))), CHAR(96))) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'VIEW');
+SET @s = IF(@v IS NULL, 'DO 0', CONCAT('DROP VIEW ', @v));
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+SET @t = (SELECT GROUP_CONCAT(CONCAT(CHAR(96), REPLACE(table_name, CHAR(96), CONCAT(CHAR(96), CHAR(96))), CHAR(96))) FROM information_schema.tables WHERE table_schema = DATABASE() AND table_type = 'BASE TABLE');
+SET @s = IF(@t IS NULL, 'DO 0', CONCAT('DROP TABLE ', @t));
+PREPARE st FROM @s; EXECUTE st; DEALLOCATE PREPARE st;
+SET FOREIGN_KEY_CHECKS = 1;
+`
+
+// importDB loads a dump; replace empties the database first (after it is
+// saved), so the result is exactly the dump - a restore, not a merge.
+func (m *Manager) importDB(ctx context.Context, id string, r io.Reader, replace bool) error {
 	password, err := m.dbPassword(id)
 	if err != nil {
 		return err
@@ -169,13 +190,25 @@ func (m *Manager) ImportDB(ctx context.Context, id string, r io.Reader) error {
 		return fmt.Errorf("nothing was imported: the current database could not be saved first (%v)", err)
 	}
 
+	ctx, cancel := context.WithTimeout(ctx, dbTransferTimeout)
+	defer cancel()
+	if replace {
+		empty := mysqlTool(ctx, password, true, "mysql",
+			"--skip-system-command", "--commands=FALSE",
+			"-h", agentHost, "-u", DBUser(id), DBName(id))
+		empty.Stdin = strings.NewReader(emptyDBSQL)
+		stderr := &cappedBuffer{limit: 8 << 10}
+		empty.Stdout, empty.Stderr = io.Discard, stderr
+		if err := empty.Run(); err != nil {
+			return fmt.Errorf("nothing was restored: the database could not be emptied first (%s). It is saved as snapshot %s", firstLine(stderr.buf.String(), err), saved.Name)
+		}
+	}
+
 	src, done, err = open()
 	if err != nil {
 		return err
 	}
 	defer done()
-	ctx, cancel := context.WithTimeout(ctx, dbTransferTimeout)
-	defer cancel()
 	// The dump is the customer's file, read by the mysql CLIENT, whose own
 	// commands run before any SQL reaches the server - grants cannot stop
 	// them. Proved on a host (2026-09-25): "\\! cmd" and "system cmd" ran a
