@@ -108,3 +108,33 @@ func saveSite(t *testing.T, m *Manager, s Site) {
 		t.Fatal(err)
 	}
 }
+
+// Re-applying the same plan (fleet:apply-limits does, to every site) changes
+// nothing a container needs restarting for: found 2026-09-26, when giving
+// every site its CPU weight restarted all seven. Only a new memory limit
+// restarts it (Apache sizes its workers to the memory).
+func TestTheSameMemoryIsNotARestart(t *testing.T) {
+	m, _, _ := newTestManager(t)
+	m.cfg.CPUBurst = 2
+	saveSite(t, m, Site{ID: "shop", CPULimit: "0.5", CPUWeight: 256, MemLimit: "384m"})
+	calls := fakeDocker(t)
+	if _, err := m.SetLimits(context.Background(), "shop", LimitsOpts{CPULimit: "0.5", CPUWeight: 1024, MemLimit: "384m"}); err != nil {
+		t.Fatal(err)
+	}
+	got := strings.Join(*calls, "\n")
+	if strings.Contains(got, "restart") {
+		t.Fatalf("restarted for an unchanged memory limit:\n%s", got)
+	}
+	if !strings.Contains(got, "update --cpus 2 --cpu-shares 1024 --memory 384m --memory-swap 384m "+m.container("shop")) {
+		t.Fatalf("the limits were not applied live:\n%s", got)
+	}
+
+	// A new memory limit does restart it: Apache sizes its workers to it.
+	*calls = nil
+	if _, err := m.SetLimits(context.Background(), "shop", LimitsOpts{MemLimit: "512m"}); err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Join(*calls, "\n"); !strings.Contains(got, "restart -t 10 "+m.container("shop")) {
+		t.Fatalf("a changed memory limit did not restart:\n%s", got)
+	}
+}
