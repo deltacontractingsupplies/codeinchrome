@@ -7,6 +7,7 @@ use App\Fleet\Suspension;
 use App\Models\Site;
 use App\Models\SiteDomain;
 use Illuminate\Console\Command;
+use Illuminate\Http\Client\Response;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -26,6 +27,44 @@ class AbuseFeeds extends Command
 
     protected $description = 'Act on our sites listed in public threat feeds';
 
+    /**
+     * Each line of the feed, streamed: at most MAX_FEED_BYTES are read and
+     * only one chunk is held at a time (a feed is hundreds of thousands of
+     * lines; split whole, 20 MB of them is several times that in memory).
+     * A line the cap cuts through is dropped: "https://x.codeinchrome.com.
+     * evil.test/" cut short reads as one of our sites.
+     *
+     * @return \Generator<string>
+     */
+    private function lines(Response $res): \Generator
+    {
+        $max = (int) config('fleet.threat_feed_max_bytes', self::MAX_FEED_BYTES);
+        $body = $res->toPsrResponse()->getBody();
+        $read = 0;
+        $rest = '';
+        try {
+            while (! $body->eof() && $read < $max) {
+                $chunk = $body->read(min(1 << 16, $max - $read));
+                $read += strlen($chunk);
+                $lines = preg_split('/\R/', $rest.$chunk);
+                $rest = array_pop($lines);
+                yield from $lines;
+            }
+            if ($body->eof() && $read < $max) {
+                yield $rest; // the last line, whole: the feed ended, not the cap
+            }
+        } finally {
+            $body->close();
+        }
+    }
+
+    /**
+     * A feed is read up to this many bytes and no further (URLhaus's is
+     * ~1.5 MB, measured 2026-09-26): a feed that came back huge - broken,
+     * redirected, compromised - costs the control host 20 MB, not its memory.
+     */
+    public const MAX_FEED_BYTES = 20 << 20;
+
     public function handle(Suspension $suspension, Enforcer $enforcer): int
     {
         $ours = $this->ourHosts();
@@ -33,7 +72,8 @@ class AbuseFeeds extends Command
         $fetched = 0;
         foreach (config('fleet.threat_feeds', []) as $feed => $url) {
             try {
-                $res = Http::timeout(30)->withHeaders(['User-Agent' => 'codeinchrome abuse monitor'])->get($url);
+                $res = Http::timeout(30)->withOptions(['stream' => true])
+                    ->withHeaders(['User-Agent' => 'codeinchrome abuse monitor'])->get($url);
             } catch (\Throwable $e) {
                 $this->warn("$feed: ".$e->getMessage());
 
@@ -45,7 +85,7 @@ class AbuseFeeds extends Command
                 continue;
             }
             $fetched++;
-            foreach (preg_split('/\R/', substr($res->body(), 0, 20 << 20)) as $line) {
+            foreach ($this->lines($res) as $line) {
                 $line = trim($line);
                 if ($line === '' || $line[0] === '#') {
                     continue;

@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Models\AuditEvent;
 use App\Models\Site;
 use App\Models\SiteDomain;
 use App\Models\User;
@@ -61,7 +62,7 @@ class AbuseFeedsTest extends TestCase
 
         // The same listing an hour later: already acted on this week.
         $this->artisan('abuse:feeds')->assertSuccessful();
-        $this->assertSame(1, \App\Models\AuditEvent::where('action', 'abuse.review')->where('site', 'shop')->count());
+        $this->assertSame(1, AuditEvent::where('action', 'abuse.review')->where('site', 'shop')->count());
     }
 
     public function test_a_customers_own_domain_is_matched_too(): void
@@ -82,6 +83,26 @@ class AbuseFeedsTest extends TestCase
         $this->openphish = "https://app.codeinchrome.com/login\n";
         $this->artisan('abuse:feeds')->expectsOutputToContain('PLATFORM LISTED')->assertSuccessful();
         $this->assertSame([], $this->paused);
+    }
+
+    public function test_a_feed_is_read_only_up_to_its_cap_and_never_by_half_a_line(): void
+    {
+        $this->site('kit');
+        $this->site('late');
+        $cap = 200_000; // several 64 KB reads; production reads up to 20 MB, same rule
+        config(['fleet.threat_feed_max_bytes' => $cap]);
+        // Listed within the cap: found. Past it: never read.
+        $head = "https://kit.codeinchrome.com/a.exe\n";
+        // The line the cap cuts through: whole, it is someone else's host;
+        // cut at the cap it would read as ours ("late.codeinchrome.com").
+        $cut = 'https://late.codeinchrome.com';
+        $pad = str_repeat("# padding\n", intdiv($cap - strlen($head) - strlen($cut), 10));
+        $pad .= str_repeat('#', $cap - strlen($head) - strlen($cut) - strlen($pad) - 1)."\n";
+        $this->urlhaus = $head.$pad.$cut.'.evil.test/x'."\nhttps://late.codeinchrome.com/past-the-cap.exe\n";
+        $this->assertSame($cap, strlen($head.$pad.$cut));
+
+        $this->artisan('abuse:feeds')->assertSuccessful();
+        $this->assertSame(['kit'], $this->paused, 'the half-read line and everything past the cap are ignored');
     }
 
     public function test_feeds_that_cannot_be_read_fail_the_run(): void
