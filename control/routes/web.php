@@ -168,6 +168,7 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::get('/sites/{site}/exposure', [FileController::class, 'exposure'])->middleware('throttle:exposure')->name('sites.exposure');
     Route::post('/sites/{site}/eval', [FileController::class, 'eval'])->middleware('throttle:eval')->name('sites.eval');
     Route::post('/sites/{site}/login-cookie', [FileController::class, 'loginCookie'])->middleware('throttle:eval')->name('sites.login-cookie');
+    Route::post('/sites/{site}/sign-in-link', [FileController::class, 'signInLink'])->middleware('throttle:eval')->name('sites.sign-in-link');
     Route::post('/sites/{site}/request', [FileController::class, 'request'])->middleware('throttle:site-request')->name('sites.request');
     // A page as one of the site's users sees it, in a real tab (LookController).
     Route::post('/sites/{site}/look', [\App\Http\Controllers\LookController::class, 'create'])->middleware('throttle:site-request')->name('sites.look');

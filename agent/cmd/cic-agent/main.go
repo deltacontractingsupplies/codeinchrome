@@ -86,6 +86,7 @@ func main() {
 		ProbeKey:       *probeKey,
 		SiteDNS:        *siteDNS,
 		CPUBurst:       *cpuBurst,
+		SignInKey:      sites.SignInKey(token),
 	})
 	if err != nil {
 		fatal("cannot start site manager: %v", err)
@@ -178,7 +179,10 @@ func authenticated(token string, next http.Handler) http.Handler {
 		//               send a bearer token. It answers only yes/no for one
 		//               domain, and the agent binds 127.0.0.1, which customer
 		//               containers cannot reach (verify-isolation.sh proves it).
-		if r.URL.Path == "/healthz" || r.URL.Path == "/tls-ask" {
+		//   /v1/signin/ - a one-time sign-in link, handed over by Caddy from a
+		//               site's address; its own signature is checked
+		//               (sites/signin.go).
+		if r.URL.Path == "/healthz" || r.URL.Path == "/tls-ask" || strings.HasPrefix(r.URL.Path, "/v1/signin/") {
 			next.ServeHTTP(w, r)
 			return
 		}

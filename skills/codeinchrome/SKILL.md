@@ -75,7 +75,7 @@ A page in a route closure, or HTML in a PHP string, is a failure, not a shortcut
   tested the same way. Never trust an id, a price or a role sent by the browser.
 - **Validation is tested too**: a test posts bad input and gets the errors back.
 - **Tests run on the test database only, each rolled back** (Step 4) - this site is live.
-- **Every screen size.** Open each page you built (`cic.lookUrl`, below) and check it at
+- **Every screen size.** Open each page you built (`cic.signInUrl`, below) and check it at
   phone 390×844, tablet 820×1180 and desktop 1440×900 (resize your browser window, one
   screenshot each): nothing cut off, no sideways scroll, buttons big enough to tap.
 
@@ -495,14 +495,16 @@ Nothing is finished until every page answers. Do all three:
    token in tests. Ember & Oak's `tests/Feature/StoreTest.php` is an example
    (`/demos/ember-and-oak/code`).
 
-Then look at the pages yourself - the checks prove they answer, not that they look
-right. A page behind the app's own login included:
+Then use the pages yourself - the checks prove they answer, not that they look or work
+right. For a page behind the app's own login, sign in with a one-time link - no password:
 ```js
-(await cic.lookUrl('/tasks', { as: 1 })).url   // signed, 10 minutes: open it in a NEW tab, screenshot it
+(await cic.signInUrl('/tasks', { as: 1 })).url  // ten minutes, once: open it in a NEW tab
 ```
-It shows the page exactly as the site's user 1 sees it (styles and images from the
-site; scripts and forms are off in this view). Leave `as` out to see it as a visitor.
-Never type the app's password or create one of its users to get in.
+The tab is the real site, signed in as the app's user 1: scripts run, forms work -
+click through the feature, fill its forms, check it at every screen size. A link is
+used once; ask for another for another tab. (`cic.lookUrl(path, { as: 1 })` still gives a
+read-only picture of a page, scripts off.) Never type the app's password or create one
+of its users to get in.
 
 **An app with no Laravel users** (one shared password, a PIN, a token) has no user 1:
 `{ as: 1 }` answers "no user with id 1". Sign in the way a visitor does, from code - the

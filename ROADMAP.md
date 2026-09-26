@@ -81,9 +81,10 @@ tested, and verified on production before it is ticked.
       DONE: cic.github.status/link/push (JSON), and the skill's steps - the agent links it, opens the add-key page in the person's browser with their OK, and they confirm their password on GitHub if asked, never the agent.
 
 **The agent can test like a person, safely, on production**
-- [ ] T1. A one-time sign-in link for the site: opens the site in the browser
+- [x] T1. A one-time sign-in link for the site: opens the site in the browser
       already signed in as a chosen user, no password (Claude in Chrome cannot
       type passwords). Builds on cic.request({ as }) and the login-cookie route.
+      DONE 2026-09-26 (agent 0.48.0): cic.signInUrl(path, { as }) - a link on the site's own address that opens it signed in as the app's user, with the app's own session (scripts run, forms work), no password. Minted for the owner only, signed with a key derived from the host's agent secret, bound to site, user, guard, path and time; ten minutes, once; only a path on the site (never another address). Caddy gives the reserved path to the agent before the site sees anything (Caddy-validated on a host). Go and PHP assert one signature vector, so they cannot drift.
 - [ ] T2. A headless browser for the agent: visit pages as a visitor, click
       through a flow, and take screenshots at phone, tablet and desktop widths
       (responsiveness) - built on the renderer the link scanner already uses.

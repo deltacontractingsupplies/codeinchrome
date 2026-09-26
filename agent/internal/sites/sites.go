@@ -36,6 +36,10 @@ type Config struct {
 	// plan's CPU is a hard cap, as before.
 	CPUBurst float64
 
+	// SignInKey verifies one-time sign-in links (signin.go); derived from the
+	// agent secret. Empty: links are refused.
+	SignInKey []byte
+
 	// Root password for the host's MySQL, from /opt/codeinchrome/etc/mysql.env.
 	// Empty means this host has no database server, and creating a site fails
 	// with that reason rather than producing a site without a database.

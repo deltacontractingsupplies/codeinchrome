@@ -383,6 +383,30 @@ test('a person and an agent can both edit a real site, without erasing each othe
     expect(again.ok, again.result?.output).toBe(true);
   });
 
+  await test.step('a one-time link opens the site signed in as one of its users, once', async () => {
+    const made = await page.evaluate(() => window.cic.eval("return \\App\\Models\\User::forceCreate(['name' => 'Link Test', 'email' => 'link-'.uniqid().'@example.test', 'password' => bcrypt(Str::random(40))])->id;"));
+    expect(made.ok, made.output).toBe(true);
+    const userId = Number(String(made.output).trim());
+    const link = await page.evaluate((id) => window.cic.signInUrl('/', { as: id }), userId);
+    expect(link.ok, link.hint).toBe(true);
+    expect(link.url).toMatch(new RegExp(`^https://${siteName}\\.codeinchrome\\.com/__codeinchrome/sign-in\\?`));
+
+    // A fresh tab of the real site: signed in with the app's own session.
+    const tab = await page.context().newPage();
+    const res = await tab.goto(link.url);
+    expect(res.status()).toBeLessThan(400);
+    expect(new URL(tab.url()).pathname).toBe('/');
+    const cookies = await page.context().cookies(`https://${siteName}.codeinchrome.com`);
+    const session = cookies.find((c) => /session/.test(c.name));
+    expect(session, JSON.stringify(cookies.map((c) => c.name))).toBeTruthy();
+    expect([session.httpOnly, session.secure]).toEqual([true, true]);
+
+    // Once: the same link again opens nothing.
+    const again = await tab.goto(link.url);
+    expect(again.status()).toBe(403);
+    await tab.close();
+  });
+
   await test.step('a destructive command runs nothing without confirm', async () => {
     const refused = await page.evaluate(() => window.cic.run('artisan', ['migrate:fresh']));
     expect(refused.status).toBe(409);

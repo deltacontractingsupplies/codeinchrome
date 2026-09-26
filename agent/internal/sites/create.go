@@ -634,7 +634,13 @@ func caddyConfig(cfg Config, s Site, port string) string {
 	if s.Suspended {
 		route = suspendedBody
 	}
-	body := guardSecrets(route) + fmt.Sprintf(`	encode gzip zstd
+	// The one-time sign-in link: the agent's, never the site's - and none for
+	// a paused site, which serves nothing (and proxies nothing) at all.
+	signIn := ""
+	if !s.Suspended {
+		signIn = signInRoute(s.ID)
+	}
+	body := guardSecrets(signIn+route) + fmt.Sprintf(`	encode gzip zstd
 	# Static files are revalidated, so an edit reaches visitors at once:
 	# without a Cache-Control of their own, Cloudflare kept them 4 hours
 	# (the second security audit, 2026-09-25). Vite's hashed build files

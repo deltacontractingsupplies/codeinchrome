@@ -42,6 +42,7 @@
      data-github="{{ route('sites.github', $site) }}"
      data-github-link="{{ route('sites.github.link', $site) }}"
      data-github-push="{{ route('sites.github.push', $site) }}"
+     data-sign-in-link="{{ route('sites.sign-in-link', $site) }}"
      data-command-live="{{ route('console.live', $site) }}"
      data-db-snapshots="{{ route('db.snapshots', $site) }}"
      data-db-snapshot-restore="{{ route('db.snapshots.restore', [$site, '20000101T000000Z-name.sql.gz']) }}"
