@@ -22,6 +22,7 @@
         <a href="#get-started" class="rounded-md border border-neutral-700 px-5 py-2.5 text-neutral-200 hover:border-neutral-500">How to start</a>
         <a href="#plans" class="rounded-md border border-neutral-700 px-5 py-2.5 text-neutral-200 hover:border-neutral-500">See plans</a>
     </div>
+    @include('partials.trial-places')
 </div>
 
 {{-- The editor itself, read-only, showing a demo's code as it is on the live
