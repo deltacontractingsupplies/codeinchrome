@@ -308,6 +308,12 @@ log "sites' DNS forwarder"
 # is proven to answer, below; until then they resolve as before.
 id cic-dns >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin cic-dns
 install -d -o cic-dns -g cic-dns -m 0750 /var/log/cic-dns
+# Its own copy of the binary: $CIC is root:caddy 0750 (it holds the agent's
+# token), which this user must not - and could not - enter. The first
+# deploy failed exactly there ("Permission denied"); the proof below caught
+# it and left the sites as they were.
+install -d -o root -g root -m 0755 /usr/local/libexec/cic-dns
+install -o root -g root -m 0755 "$CIC/bin/cic-agent" /usr/local/libexec/cic-dns/cic-agent
 dns_gw=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)
 site_dns_flag=""
 if [[ -n $dns_gw ]]; then
@@ -317,7 +323,7 @@ Description=codeinchrome: DNS forwarder for sites (which site asked what)
 After=docker.service
 Requires=docker.service
 [Service]
-ExecStart=$CIC/bin/cic-agent dns -listen $dns_gw:53
+ExecStart=/usr/local/libexec/cic-dns/cic-agent dns -listen $dns_gw:53
 User=cic-dns
 AmbientCapabilities=CAP_NET_BIND_SERVICE
 CapabilityBoundingSet=CAP_NET_BIND_SERVICE
