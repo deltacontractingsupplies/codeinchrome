@@ -239,5 +239,73 @@ class LinkScannerTest extends TestCase
         $r = app(LinkScanner::class)->scan($this->site(), render: true);
         $this->assertCount(1, $r['review'], 'the HTML is still read');
     }
+
+    public function test_a_program_built_or_carried_by_the_pages_script_is_a_ban_and_a_csv_export_is_not(): void
+    {
+        $this->pages([
+            'https://shopx.codeinchrome.com/' => '<a href="/export">export</a><script>const b = new Blob([bytes], {type: "application/octet-stream"});'
+                .' const a = document.createElement("a"); a.href = URL.createObjectURL(b); a.download = "Setup.exe"; a.click();</script>',
+            'https://shopx.codeinchrome.com/export' => '<script>const u = URL.createObjectURL(new Blob([rows.join("\\n")], {type: "text/csv"}));'
+                .' link.download = "orders.csv";</script><p>data:application/octet-stream;base64,TVqQAAMAAAAEAAAA//8AALgAAAAA</p>',
+        ]);
+        $r = app(LinkScanner::class)->scan($this->site(), render: false);
+        $this->assertCount(2, $r['ban'], implode("\n", $r['ban']));
+        $this->assertStringContainsString('builds a program download', $r['ban'][0]);
+        $this->assertStringEndsWith('(https://shopx.codeinchrome.com/)', $r['ban'][0], 'named on the page that builds it');
+        $this->assertStringContainsString('carries a Windows program inside the page', $r['ban'][1]);
+        $this->assertStringContainsString('/export', $r['ban'][1]);
+    }
+
+    public function test_a_csv_export_alone_is_not_flagged(): void
+    {
+        $this->pages(['https://shopx.codeinchrome.com/' => '<script>a.href = URL.createObjectURL(new Blob([csv], {type: "text/csv"})); a.download = "orders.csv";</script>']);
+        $r = app(LinkScanner::class)->scan($this->site(), render: false);
+        $this->assertSame([], $r['ban']);
+        $this->assertSame([], $r['review']);
+    }
+
+    public function test_the_sites_own_scripts_are_read_and_nobody_elses(): void
+    {
+        $fetched = [];
+        Http::fake(function ($request) use (&$fetched) {
+            $fetched[] = $request->url();
+
+            return match ($request->url()) {
+                'https://shopx.codeinchrome.com/' => Http::response('<p>Shop</p><script src="/js/app.js"></script><script src="https://cdn.example.test/lib.js"></script>', 200, ['Content-Type' => 'text/html']),
+                'https://shopx.codeinchrome.com/js/app.js' => Http::response('document.querySelector("#v").onclick = () => { navigator.clipboard.writeText("powershell -enc AAAA"); };'
+                    .' const x = URL.createObjectURL(blob); link.download = "update.msi";', 200, ['Content-Type' => 'text/javascript']),
+                default => Http::response('not found', 404),
+            };
+        });
+        $r = app(LinkScanner::class)->scan($this->site(), render: false);
+        $this->assertStringContainsString('builds a program download', implode("\n", $r['ban']));
+        $this->assertStringContainsString('/js/app.js, a script of https://shopx.codeinchrome.com/', implode("\n", $r['ban']));
+        $this->assertStringContainsString("on the visitor's clipboard", implode("\n", $r['review']));
+        $this->assertNotContains('https://cdn.example.test/lib.js', $fetched, "another host's script is not fetched");
+        // It is still reviewed as a script from another site.
+        $this->assertStringContainsString('runs a script from another site: https://cdn.example.test/lib.js', implode("\n", $r['review']));
+    }
+
+    public function test_at_most_five_of_the_sites_scripts_are_read(): void
+    {
+        $fetched = [];
+        $tags = implode('', array_map(fn ($i) => "<script src=\"/js/$i.js\"></script>", range(1, 9)));
+        Http::fake(function ($request) use (&$fetched, $tags) {
+            $fetched[] = $request->url();
+
+            return $request->url() === 'https://shopx.codeinchrome.com/'
+                ? Http::response($tags, 200, ['Content-Type' => 'text/html'])
+                : Http::response('// ok', 200, ['Content-Type' => 'text/javascript']);
+        });
+        app(LinkScanner::class)->scan($this->site(), render: false);
+        $this->assertCount(5, array_filter($fetched, fn ($u) => str_contains($u, '/js/')));
+    }
+
+    public function test_cloudflares_own_analytics_beacon_is_not_the_sites_doing(): void
+    {
+        $this->pages(['https://shopx.codeinchrome.com/' => '<p>Shop</p><script defer src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95"></script>']);
+        $r = app(LinkScanner::class)->scan($this->site(), render: false);
+        $this->assertSame([], $r['review']);
+    }
 }
 

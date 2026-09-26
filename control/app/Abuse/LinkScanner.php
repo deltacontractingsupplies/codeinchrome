@@ -51,13 +51,23 @@ class LinkScanner
 
     /** Where a free site may post a form or send a visitor without review (the edge guard's list). */
     private const ALLOWED_HOSTS = ['checkout.stripe.com', 'billing.stripe.com', 'connect.stripe.com', 'paypal.com', 'www.paypal.com',
-        'www.sandbox.paypal.com', 'accounts.google.com', 'appleid.apple.com'];
+        'www.sandbox.paypal.com', 'accounts.google.com', 'appleid.apple.com',
+        // Cloudflare's own analytics beacon, which Cloudflare - our CDN, not
+        // the site - adds to pages it serves (seen on every page of every
+        // site in a dry run, 2026-09-26).
+        'static.cloudflareinsights.com'];
 
-    /** @return array{ban: list<string>, review: list<string>, pages: int} */
+    /** The site's own script files read per scan. */
+    public const MAX_SCRIPTS = 5;
+
+    private const CLIPBOARD_COMMAND = '/(clipboard\.writeText|execCommand\(\s*["\']copy)[\s\S]{0,600}(powershell|mshta|cmd(\.exe)?\s*\/c|curl[^|<]{0,200}\|\s*(ba)?sh|iex\b|Invoke-WebRequest|-enc(odedcommand)?\b)/i';
+
     /** Pages rendered in a browser per scan (audit A15): a browser costs. */
     public const RENDER_PAGES = 3;
 
     /**
+     * @return array{ban: list<string>, review: list<string>, pages: int}
+     *
      * $render: also read the first pages as a browser has them once their
      * scripts ran - always for a report, otherwise once a day per site (the
      * scan itself is hourly).
@@ -66,6 +76,7 @@ class LinkScanner
     {
         $render ??= \Illuminate\Support\Facades\Cache::add("linkscan.rendered.{$site->id}", true, now()->addDay());
         $rendered = 0;
+        $scripts = [];
         $own = array_map('strtolower', array_merge([$site->domain], $site->domains()->pluck('domain')->all()));
         // The home page, and every GET route without parameters: a kit at a
         // path nothing links to was never fetched.
@@ -99,7 +110,7 @@ class LinkScanner
             }
             $pages++;
             $html = $res->body();
-            $this->inspect($html, $url, $url, $own, $ban, $review, $queue, $seen);
+            $this->inspect($html, $url, $url, $own, $ban, $review, $queue, $seen, $scripts);
             // The same page as a browser has it once its scripts ran: a kit that
             // builds its form, frame or "press Win+R" in JavaScript is invisible
             // in the HTML (audit A15). Rendered on another host than the site's.
@@ -115,12 +126,33 @@ class LinkScanner
             }
         }
 
+        foreach ($scripts as $src => $page) {
+            try {
+                $js = Http::timeout(10)->withoutRedirecting()->withHeaders(self::HEADERS)->get($src);
+            } catch (\Throwable) {
+                continue;
+            }
+            if (! $js->successful()) {
+                continue;
+            }
+            $code = substr($js->body(), 0, 1 << 20);
+            [$sb, $sr] = $this->scriptFindings($code, "$src, a script of $page");
+            array_push($ban, ...$sb);
+            array_push($review, ...$sr);
+            if (preg_match(self::CLIPBOARD_COMMAND, $code)) {
+                $review[] = "a script puts a command (PowerShell, mshta or a shell) on the visitor's clipboard ($src, a script of $page)";
+            }
+        }
+
         return ['ban' => array_values(array_unique($ban)), 'review' => array_values(array_unique($review)), 'pages' => $pages];
     }
 
     /** One page's HTML (or rendered DOM) against every rule; findings added in place. */
-    private function inspect(string $html, string $url, string $where, array $own, array &$ban, array &$review, array &$queue, array $seen): void
+    private function inspect(string $html, string $url, string $where, array $own, array &$ban, array &$review, array &$queue, array $seen, array &$scripts = []): void
     {
+        [$sb, $sr] = $this->scriptFindings($html, $where);
+        array_push($ban, ...$sb);
+        array_push($review, ...$sr);
         foreach ($this->links($html, $url) as [$kind, $target]) {
             $host = strtolower((string) parse_url($target, PHP_URL_HOST));
             $path = (string) parse_url($target, PHP_URL_PATH);
@@ -144,6 +176,12 @@ class LinkScanner
                 $review[] = "links to an archive elsewhere: $target (on $where)";
             }
             if ($internal) {
+                // The site's own scripts are read too (after the pages): a
+                // ClickFix or a download built in script lives there.
+                if ($kind === 'script' && count($scripts) < self::MAX_SCRIPTS) {
+                    $scripts[$target] = $where;
+                }
+
                 continue;
             }
             if (in_array($host, self::SHORTENERS, true)) {
@@ -184,6 +222,32 @@ class LinkScanner
                 }
             }
         }
+    }
+
+    /**
+     * A program built or carried by the page's script (audit A17): the edge
+     * refuses to serve a program, so a script that assembles one in the
+     * browser (a Blob and a download of an .exe, an installer's MIME type)
+     * or carries one inline (a base64 Windows executable, "TVqQ...") is
+     * going round that on purpose. No honest page does either; a CSV export
+     * built the same way is left alone.
+     *
+     * @return array{0: list<string>, 1: list<string>} [ban, review]
+     */
+    private function scriptFindings(string $code, string $where): array
+    {
+        $ban = [];
+        $program = '\.(exe|msi|msix|scr|bat|cmd|ps1|vbs|vbe|jar|hta|wsf|lnk|apk|dmg|pkg|appimage)\b[\'"`]';
+        $mime = 'application\/(x-msdownload|x-msdos-program|vnd\.microsoft\.portable-executable|x-dosexec|vnd\.android\.package-archive|x-apple-diskimage)';
+        $blob = '(createObjectURL|msSaveOrOpenBlob|msSaveBlob|new\s+Blob|\.download\s*=)';
+        if (preg_match("/$blob".'[\s\S]{0,800}'."($program|$mime)|($program|$mime)".'[\s\S]{0,800}'."$blob/i", $code)) {
+            $ban[] = "builds a program download in the page's own script, round the edge's refusal to serve programs ($where)";
+        }
+        if (preg_match('/TVqQAAMAAAAEAAAA|TVpQAAIAAAAEAA8A|TVqAAAEAAAAEABAA/', $code)) {
+            $ban[] = "carries a Windows program inside the page itself ($where)";
+        }
+
+        return [$ban, []];
     }
 
     /** The page rendered on another host than the site's; null if that fails. */
