@@ -2,9 +2,12 @@
 
 namespace App\Fleet;
 
+use App\Abuse\Enforcer;
 use App\Audit\Audit;
+use App\Auth\Device;
 use App\Models\Site;
 use App\Models\User;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
 
@@ -70,7 +73,7 @@ class Provisioner
                 $why = 'signed up from the same network as an account banned in the last 30 days';
             } elseif ($devices = array_filter([$user->signup_device, $user->last_device])) {
                 foreach ($devices as $device) {
-                    if ($bannedLike(\App\Auth\Device::sameBrowser($device))) {
+                    if ($bannedLike(Device::sameBrowser($device))) {
                         $why = 'uses the same browser as an account banned in the last 30 days';
                         break;
                     }
@@ -78,8 +81,8 @@ class Provisioner
             }
         }
         if ($why) {
-            if (\Illuminate\Support\Facades\Cache::add("abuse.held.{$user->id}", true, now()->addDay())) {
-                app(\App\Abuse\Enforcer::class)->holdForReview($user, $why);
+            if (Cache::add("abuse.held.{$user->id}", true, now()->addDay())) {
+                app(Enforcer::class)->holdForReview($user, $why);
             }
             throw new RuntimeException('Your account is being checked before it can create sites. We will be in touch by email.');
         }
@@ -130,6 +133,7 @@ class Provisioner
             'host' => $host,
             'status' => 'provisioning',
             'cpu_limit' => $plan['cpu'],
+            'cpu_weight' => (int) ($plan['cpu_weight'] ?? 1024),
             'memory_limit' => $plan['memory'],
             'disk_gb' => (int) $plan['disk_gb'],
         ]);
@@ -138,7 +142,7 @@ class Provisioner
             $this->requireCapableAgent($host);
             $this->dns->upsert($siteId, config("fleet.hosts.$host.ip"));
 
-            $created = AgentClient::for($host)->createSite($siteId, $domain, $plan['cpu'], $plan['memory'], (int) $plan['disk_gb']);
+            $created = AgentClient::for($host)->createSite($siteId, $domain, $plan['cpu'], $plan['memory'], (int) $plan['disk_gb'], (int) ($plan['cpu_weight'] ?? 1024));
 
             $site->update([
                 'port' => $created['port'] ?? null,

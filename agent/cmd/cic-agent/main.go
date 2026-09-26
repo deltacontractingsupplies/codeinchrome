@@ -53,6 +53,7 @@ func main() {
 		probeCrt = flag.String("probe-cert", "", "client certificate the agent's own edge checks present (with -origin-client-ca)")
 		probeKey = flag.String("probe-key", "", "private key for -probe-cert")
 		siteDNS  = flag.String("site-dns", "", "the host's DNS forwarder (cic-dns) for sites, once proven to answer")
+		cpuBurst = flag.Float64("cpu-burst", 0, "every site may use up to this many CPUs while the host has them idle; its plan's weight decides when it is busy (0: the plan's CPU is a hard cap)")
 	)
 	flag.Parse()
 
@@ -84,6 +85,7 @@ func main() {
 		ProbeCert:      *probeCrt,
 		ProbeKey:       *probeKey,
 		SiteDNS:        *siteDNS,
+		CPUBurst:       *cpuBurst,
 	})
 	if err != nil {
 		fatal("cannot start site manager: %v", err)
@@ -111,6 +113,10 @@ func main() {
 	}
 	// A new free site's first-week egress limits (a reboot clears firewall rules).
 	mgr.ApplyAllRestrictedEgress(context.Background())
+	// Every site's CPU cap and weight, live (a changed -cpu-burst reaches all).
+	if n := mgr.ApplyCPUPolicy(context.Background()); n > 0 {
+		slog.Info("cpu policy applied", "sites", n, "burst", *cpuBurst)
+	}
 
 	srv := &http.Server{
 		Addr:              *addr,

@@ -23,7 +23,8 @@ class FleetApplyLimits extends Command
             $plan = $site->user?->planConfig();
 
             return $site->limits_pending
-                || ($plan && ((string) $site->cpu_limit !== (string) $plan['cpu'] || (string) $site->memory_limit !== (string) $plan['memory']));
+                || ($plan && ((string) $site->cpu_limit !== (string) $plan['cpu'] || (string) $site->memory_limit !== (string) $plan['memory']
+                    || (int) $site->cpu_weight !== (int) ($plan['cpu_weight'] ?? 1024)));
         });
 
         foreach ($pending as $site) {

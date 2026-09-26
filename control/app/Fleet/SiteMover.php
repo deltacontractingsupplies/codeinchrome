@@ -6,6 +6,7 @@ use App\Audit\Audit;
 use App\Models\Site;
 use Illuminate\Support\Facades\Log;
 use RuntimeException;
+use Symfony\Component\Process\Process;
 
 /**
  * Moves a live site to another host: to drain a host before retiring it, or
@@ -67,7 +68,7 @@ class SiteMover
         }
 
         $say("creating $id on $to");
-        $created = $target->createSite($id, $site->domain, (string) $site->cpu_limit, (string) $site->memory_limit, (int) $site->disk_gb);
+        $created = $target->createSite($id, $site->domain, (string) $site->cpu_limit, (string) $site->memory_limit, (int) $site->disk_gb, (int) ($site->cpu_weight ?: 1024));
         $port = $created['port'] ?? null;
 
         $maintenance = false;
@@ -161,7 +162,7 @@ class SiteMover
         }
 
         $say("creating $id on $to");
-        $created = $target->createSite($id, $site->domain, (string) $site->cpu_limit, (string) $site->memory_limit, (int) $site->disk_gb);
+        $created = $target->createSite($id, $site->domain, (string) $site->cpu_limit, (string) $site->memory_limit, (int) $site->disk_gb, (int) ($site->cpu_weight ?: 1024));
         try {
             $say('loading the database');
             $this->sendFile($dbGz, fn ($in) => $target->dbImport($id, $in));
@@ -263,6 +264,6 @@ class SiteMover
             return false;
         }
 
-        return (new \Symfony\Component\Process\Process(['gzip', '-t', $file]))->setTimeout(3600)->run() === 0;
+        return (new Process(['gzip', '-t', $file]))->setTimeout(3600)->run() === 0;
     }
 }

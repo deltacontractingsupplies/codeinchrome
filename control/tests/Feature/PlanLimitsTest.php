@@ -2,8 +2,11 @@
 
 namespace Tests\Feature;
 
+use App\Fleet\PlanLimits;
+use App\Fleet\Provisioner;
 use App\Models\Site;
 use App\Models\User;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Artisan;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
@@ -27,7 +30,7 @@ class PlanLimitsTest extends TestCase
         Http::fake([
             '127.0.0.1:944*/v1/sites/*/limits' => function () {
                 if ($this->hostDown) {
-                    throw new \Illuminate\Http\Client\ConnectionException('tunnel down');
+                    throw new ConnectionException('tunnel down');
                 }
 
                 return Http::response(['ok' => true, 'applied' => ['cpuMemory' => 'applied', 'disk' => 'grown']]);
@@ -80,6 +83,28 @@ class PlanLimitsTest extends TestCase
         $this->assertFalse($site->limits_pending);
     }
 
+    public function test_an_upgrade_moves_the_site_up_the_cpu_queue_and_existing_sites_get_their_weight(): void
+    {
+        // Every site bursts into idle CPU; when the host is busy, a paying
+        // customer's weight is four times a trial's (owner, 2026-09-26).
+        $this->assertSame(256, config('billing.plans.free.cpu_weight'));
+        $this->assertSame(1024, config('billing.plans.starter.cpu_weight'));
+
+        $user = User::factory()->create(['plan' => 'free']);
+        $site = $this->siteFor($user); // made before weights existed: none recorded
+        $this->assertNull($site->cpu_weight);
+
+        // fleet:apply-limits finds it and gives it the free weight.
+        $this->assertSame(0, Artisan::call('fleet:apply-limits'));
+        Http::assertSent(fn ($r) => $r->method() === 'PUT' && str_ends_with($r->url(), '/v1/sites/shop/limits') && $r['cpuWeight'] === 256);
+        $this->assertSame(256, $site->fresh()->cpu_weight);
+
+        // Paying moves it up, live.
+        $this->upgradeWebhook($user)->assertOk();
+        Http::assertSent(fn ($r) => $r->method() === 'PUT' && str_ends_with($r->url(), '/v1/sites/shop/limits') && $r['cpuWeight'] === 1024);
+        $this->assertSame(1024, $site->fresh()->cpu_weight);
+    }
+
     public function test_a_host_being_down_never_fails_the_payment_and_is_retried(): void
     {
         $user = User::factory()->create(['plan' => 'free']);
@@ -104,7 +129,7 @@ class PlanLimitsTest extends TestCase
         $user = User::factory()->create(['plan' => 'free']); // 2 GB plan
         $site = $this->siteFor($user);                        // but the site has 5 GB
 
-        app(\App\Fleet\PlanLimits::class)->applyTo($user);
+        app(PlanLimits::class)->applyTo($user);
 
         // The host never shrinks a disk, so the row must keep saying 5.
         $this->assertSame(5, $site->fresh()->disk_gb);
@@ -134,10 +159,17 @@ class PlanLimitsTest extends TestCase
         ]);
         $user = User::factory()->create(['plan' => 'starter']);
 
-        $site = \App\Fleet\Provisioner::make()->provision($user, 'big');
+        $site = Provisioner::make()->provision($user, 'big');
 
-        Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/v1/sites') && $r['diskGb'] === config('billing.plans.starter.disk_gb'));
+        Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/v1/sites') && $r['diskGb'] === config('billing.plans.starter.disk_gb')
+            && $r['cpuWeight'] === 1024);
         $this->assertSame(config('billing.plans.starter.disk_gb'), $site->disk_gb);
+        $this->assertSame(1024, $site->cpu_weight);
+
+        // A trial is created with the trial's weight.
+        $trial = Provisioner::make()->provision(User::factory()->create(['plan' => 'free']), 'trial');
+        Http::assertSent(fn ($r) => $r->method() === 'POST' && str_ends_with($r->url(), '/v1/sites') && $r['id'] === 'trial' && $r['cpuWeight'] === 256);
+        $this->assertSame(256, $trial->cpu_weight);
     }
 
     public function test_a_site_whose_limits_drifted_from_its_plan_is_brought_back_in_line(): void
