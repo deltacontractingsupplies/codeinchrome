@@ -35,6 +35,8 @@ type WrittenFile struct {
 	Path     string `json:"path"`
 	Bytes    int    `json:"bytes"`
 	Revision string `json:"revision"`
+	// Created: the file is new (the editor marks it A, not M).
+	Created bool `json:"created"`
 	// For PHP files: "ok", or the syntax error with its line, from php -l in
 	// the site's own container. Written either way - the file is the caller's
 	// to fix - but they learn now, not from a 500 later.
@@ -76,14 +78,17 @@ func (m *Manager) WriteMany(ctx context.Context, id string, files []FileWrite, m
 	written, err := func() ([]WrittenFile, error) {
 		m.mu.Lock()
 		defer m.mu.Unlock()
-		type ready struct{ root, rel string }
+		type ready struct {
+			root, rel string
+			existed   bool
+		}
 		prepared := make([]ready, len(files))
 		for i, f := range files {
-			root, rel, err := m.checkWrite(id, f.Path, f.Content, f.Expect)
+			root, rel, existed, err := m.checkWrite(id, f.Path, f.Content, f.Expect)
 			if err != nil {
 				return nil, &BatchError{f.Path, err}
 			}
-			prepared[i] = ready{root, rel}
+			prepared[i] = ready{root, rel, existed}
 		}
 		out := make([]WrittenFile, 0, len(files))
 		for i, f := range files {
@@ -93,7 +98,7 @@ func (m *Manager) WriteMany(ctx context.Context, id string, files []FileWrite, m
 				// reported, and recorded below, rather than hidden.
 				return out, &BatchError{f.Path, err}
 			}
-			out = append(out, WrittenFile{Path: f.Path, Bytes: len(f.Content), Revision: rev})
+			out = append(out, WrittenFile{Path: f.Path, Bytes: len(f.Content), Revision: rev, Created: !prepared[i].existed})
 		}
 		return out, nil
 	}()
@@ -221,7 +226,7 @@ func (m *Manager) EditFile(ctx context.Context, id, rel string, edits []Edit, ex
 	}
 	// Written only if the file is still what was edited: a save in between
 	// is a conflict, not something to overwrite.
-	newRev, err := m.writeFileIf(ctx, id, rel, text, rev, "edit "+strings.TrimPrefix(filepath.Clean("/"+rel), "/"))
+	newRev, _, err := m.writeFileIf(ctx, id, rel, text, rev, "edit "+strings.TrimPrefix(filepath.Clean("/"+rel), "/"))
 	if err != nil {
 		return WrittenFile{}, err
 	}

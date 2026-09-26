@@ -322,7 +322,7 @@ func (m *Manager) Restore(ctx context.Context, id, rev, rel string) error {
 		return err
 	}
 	clean, _ := historyPath(rel)
-	if _, err := m.writeFileIf(ctx, id, clean, content, "", ""); err != nil {
+	if _, _, err := m.writeFileIf(ctx, id, clean, content, "", ""); err != nil {
 		return err
 	}
 	m.record(ctx, id, fmt.Sprintf("restore %s from %s", clean, rev[:7]))

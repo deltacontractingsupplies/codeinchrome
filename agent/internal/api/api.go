@@ -245,7 +245,7 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {path, content}"))
 			return
 		}
-		rev, err := mgr.WriteFileIf(r.Context(), r.PathValue("id"), body.Path, body.Content, body.Expect)
+		rev, created, err := mgr.WriteFileIfCreated(r.Context(), r.PathValue("id"), body.Path, body.Content, body.Expect)
 		if refusedMalware(w, err) {
 			return
 		}
@@ -264,6 +264,7 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			"path":     body.Path,
 			"bytes":    len(body.Content),
 			"revision": rev,
+			"created":  created,
 			"basis":    "written to a temporary file in the same directory and renamed",
 		}))
 	})
