@@ -14,6 +14,9 @@ return [
     'jurisdiction' => env('CIC_LEGAL_JURISDICTION'),
     // Where customers write to. Must actually receive mail.
     'support_email' => env('CIC_SUPPORT_EMAIL', 'support@codeinchrome.com'),
+    // Where a site hosted here is reported by email (the form at /report is
+    // the other way). Must actually receive mail.
+    'abuse_email' => env('CIC_ABUSE_EMAIL', 'abuse@codeinchrome.com'),
     // Money back on the first payment of a plan, within this many days.
     'refund_days' => (int) env('CIC_REFUND_DAYS', 14),
     // The public source code: linked from every public page, and the security
@@ -23,5 +26,5 @@ return [
         'license' => 'FSL-1.1-ALv2',
     ],
     // Shown on every legal page.
-    'updated' => '2026-09-25',
+    'updated' => '2026-09-26',
 ];

@@ -137,4 +137,5 @@
 
 <h2>Contact</h2>
 <p><a href="mailto:{{ $mail }}">{{ $mail }}</a></p>
+<p>To report a site hosted here: <a href="mailto:{{ config('legal.abuse_email') }}">{{ config('legal.abuse_email') }}</a>, or the <a href="{{ route('report') }}">report form</a>.</p>
 @endsection

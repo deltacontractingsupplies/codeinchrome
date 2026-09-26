@@ -5,7 +5,8 @@
     <h1 class="text-2xl font-semibold text-white">Report a site</h1>
     <p class="mt-2 text-sm text-neutral-400">
         Seen phishing, malware, a scam or anything else that breaks our <a href="{{ route('terms') }}#acceptable-use" class="underline">rules</a> on a site hosted here?
-        Tell us. Every report is read, and a site that breaks the rules is taken down.
+        Tell us here or at <a href="mailto:{{ config('legal.abuse_email') }}" class="underline">{{ config('legal.abuse_email') }}</a>.
+        Every report is read, and a site that breaks the rules is taken down.
         For a security problem in codeinchrome itself, see our <a href="{{ config('legal.source.url') }}/security/policy" class="underline" rel="noopener">security policy</a>.
     </p>
     @if (session('status'))
