@@ -2176,14 +2176,14 @@ async function restoreSnapshot(name, { confirm = false, interactive = true } = {
 /* Every screen size (ScreensController): a page at phone, tablet and desktop
  * size side by side over the editor, so a person - or an agent taking ONE
  * screenshot - sees all three at once. */
-async function showScreens(path = '/') {
+async function showScreens(path = '/', { as, guard } = {}) {
   status(`Showing ${path} at every screen size…`);
-  const r = await apiAt(SITE.screensUrl, 'POST', {}, { path });
+  const r = await apiAt(SITE.screensUrl, 'POST', {}, { path, ...(as ? { as } : {}), ...(guard ? { guard } : {}) });
   if (!r.ok) {
     status(r.hint ?? 'The page could not be shown.', true);
     return r;
   }
-  $('screensTitle').textContent = `${r.url} at every screen size`;
+  $('screensTitle').textContent = `${r.url} at every screen size${r.signedInAs ? `, signed in as user ${r.signedInAs}` : ''}`;
   $('screensRow').replaceChildren(...r.shots.map((s) => {
     const fig = document.createElement('figure');
     const img = document.createElement('img');
@@ -2766,7 +2766,7 @@ false. Nothing is paraphrased.
   cic.github.push()            push now - after the key is added on GitHub ("waiting_for_key" until then)
   cic.signInUrl(path, { as })  a one-time link (10 minutes, once) that opens the site in a new tab
                                signed in as the app's user \`as\` (default 1) - scripts and forms work
-  cic.screens(path)            the page at phone, tablet and desktop size, side by side over
+  cic.screens(path, { as })    the page at phone, tablet and desktop size ({ as: 1 }: signed in as user 1), side by side over
                                the editor - then ONE screenshot of this tab shows all three
   cic.db.export()              download the whole database as .sql.gz
   cic.db.import(blob, { confirm }) load a .sql or .sql.gz File/Blob (95 MB at most).
@@ -3858,7 +3858,8 @@ const cicApi = {
   signInUrl: (path = '/', { as = 1, guard } = {}) => apiAt(SITE.signInLinkUrl, 'POST', {}, { user: as, path, ...(guard ? { guard } : {}) }),
   // The page at phone, tablet and desktop size, side by side over the
   // editor: one call, then ONE screenshot of this tab shows all three.
-  screens: (path = '/') => showScreens(String(path)),
+  // { as: 1 }: signed in as the app's user 1 (a one-time link per size).
+  screens: (path = '/', options = {}) => showScreens(String(path), options),
   // The Laravel names the editor completes, straight from the site.
   laravel: Object.freeze({
     routes: async () => ({ ok: true, names: await laravel.routeNames() }),

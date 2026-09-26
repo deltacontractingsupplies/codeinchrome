@@ -78,8 +78,8 @@ A page in a route closure, or HTML in a PHP string, is a failure, not a shortcut
 - **Every screen size.** `await cic.screens('/cart')` shows the page at phone 390×844,
   tablet 820×1180 and desktop 1440×900 side by side over the editor: take ONE screenshot
   of the editor tab and check all three - nothing cut off, no sideways scroll, buttons big
-  enough to tap. Fix, then look again. For a page behind the app's login, open a sign-in
-  link (`cic.signInUrl`, below) and resize the browser window to each size instead.
+  enough to tap. Fix, then look again. Behind the app's login: `cic.screens('/admin', { as: 1 })`
+  shows it signed in as the app's user 1 (no password).
 
 If a senior Laravel reviewer would reject it, it is not done. `cic.check()` reports
 code that breaks these rules (a page built in `routes/web.php`, for one): fix what it

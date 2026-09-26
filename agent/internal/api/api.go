@@ -593,14 +593,19 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	// look.
 	mux.HandleFunc("POST /v1/render/shots", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
-			URL string `json:"url"`
+			URL  string   `json:"url"`
+			URLs []string `json:"urls"` // one per screen size (sign-in links are used once)
 		}
-		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
-			writeJSON(w, http.StatusBadRequest, fail("invalid_body", "send JSON: url"))
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("invalid_body", "send JSON: url, or urls (one per screen size)"))
 			return
 		}
+		urls := body.URLs
+		if len(urls) == 0 {
+			urls = []string{body.URL}
+		}
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(3 * time.Minute))
-		shots, err := mgr.RenderShots(r.Context(), body.URL)
+		shots, err := mgr.RenderShotsEach(r.Context(), urls)
 		if err != nil {
 			writeJSON(w, http.StatusBadRequest, fail("cannot_render", err.Error()))
 			return

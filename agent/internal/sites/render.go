@@ -131,9 +131,27 @@ const maxShotPNG = 8 << 20
 // time. The container writes only the picture, into a directory of its own
 // that is removed afterwards.
 func (m *Manager) RenderShots(ctx context.Context, raw string) ([]Shot, error) {
-	target, err := m.renderable(raw)
-	if err != nil {
-		return nil, err
+	return m.RenderShotsEach(ctx, []string{raw})
+}
+
+// RenderShotsEach is RenderShots with an address per screen size - one
+// sign-in link each, for a page behind the app's login: a link is used once.
+// One address is used for every size.
+func (m *Manager) RenderShotsEach(ctx context.Context, raws []string) ([]Shot, error) {
+	if len(raws) != 1 && len(raws) != len(ScreenSizes) {
+		return nil, fmt.Errorf("one address, or one for each of the %d screen sizes", len(ScreenSizes))
+	}
+	targets := make([]string, len(ScreenSizes))
+	for i := range ScreenSizes {
+		raw := raws[0]
+		if len(raws) > 1 {
+			raw = raws[i]
+		}
+		t, err := m.renderable(raw)
+		if err != nil {
+			return nil, err
+		}
+		targets[i] = t
 	}
 	select {
 	case renderSlots <- struct{}{}:
@@ -155,7 +173,8 @@ func (m *Manager) RenderShots(ctx context.Context, raw string) ([]Shot, error) {
 		return nil, err
 	}
 	var shots []Shot
-	for _, size := range ScreenSizes {
+	for i, size := range ScreenSizes {
+		target := targets[i]
 		b := make([]byte, 6)
 		_, _ = rand.Read(b)
 		name := "cic-render-" + hex.EncodeToString(b)
