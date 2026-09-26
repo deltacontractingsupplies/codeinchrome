@@ -2835,7 +2835,7 @@ let lastWriteAt = 0;
 function agentWrote(path, content, revision, { created } = {}) {
   lastWriteAt = Date.now();
   seenRevision.set(path, revision);
-  noteAgentChange(path, content, revision, created);
+  const lines = noteAgentChange(path, content, revision, created);
   const t = tabs.get(path);
   if (t && !t.dirty && typeof content === 'string') {
     Object.assign(t, { content, saved: content, revision, conflict: null });
@@ -2843,6 +2843,9 @@ function agentWrote(path, content, revision, { created } = {}) {
     t.conflict = 'This file was just changed by the agent. Your unsaved edits would overwrite that change.';
   }
   if (t && path === active) show(path);
+  // After the tab holds the new text: highlighting first and then replacing
+  // the text wiped the highlight of every edit to an open file (e2e).
+  if (lines && !(t && t.dirty)) followWrite(path, content, revision, lines);
 }
 
 /* ───────── what the agent is doing, live (activity.js) ─────────
@@ -2924,7 +2927,7 @@ function noteAgentChange(path, content, revision, created) {
   if (!changedFiles.has(path) || changedFiles.get(path) === 'D') changedFiles.set(path, existed === false ? 'A' : 'M');
   rememberContent(path, content);
   paintChangeBadge(path);
-  if (lines) followWrite(path, content, revision, lines);
+  return lines;
 }
 
 function paintChangeBadge(path) {
