@@ -20,6 +20,14 @@ class LegalPagesTest extends TestCase
         $home->assertSee('mailto:support@codeinchrome.com', false);
     }
 
+    public function test_the_abuse_address_is_where_a_reporter_looks(): void
+    {
+        // A mailbox that receives (Cloudflare Email Routing, 2026-09-26): the
+        // address hosting providers and Cloudflare expect an operator to answer.
+        $this->get(route('report'))->assertOk()->assertSee('mailto:abuse@codeinchrome.com', false);
+        $this->get(route('terms'))->assertOk()->assertSee('mailto:abuse@codeinchrome.com', false);
+    }
+
     public function test_pricing_shows_every_plan_at_the_price_the_app_charges(): void
     {
         $page = $this->get('/pricing')->assertOk();
