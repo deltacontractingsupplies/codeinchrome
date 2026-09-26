@@ -19,11 +19,17 @@ class WebhookController extends Controller
         }
 
         $signature = (string) $request->header('X-Signature', '');
-        $expected = hash_hmac('sha256', $request->getContent(), $secret);
-
-        // Constant-time: a timing-variable comparison leaks the signature one
-        // byte at a time to anyone willing to send enough requests.
-        if (! hash_equals($expected, $signature)) {
+        // During a rotation the previous secret is accepted too, so the store
+        // and the app can switch at different moments without refusing a
+        // real payment in between. Remove it once the store has the new one.
+        $secrets = array_filter([$secret, config('billing.webhook_secret_previous')]);
+        $valid = false;
+        foreach ($secrets as $s) {
+            // Constant-time: a timing-variable comparison leaks the signature
+            // one byte at a time to anyone willing to send enough requests.
+            $valid = hash_equals(hash_hmac('sha256', $request->getContent(), $s), $signature) || $valid;
+        }
+        if (! $valid) {
             return response('invalid signature', 401);
         }
 
@@ -40,7 +46,7 @@ class WebhookController extends Controller
         } catch (\Throwable $e) {
             // 500 asks Lemon Squeezy to retry. The event row is already stored
             // with its error, so the retry is cheap and the payment is not lost.
-            return response('could not process: ' . $e->getMessage(), 500);
+            return response('could not process: '.$e->getMessage(), 500);
         }
 
         return response($result, 200);

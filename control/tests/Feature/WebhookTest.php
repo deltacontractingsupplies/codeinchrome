@@ -5,6 +5,9 @@ namespace Tests\Feature;
 use App\Models\Subscription;
 use App\Models\User;
 use App\Models\WebhookEvent;
+use App\Notifications\PlanNotice;
+use Illuminate\Support\Facades\Artisan;
+use Illuminate\Support\Facades\Notification;
 use Tests\TestCase;
 
 /**
@@ -60,6 +63,26 @@ class WebhookTest extends TestCase
         $this->assertSame(0, WebhookEvent::count(), 'An unverified payload must not even be stored.');
     }
 
+    public function test_during_a_rotation_both_secrets_are_accepted_and_after_it_only_the_new(): void
+    {
+        config(['billing.plans.starter.variant_id' => '777']);
+        $sign = fn (array $p, string $secret) => hash_hmac('sha256', json_encode($p), $secret);
+
+        // The store still signs with the old secret; the app already has the new one.
+        config(['billing.webhook_secret' => 'the-new-secret', 'billing.webhook_secret_previous' => self::SECRET]);
+        $a = $this->payload(User::factory()->create(['plan' => 'free']), '777', id: 'sub_old');
+        $this->send($a, signature: $sign($a, self::SECRET))->assertOk();
+        $b = $this->payload(User::factory()->create(['plan' => 'free']), '777', id: 'sub_new');
+        $this->send($b, signature: $sign($b, 'the-new-secret'))->assertOk();
+        $c = $this->payload(User::factory()->create(['plan' => 'free']), '777', id: 'sub_forged');
+        $this->send($c, signature: $sign($c, 'neither'))->assertStatus(401);
+
+        // Rotation finished: the old secret no longer opens anything.
+        config(['billing.webhook_secret_previous' => null]);
+        $d = $this->payload(User::factory()->create(['plan' => 'free']), '777', id: 'sub_late');
+        $this->send($d, signature: $sign($d, self::SECRET))->assertStatus(401);
+    }
+
     public function test_it_rejects_a_signature_for_different_bytes(): void
     {
         $user = User::factory()->create(['plan' => 'free']);
@@ -108,7 +131,7 @@ class WebhookTest extends TestCase
 
     public function test_a_failed_payment_keeps_service_for_the_grace_period_only(): void
     {
-        \Illuminate\Support\Facades\Notification::fake();
+        Notification::fake();
         $user = User::factory()->create(['plan' => 'free']);
         config(['billing.plans.starter.variant_id' => '777']);
         $this->send($this->payload($user, '777', 'active', 'sub_pd'))->assertOk();
@@ -119,7 +142,7 @@ class WebhookTest extends TestCase
         $this->assertSame('starter', $user->fresh()->plan);
         $failedAt = Subscription::first()->payment_failed_at;
         $this->assertNotNull($failedAt);
-        \Illuminate\Support\Facades\Notification::assertSentTo($user, \App\Notifications\PlanNotice::class, fn ($n) => $n->kind === 'payment_failed');
+        Notification::assertSentTo($user, PlanNotice::class, fn ($n) => $n->kind === 'payment_failed');
 
         // A repeat of the failure does not restart the clock; expiry inside the
         // grace period does not end it early.
@@ -132,7 +155,7 @@ class WebhookTest extends TestCase
         // The grace period ends on the clock, with nothing arriving from Lemon Squeezy.
         $this->travel(4)->days();
         $this->travel(1)->minutes();
-        \Illuminate\Support\Facades\Artisan::call('trials:expire');
+        Artisan::call('trials:expire');
         $this->assertSame('free', $user->fresh()->plan);
     }
 
@@ -145,7 +168,7 @@ class WebhookTest extends TestCase
         $this->assertNull(Subscription::first()->payment_failed_at);
 
         $this->travel(30)->days();
-        \Illuminate\Support\Facades\Artisan::call('trials:expire');
+        Artisan::call('trials:expire');
         $this->assertSame('starter', $user->fresh()->plan);
     }
 

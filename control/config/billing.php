@@ -4,6 +4,8 @@ return [
     'store_id' => env('LEMONSQUEEZY_STORE_ID'),
     'api_key' => env('LEMONSQUEEZY_API_KEY'),
     'webhook_secret' => env('LEMONSQUEEZY_WEBHOOK_SECRET'),
+    // Also accepted while the secret is being rotated (WebhookController).
+    'webhook_secret_previous' => env('LEMONSQUEEZY_WEBHOOK_SECRET_PREVIOUS'),
     // Pause between retries of a dropped connection to the API. 0 in tests.
     'retry_sleep_ms' => (int) env('LEMONSQUEEZY_RETRY_SLEEP_MS', 500),
 
