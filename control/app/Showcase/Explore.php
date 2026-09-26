@@ -2,7 +2,9 @@
 
 namespace App\Showcase;
 
+use App\Fleet\Provisioner;
 use App\Models\Site;
+use App\Support\BoundedSink;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
@@ -35,7 +37,7 @@ class Explore
             ->where('links_clean_at', '>=', now()->subDays(7))
             // Out of its first week (and its noindex, Provisioner::NOINDEX_DAYS)
             // first: a fresh phishing kit is not advertised (the audit, 2026-09-25).
-            ->where('created_at', '<=', now()->subDays(\App\Fleet\Provisioner::NOINDEX_DAYS))
+            ->where('created_at', '<=', now()->subDays(Provisioner::NOINDEX_DAYS))
             ->whereNotIn('site_id', $demoSites)
             ->whereHas('user', function (Builder $q) {
                 $q->where('plan', 'free');
@@ -83,17 +85,14 @@ class Explore
      */
     private function isBuilt(Site $site): bool
     {
-        try {
-            $res = Http::timeout(8)->withoutRedirecting()
-                ->withHeaders(['User-Agent' => 'codeinchrome-explore (+https://codeinchrome.com)'])
-                ->get('https://'.$site->domain.'/');
-        } catch (\Throwable) {
+        // 1 MB: Laravel's start page is ~30 KB (BoundedSink says why a cap).
+        $res = BoundedSink::get(Http::timeout(8)->withoutRedirecting()
+            ->withHeaders(['User-Agent' => 'codeinchrome-explore (+https://codeinchrome.com)']),
+            'https://'.$site->domain.'/', 1 << 20);
+        if ($res === null || $res['status'] !== 200) {
             return false;
         }
-        if ($res->status() !== 200) {
-            return false;
-        }
-        $body = $res->body();
+        $body = $res['body'];
 
         return ! (str_contains($body, "Let's get started") && str_contains($body, 'laravel.com/docs'));
     }

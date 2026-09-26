@@ -2,7 +2,10 @@
 
 namespace App\Abuse;
 
+use App\Fleet\AgentClient;
 use App\Models\Site;
+use App\Support\BoundedSink;
+use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Facades\Http;
 
 /**
@@ -60,6 +63,13 @@ class LinkScanner
     /** The site's own script files read per scan. */
     public const MAX_SCRIPTS = 5;
 
+    /**
+     * What is read of one page or script (BoundedSink: a site answering with
+     * gigabytes cannot fill the control host). A kit padded past it would
+     * hide what follows, so an answer cut at the cap is itself for review.
+     */
+    public const MAX_ANSWER_BYTES = 4 << 20;
+
     private const CLIPBOARD_COMMAND = '/(clipboard\.writeText|execCommand\(\s*["\']copy)[\s\S]{0,600}(powershell|mshta|cmd(\.exe)?\s*\/c|curl[^|<]{0,200}\|\s*(ba)?sh|iex\b|Invoke-WebRequest|-enc(odedcommand)?\b)/i';
 
     /** Pages rendered in a browser per scan (audit A15): a browser costs. */
@@ -74,7 +84,7 @@ class LinkScanner
      */
     public function scan(Site $site, ?bool $render = null): array
     {
-        $render ??= \Illuminate\Support\Facades\Cache::add("linkscan.rendered.{$site->id}", true, now()->addDay());
+        $render ??= Cache::add("linkscan.rendered.{$site->id}", true, now()->addDay());
         $rendered = 0;
         $scripts = [];
         $own = array_map('strtolower', array_merge([$site->domain], $site->domains()->pluck('domain')->all()));
@@ -90,26 +100,27 @@ class LinkScanner
                 continue;
             }
             $seen[$url] = true;
-            try {
-                $res = Http::timeout(10)->withoutRedirecting()
-                    ->withHeaders(self::HEADERS)->get($url);
-            } catch (\Throwable) {
+            $res = BoundedSink::get(Http::timeout(10)->withoutRedirecting()->withHeaders(self::HEADERS), $url, self::MAX_ANSWER_BYTES);
+            if ($res === null) {
                 continue;
             }
             // A redirect within the site (a home page sending visitors to /login)
             // is followed; one to elsewhere the edge refuses anyway.
-            if ($res->status() >= 300 && $res->status() < 400 && ($loc = $this->absolute($res->header('Location'), $url))) {
+            if ($res['status'] >= 300 && $res['status'] < 400 && ($loc = $this->absolute($res['location'], $url))) {
                 if (in_array(strtolower((string) parse_url($loc, PHP_URL_HOST)), $own, true)) {
                     $queue[] = $loc;
                 }
 
                 continue;
             }
-            if (! str_contains(strtolower($res->header('Content-Type')), 'html') || $res->status() !== 200) {
+            if (! str_contains(strtolower($res['type']), 'html') || $res['status'] !== 200) {
                 continue;
             }
             $pages++;
-            $html = $res->body();
+            $html = $res['body'];
+            if ($res['truncated']) {
+                $review[] = 'a page larger than '.(self::MAX_ANSWER_BYTES >> 20)." MB, checked only as far as that ($url)";
+            }
             $this->inspect($html, $url, $url, $own, $ban, $review, $queue, $seen, $scripts);
             // The same page as a browser has it once its scripts ran: a kit that
             // builds its form, frame or "press Win+R" in JavaScript is invisible
@@ -127,15 +138,14 @@ class LinkScanner
         }
 
         foreach ($scripts as $src => $page) {
-            try {
-                $js = Http::timeout(10)->withoutRedirecting()->withHeaders(self::HEADERS)->get($src);
-            } catch (\Throwable) {
+            $js = BoundedSink::get(Http::timeout(10)->withoutRedirecting()->withHeaders(self::HEADERS), $src, self::MAX_ANSWER_BYTES);
+            if ($js === null || $js['status'] < 200 || $js['status'] >= 300) {
                 continue;
             }
-            if (! $js->successful()) {
-                continue;
+            $code = $js['body'];
+            if ($js['truncated']) {
+                $review[] = 'a script larger than '.(self::MAX_ANSWER_BYTES >> 20)." MB, checked only as far as that ($src, a script of $page)";
             }
-            $code = substr($js->body(), 0, 1 << 20);
             [$sb, $sr] = $this->scriptFindings($code, "$src, a script of $page");
             array_push($ban, ...$sb);
             array_push($review, ...$sr);
@@ -257,7 +267,7 @@ class LinkScanner
         $others = array_values(array_diff($hosts, [$site->host]));
         $host = $others ? $others[crc32($site->site_id) % count($others)] : $site->host;
         try {
-            $dom = \App\Fleet\AgentClient::for($host)->render($url)['dom'] ?? '';
+            $dom = AgentClient::for($host)->render($url)['dom'] ?? '';
         } catch (\Throwable) {
             return null; // the raw read still counts; a renderer that failed proves nothing
         }
@@ -325,7 +335,7 @@ class LinkScanner
     private function routes(Site $site): array
     {
         try {
-            $r = \App\Fleet\AgentClient::for($site->host)->runCommand($site->site_id, 'artisan', ['route:list', '--json', '--method=GET']);
+            $r = AgentClient::for($site->host)->runCommand($site->site_id, 'artisan', ['route:list', '--json', '--method=GET']);
             $list = json_decode((string) ($r['result']['output'] ?? ''), true);
         } catch (\Throwable) {
             return [];

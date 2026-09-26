@@ -2,12 +2,17 @@
 
 namespace App\Fleet;
 
+use App\Billing\Sales;
 use App\Models\Incident;
 use App\Models\Monitor;
 use App\Models\Site;
+use App\Support\BoundedSink;
+use Illuminate\Console\Scheduling\Event;
 use Illuminate\Http\Client\Pool;
+use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * Checks the fleet from OUTSIDE each host, and turns failures into incidents.
@@ -64,7 +69,7 @@ class Monitoring
         $min = (int) config('fleet.stock.alert_below', 3);
         $out = [];
         // Only what is for sale can run out (App\Billing\Sales).
-        foreach (\App\Billing\Sales::plans() as $key => $plan) {
+        foreach (Sales::plans() as $key => $plan) {
             if ($plan['price'] <= 0) {
                 continue;
             }
@@ -97,7 +102,7 @@ class Monitoring
     {
         $out = [];
         $limit = now()->subHours(self::BACKUP_MAX_AGE_HOURS);
-        $sites = \App\Models\Site::where('status', 'live')
+        $sites = Site::where('status', 'live')
             ->where(fn ($q) => $q->where('created_at', '<', $limit)->orWhereNotNull('last_backup_at'))->get();
         foreach ($sites as $site) {
             $last = $site->last_backup_at;
@@ -110,7 +115,7 @@ class Monitoring
         // hours on a stale lock, and only a failed systemd unit said so.
         if ($stamp = config('fleet.control_backup_stamp')) {
             clearstatcache(true, $stamp);
-            $at = is_file($stamp) ? \Illuminate\Support\Carbon::createFromTimestamp(filemtime($stamp)) : null;
+            $at = is_file($stamp) ? Carbon::createFromTimestamp(filemtime($stamp)) : null;
             $out['control:backup'] = ['control plane backups', $at !== null && $at->greaterThan($limit),
                 $at ? 'newest complete backup '.$at->diffForHumans() : 'no complete backup recorded', null];
         }
@@ -118,7 +123,7 @@ class Monitoring
         // The off-provider copy, once it has ever completed (it is optional).
         if (($stamp = config('fleet.offsite_stamp')) && is_file($stamp)) {
             clearstatcache(true, $stamp);
-            $at = \Illuminate\Support\Carbon::createFromTimestamp(filemtime($stamp));
+            $at = Carbon::createFromTimestamp(filemtime($stamp));
             $out['control:offsite'] = ['off-provider backup copy', $at->greaterThan($limit),
                 'newest complete copy '.$at->diffForHumans(), null];
         }
@@ -129,7 +134,7 @@ class Monitoring
     private function checkFiles(): array
     {
         $out = [];
-        foreach (\App\Models\Site::where('status', 'live')->where('inodes_total', '>', 0)->get() as $site) {
+        foreach (Site::where('status', 'live')->where('inodes_total', '>', 0)->get() as $site) {
             $pct = (int) round(100 * $site->inodes_used / $site->inodes_total);
             $out["site:{$site->site_id}:files"] = ["{$site->domain} files", $pct < 90,
                 "$pct% of its file slots used ({$site->inodes_used} of {$site->inodes_total})", null];
@@ -141,12 +146,12 @@ class Monitoring
     /** @return array<string, array{0: string, 1: bool, 2: string, 3: ?int}> */
     private function checkHost(string $host): array
     {
-        $label = "host $host (" . config("fleet.hosts.$host.ip") . ')';
+        $label = "host $host (".config("fleet.hosts.$host.ip").')';
         $started = microtime(true);
         try {
             $s = AgentClient::for($host)->hostStats();
         } catch (\Throwable $e) {
-            return ["host:$host" => [$label, false, 'agent unreachable: ' . $e->getMessage(), null]];
+            return ["host:$host" => [$label, false, 'agent unreachable: '.$e->getMessage(), null]];
         }
         Stock::remember($host, $s);
         $ms = (int) round((microtime(true) - $started) * 1000);
@@ -158,7 +163,7 @@ class Monitoring
         // effect: fine for a few days, not forever (the audit found two hosts
         // running a kernel days older than the one installed).
         if (! empty($s['rebootRequiredSince'])) {
-            $since = \Illuminate\Support\Carbon::parse($s['rebootRequiredSince']);
+            $since = Carbon::parse($s['rebootRequiredSince']);
             $out["host:$host:reboot"] = ["$label reboot", $since->greaterThan(now()->subDays(self::REBOOT_GRACE_DAYS)),
                 'an update has waited '.$since->diffForHumans(null, true).' for a reboot to take effect', null];
         } else {
@@ -191,10 +196,15 @@ class Monitoring
         }
 
         $timings = [];
-        $responses = Http::pool(function (Pool $pool) use ($sites, &$timings) {
+        // Only the status is used: 64 KB of any answer is read, no more
+        // (BoundedSink - a site answering with gigabytes, every minute).
+        $sinks = [];
+        $responses = Http::pool(function (Pool $pool) use ($sites, &$timings, &$sinks) {
             foreach ($sites as $site) {
                 $timings[$site->site_id] = microtime(true);
-                $pool->as($site->site_id)->timeout(10)->withOptions(['allow_redirects' => false])
+                $sinks[$site->site_id] = new BoundedSink(64 << 10);
+                $pool->as($site->site_id)->timeout(10)
+                    ->withOptions(['allow_redirects' => false] + $sinks[$site->site_id]->options())
                     ->withHeaders(['User-Agent' => 'codeinchrome-monitor'])->get($site->url());
             }
         });
@@ -203,14 +213,15 @@ class Monitoring
         foreach ($sites as $site) {
             $r = $responses[$site->site_id] ?? null;
             $label = "site {$site->domain}";
-            if ($r instanceof \Throwable || $r === null) {
-                $out["site:{$site->site_id}"] = [$label, false, 'no answer: ' . ($r ? $r->getMessage() : 'unknown'), null];
+            $answer = $sinks[$site->site_id]->answerFrom($r);
+            if ($answer === null) {
+                $out["site:{$site->site_id}"] = [$label, false, 'no answer: '.($r instanceof \Throwable ? $r->getMessage() : 'unknown'), null];
 
                 continue;
             }
             $ms = (int) round((microtime(true) - $timings[$site->site_id]) * 1000);
-            $up = $r->status() < 500;
-            $out["site:{$site->site_id}"] = [$label, $up, "HTTP {$r->status()}", $ms];
+            $up = $answer['status'] < 500;
+            $out["site:{$site->site_id}"] = [$label, $up, "HTTP {$answer['status']}", $ms];
         }
 
         return $out;
@@ -237,7 +248,7 @@ class Monitoring
 
         foreach ($gone as $key) {
             Incident::where('monitor_key', $key)->whereNull('resolved_at')->get()->each(function ($i) {
-                $i->update(['resolved_at' => now(), 'detail' => $i->detail . ' [closed: the site was deleted]']);
+                $i->update(['resolved_at' => now(), 'detail' => $i->detail.' [closed: the site was deleted]']);
             });
             Monitor::where('key', $key)->delete();
         }
@@ -250,7 +261,7 @@ class Monitoring
      * A job that runs every few minutes alerts on its third failure in a row;
      * an hourly or daily one on its first, or a day would pass unnoticed.
      */
-    public function recordJob(\Illuminate\Console\Scheduling\Event $event, bool $ok, string $detail): void
+    public function recordJob(Event $event, bool $ok, string $detail): void
     {
         if (! preg_match("/artisan'?\\s+([a-z0-9:-]+)/i", (string) $event->command, $m)) {
             return; // not an artisan command
@@ -296,8 +307,8 @@ class Monitoring
                 return false;
             }
             try {
-                \Illuminate\Support\Facades\Mail::raw($text . "\n\nhttps://app.codeinchrome.com/status", function ($m) use ($to, $text) {
-                    $m->to($to)->subject('[codeinchrome] ' . mb_substr($text, 0, 120));
+                Mail::raw($text."\n\nhttps://app.codeinchrome.com/status", function ($m) use ($to, $text) {
+                    $m->to($to)->subject('[codeinchrome] '.mb_substr($text, 0, 120));
                 });
 
                 return true;

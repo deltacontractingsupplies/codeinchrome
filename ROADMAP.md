@@ -829,6 +829,18 @@ be hard to abuse. Every item is verified live, never assumed.
 - [x] **Found by the link scanner, fixed**: the edge guard sent every header of
       an allowed redirect twice (Location, Set-Cookie) - copy_response_headers
       on top of copy_response. Agent 0.26.9; checked on production.
+- [x] **Found reviewing the scanners, fixed** (2026-09-26): the control host
+      read a site's WHOLE answer - the link scanner, Explore, the minutely
+      monitor, the exposure check and the image roll - past 2 MB into a temp
+      file on its disk and all of it into memory once read, and its PHP CLI
+      has no memory limit. A free site answering with gigabytes (visitor
+      traffic is not rate-capped) could fill the control host's disk or
+      memory, and the scanner stopped for every site after it. Now every
+      answer from a site is written through BoundedSink: the transfer stops at
+      a cap (4 MB a page or script for the scanner, 64 KB where only the
+      status is used), measured against a local 50 MB answer - stopped at the
+      cap in well under a second, in a pool too. A page or script cut at the
+      cap is itself for review, so padding cannot hide a kit.
 - [x] **Found by the skill test, fixed** (2026-09-26): a whole-site restore
       left a Laravel site answering EVERY page with a 500 ("Please provide a
       valid cache path"). Backups and host moves leave out the compiled views

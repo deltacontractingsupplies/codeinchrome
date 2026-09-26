@@ -3,6 +3,7 @@
 namespace App\Fleet;
 
 use App\Models\Site;
+use App\Support\BoundedSink;
 use Illuminate\Http\Client\Pool;
 use Illuminate\Support\Facades\Http;
 
@@ -57,22 +58,25 @@ class ExposureCheck
         $paths = array_values(array_unique(array_merge(self::PROBES, $this->publicFiles($agent))));
         $base = 'https://'.$this->site->domain;
 
+        // The first 512 KB of each answer is what is searched; no more is
+        // transferred (BoundedSink).
+        $sinks = array_combine($paths, array_map(fn () => new BoundedSink(512 * 1024), $paths));
         $responses = Http::pool(fn (Pool $pool) => array_map(
-            fn ($path) => $pool->as($path)->withOptions(['allow_redirects' => false, 'http_errors' => false])
+            fn ($path) => $pool->as($path)->withOptions(['allow_redirects' => false, 'http_errors' => false] + $sinks[$path]->options())
                 ->withHeaders(['User-Agent' => 'codeinchrome-exposure-check'])->timeout(15)->get($base.$path),
             $paths,
         ));
 
         $results = [];
         foreach ($paths as $path) {
-            $r = $responses[$path] ?? null;
-            if (! $r instanceof \Illuminate\Http\Client\Response) {
+            $r = $sinks[$path]->answerFrom($responses[$path] ?? null);
+            if ($r === null) {
                 // No answer at all gives nothing away; it is reported, not failed.
                 $results[] = ['path' => $path, 'status' => 0, 'ok' => true, 'why' => 'no answer'];
 
                 continue;
             }
-            $body = substr((string) $r->body(), 0, 512 * 1024);
+            $body = $r['body'];
             $why = null;
             foreach ($needles as $label => $needle) {
                 if (str_contains($body, $needle)) {
@@ -80,15 +84,15 @@ class ExposureCheck
                     break;
                 }
             }
-            if (! $why && $r->status() < 400) {
+            if (! $why && $r['status'] < 400) {
                 foreach (self::TELLTALES as $mark) {
                     if (str_contains($body, $mark)) {
-                        $why = 'the answer looks like the private file ('.trim($mark, " :=[{").')';
+                        $why = 'the answer looks like the private file ('.trim($mark, ' :=[{').')';
                         break;
                     }
                 }
             }
-            $results[] = ['path' => $path, 'status' => $r->status(), 'ok' => $why === null, 'why' => $why];
+            $results[] = ['path' => $path, 'status' => $r['status'], 'ok' => $why === null, 'why' => $why];
         }
         $failed = count(array_filter($results, fn ($x) => ! $x['ok']));
 
