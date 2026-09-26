@@ -67,15 +67,18 @@ tested, and verified on production before it is ticked.
       (Research first: how Lovable, Replit, Bolt, v0, Cursor show this.)
 
 **Never lose code, and link GitHub**
-- [ ] G1. Every change is a commit already (history.git, verified). Re-check
+- [x] G1. Every change is a commit already (history.git, verified). Re-check
       every path that changes files (write, edit, delete, rename, shell, eval,
       restore, import) records a version, and that no agent call can erase
       history.
-- [ ] G2. Link a GitHub repository: from then on every commit is pushed to the
+      DONE (verified 2026-09-26): every change path records a version - write, edit (through writeFileIf), batch, delete, move, copy, upload, folder deletes, unzip, clone, replace, commands, eval, restore. history.git is outside the site's container (only vol/app is mounted; checked on a live host: not findable from inside), and no route deletes or rewrites it - only deleting the whole site does.
+- [x] G2. Link a GitHub repository: from then on every commit is pushed to the
       customer's repo automatically. Simplest secure path first (research:
       deploy key vs GitHub App); the free plan says plainly that a deleted
       free site is gone unless GitHub is linked.
-- [ ] G3. Claude in Chrome can do the linking for the user (the skill says how).
+      DONE 2026-09-26 (agent 0.47.0): Settings > GitHub. A deploy key made for the site alone (ssh-keygen on the host; the private half never leaves it, 0600, outside the container); the owner adds the public half with write access; every recorded version is pushed a few seconds later (a burst is one push), and once at agent start to catch up. Fast-forward only: when GitHub has the owner's own commits, the site's history goes to codeinchrome/sync and nothing is overwritten. GitHub's host keys pinned (checked against the published fingerprint). .env never leaves (history excludes it; tested). Unlink destroys the key. The free plan's page says a deleted free site is gone unless linked.
+- [x] G3. Claude in Chrome can do the linking for the user (the skill says how).
+      DONE: cic.github.status/link/push (JSON), and the skill's steps - the agent links it, opens the add-key page in the person's browser with their OK, and they confirm their password on GitHub if asked, never the agent.
 
 **The agent can test like a person, safely, on production**
 - [ ] T1. A one-time sign-in link for the site: opens the site in the browser

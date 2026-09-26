@@ -83,6 +83,74 @@
     </form>
 </section>
 
+<section id="github" class="mt-12 max-w-2xl" aria-labelledby="github-heading">
+    <h2 id="github-heading" class="text-lg font-medium text-neutral-100">GitHub</h2>
+    <p class="mt-1 text-sm text-neutral-400">
+        Every change to your code is already a version here. Link a GitHub repository and every version is pushed there too,
+        by itself - your code in your own GitHub, whatever happens to the site.
+        @unless ($site->user->isPaid())
+            <strong class="text-neutral-200">On the free plan a deleted site is gone for good; linked, its code stays in your GitHub.</strong>
+        @endunless
+        Your <code>.env</code> is never pushed.
+    </p>
+    @if (! $githubKnown)
+        <p class="mt-4 text-sm text-amber-300">The site's host is not answering, so its GitHub link cannot be shown right now.</p>
+    @elseif (! $github)
+        <form method="POST" action="{{ route('sites.github.link', $site) }}" class="mt-6 grid gap-4 sm:grid-cols-3">@csrf
+            <label class="block text-sm sm:col-span-2">
+                <span class="text-neutral-200">Repository</span>
+                <input name="repo" required value="{{ old('repo') }}" placeholder="your-name/{{ $site->site_id }}" autocomplete="off" spellcheck="false"
+                       class="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 font-mono text-neutral-100">
+                <span class="mt-1 block text-xs text-neutral-500">As in its address, github.com/<em>owner/name</em>. Create it on GitHub first (empty is best).</span>
+            </label>
+            <label class="block text-sm">
+                <span class="text-neutral-200">Branch</span>
+                <input name="branch" value="{{ old('branch', 'main') }}" autocomplete="off" spellcheck="false"
+                       class="mt-1 w-full rounded-md border border-neutral-700 bg-neutral-900 px-3 py-2 font-mono text-neutral-100">
+            </label>
+            <div class="sm:col-span-3">
+                <button class="rounded-md bg-teal-500 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-teal-400">Link GitHub</button>
+            </div>
+        </form>
+    @else
+        <div class="mt-6 rounded-md border border-neutral-800 p-4 text-sm" data-github-state="{{ $github['state'] }}">
+            <p class="text-neutral-200">
+                <a href="https://github.com/{{ $github['repo'] }}" class="underline" rel="noopener" target="_blank">{{ $github['repo'] }}</a>,
+                branch <code>{{ $github['branch'] }}</code> -
+                @switch($github['state'])
+                    @case('linked') <span class="text-teal-300">every version is pushed here</span> @break
+                    @case('diverged') <span class="text-amber-300">GitHub has commits the site does not</span> @break
+                    @case('waiting_for_key') <span class="text-amber-300">waiting for the key</span> @break
+                    @default <span class="text-red-300">not pushing</span>
+                @endswitch
+            </p>
+            @if (! empty($github['lastPushAt']))
+                <p class="mt-1 text-neutral-400">Last pushed {{ \Illuminate\Support\Carbon::parse($github['lastPushAt'])->diffForHumans() }}@if (! empty($github['lastCommit'])), commit <code>{{ substr($github['lastCommit'], 0, 7) }}</code>@endif.</p>
+            @endif
+            @if (! empty($github['hint']) && $github['state'] !== 'waiting_for_key')
+                <p class="mt-2 text-amber-300">{{ $github['hint'] }}</p>
+            @endif
+            @if ($github['state'] === 'waiting_for_key')
+                <ol class="mt-4 list-decimal space-y-2 pl-5 text-neutral-300">
+                    <li>Open <a class="underline" href="https://github.com/{{ $github['repo'] }}/settings/keys/new" rel="noopener" target="_blank">the repository's new deploy key page</a>.</li>
+                    <li>Title: <code>codeinchrome</code>. Key: this site's key - <button type="button" class="underline" data-copy="#githubKey">copy it</button>:
+                        <code id="githubKey" class="mt-1 block break-all rounded bg-neutral-900 p-2 text-xs text-neutral-200">{{ $github['publicKey'] }}</code></li>
+                    <li>Tick <strong>Allow write access</strong>, then <strong>Add key</strong>.</li>
+                    <li>Come back and check again:</li>
+                </ol>
+            @endif
+            <div class="mt-4 flex flex-wrap gap-3">
+                <form method="POST" action="{{ route('sites.github.push', $site) }}">@csrf
+                    <button class="rounded-md bg-teal-500 px-4 py-2 text-sm font-medium text-neutral-950 hover:bg-teal-400">{{ $github['state'] === 'waiting_for_key' ? 'Check again' : 'Push now' }}</button>
+                </form>
+                <form method="POST" action="{{ route('sites.github.unlink', $site) }}">@csrf @method('DELETE')
+                    <button class="rounded-md border border-neutral-700 px-4 py-2 text-sm text-neutral-200 hover:border-neutral-500">Unlink</button>
+                </form>
+            </div>
+        </div>
+    @endif
+</section>
+
 <section class="mt-12 max-w-2xl" aria-labelledby="storage-heading">
     <h2 id="storage-heading" class="text-lg font-medium text-neutral-100">Keep uploads on Cloudflare R2 or S3</h2>
     <p class="mt-1 text-sm text-neutral-400">

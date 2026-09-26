@@ -515,6 +515,21 @@ await cic.check({ session: true });                       // crawls with that lo
 In `app:check`, sign in the same way the app does (set its session flag) instead of
 `Auth::loginUsingId`.
 
+## Keep the code in the person's own GitHub (offer it once a site works)
+
+Every change is already a version here; linked, every version is also pushed to the
+person's GitHub repository - by itself, never `.env`, never overwriting what they push.
+On the free plan a deleted site is gone for good unless it is linked.
+
+1. Ask for the repository (`owner/name`); they create it on GitHub first, empty.
+2. `const g = (await cic.github.link('owner/name')).github` - the state is
+   `waiting_for_key`; `g.publicKey` is the site's key (public, safe to show), `g.addKeyUrl`
+   where it goes.
+3. With the person's OK, open `g.addKeyUrl` in their browser: title `codeinchrome`, paste
+   the key, tick **Allow write access**, **Add key**. If GitHub asks them to confirm their
+   password, THEY type it - never you.
+4. `(await cic.github.push()).github.state` is `linked`. Done: tell them.
+
 ## Finish
 
 Tell the person what you built and give them the live URL

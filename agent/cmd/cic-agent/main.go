@@ -113,6 +113,13 @@ func main() {
 	}
 	// A new free site's first-week egress limits (a reboot clears firewall rules).
 	mgr.ApplyAllRestrictedEgress(context.Background())
+	// Linked sites' versions to GitHub, in case some were recorded while the
+	// agent was down or GitHub unreachable (in the background: it is a push).
+	go func() {
+		if n := mgr.CatchUpGitHub(context.Background()); n > 0 {
+			slog.Info("github: caught up", "sites", n)
+		}
+	}()
 	// Every site's CPU cap and weight, live (a changed -cpu-burst reaches all).
 	if n := mgr.ApplyCPUPolicy(context.Background()); n > 0 {
 		slog.Info("cpu policy applied", "sites", n, "burst", *cpuBurst)
@@ -152,6 +159,8 @@ func main() {
 	if err := srv.Shutdown(ctx); err != nil {
 		slog.Error("shutdown", "err", err)
 	}
+	// A push that is running finishes; one still waiting runs at the next start.
+	sites.StopGitHubPushes()
 }
 
 // authenticated gates every route on a constant-time bearer comparison.

@@ -990,6 +990,55 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 	})
 
+	// The site's GitHub link (sites/github.go): its state, linking one
+	// (owner/repo, branch), pushing now ("check again" once the key is on
+	// GitHub), and unlinking (the site's deploy key destroyed).
+	mux.HandleFunc("GET /v1/sites/{id}/github", func(w http.ResponseWriter, r *http.Request) {
+		l, err := mgr.GitHubStatus(r.PathValue("id"))
+		switch {
+		case errors.Is(err, sites.ErrNotLinked):
+			writeJSON(w, http.StatusOK, ok(resp{"linked": false}))
+		case err != nil:
+			writeJSON(w, http.StatusBadRequest, fail("invalid", err.Error()))
+		default:
+			writeJSON(w, http.StatusOK, ok(resp{"linked": true, "github": l}))
+		}
+	})
+	mux.HandleFunc("POST /v1/sites/{id}/github", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Repo   string `json:"repo"`
+			Branch string `json:"branch"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {repo: owner/name, branch?}"))
+			return
+		}
+		l, err := mgr.LinkGitHub(r.Context(), r.PathValue("id"), body.Repo, body.Branch)
+		if err != nil {
+			writeJSON(w, http.StatusUnprocessableEntity, fail("invalid", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"linked": true, "github": l}))
+	})
+	mux.HandleFunc("POST /v1/sites/{id}/github/push", func(w http.ResponseWriter, r *http.Request) {
+		l, err := mgr.PushGitHub(r.Context(), r.PathValue("id"))
+		switch {
+		case errors.Is(err, sites.ErrNotLinked):
+			writeJSON(w, http.StatusNotFound, fail("not_linked", "this site is not linked to GitHub"))
+		case err != nil:
+			writeJSON(w, http.StatusUnprocessableEntity, fail("push_failed", err.Error()))
+		default:
+			writeJSON(w, http.StatusOK, ok(resp{"linked": true, "github": l}))
+		}
+	})
+	mux.HandleFunc("DELETE /v1/sites/{id}/github", func(w http.ResponseWriter, r *http.Request) {
+		if err := mgr.UnlinkGitHub(r.PathValue("id")); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("invalid", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"linked": false}))
+	})
+
 	mux.HandleFunc("GET /v1/sites/{id}/db/export", func(w http.ResponseWriter, r *http.Request) {
 		// The server's 5-minute write timeout is for API calls, not a dump.
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(35 * time.Minute))

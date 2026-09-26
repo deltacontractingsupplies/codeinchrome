@@ -53,6 +53,9 @@ const SITE = {
   lspCloseUrl: root.dataset.lspClose,
   dbImportUrl: root.dataset.dbImport,
   commandUrl: root.dataset.command,
+  githubUrl: root.dataset.github,
+  githubLinkUrl: root.dataset.githubLink,
+  githubPushUrl: root.dataset.githubPush,
   commandLiveUrl: root.dataset.commandLive,
   dbSnapshotsUrl: root.dataset.dbSnapshots,
   dbSnapshotRestoreUrl: root.dataset.dbSnapshotRestore,
@@ -2726,6 +2729,9 @@ false. Nothing is paraphrased.
                                transaction. Anything else is refused with status 409 /
                                error "needs_write" and NOTHING runs, unless you pass
                                write: true. 500 rows and 10 s per read at most.
+  cic.github.status()          the site's GitHub link: { linked, github: { repo, branch, state, publicKey, addKeyUrl } }
+  cic.github.link('owner/repo') link it (branch 'main', or { branch }); every version is then pushed there
+  cic.github.push()            push now - after the key is added on GitHub ("waiting_for_key" until then)
   cic.db.export()              download the whole database as .sql.gz
   cic.db.import(blob, { confirm }) load a .sql or .sql.gz File/Blob (95 MB at most).
                                Refused with "needs_confirm" unless confirm: true. The current
@@ -3801,6 +3807,15 @@ const cicApi = {
     },
   }),
   open: (path) => openFile(path),
+  // The site's code in the person's own GitHub: every version pushed there
+  // (a deploy key made for this site; never .env). link() answers with the
+  // key and addKeyUrl - the person (or you, with their OK, in their browser)
+  // adds it there with "Allow write access"; push() checks and pushes.
+  github: Object.freeze({
+    status: () => apiAt(SITE.githubUrl, 'GET'),
+    link: (repo, options = {}) => apiAt(SITE.githubLinkUrl, 'POST', {}, { repo: String(repo ?? ''), branch: options.branch ?? 'main' }),
+    push: () => apiAt(SITE.githubPushUrl, 'POST', {}, {}),
+  }),
   // The Laravel names the editor completes, straight from the site.
   laravel: Object.freeze({
     routes: async () => ({ ok: true, names: await laravel.routeNames() }),

@@ -137,6 +137,35 @@ class AgentClient
         return $this->send('get', "/v1/sites/$id/command/live", query: ['key' => $key, 'from' => $from])['live'] ?? ['running' => false, 'output' => '', 'next' => $from];
     }
 
+    /**
+     * The site's GitHub link (agent github.go): null when there is none.
+     *
+     * @return array{repo: string, branch: string, publicKey: string, state: string, hint?: string, lastPushAt?: string, lastCommit?: string}|null
+     */
+    public function github(string $id): ?array
+    {
+        $r = $this->send('get', "/v1/sites/$id/github");
+
+        return ($r['linked'] ?? false) ? $r['github'] : null;
+    }
+
+    /** Link owner/repo (and push at once: "waiting_for_key" until the key is on GitHub). */
+    public function linkGitHub(string $id, string $repo, string $branch): array
+    {
+        return $this->send('post', "/v1/sites/$id/github", ['repo' => $repo, 'branch' => $branch])['github'];
+    }
+
+    public function pushGitHub(string $id): array
+    {
+        return $this->send('post', "/v1/sites/$id/github/push")['github'];
+    }
+
+    /** Stop pushing; the site's deploy key is destroyed. */
+    public function unlinkGitHub(string $id): void
+    {
+        $this->send('delete', "/v1/sites/$id/github");
+    }
+
     /** @param  array{since?: int, file?: string}  $mark  only what the app log gained after this */
     public function logs(string $id, string $source, int $lines = 200, array $mark = []): array
     {
