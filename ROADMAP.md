@@ -140,8 +140,11 @@ Limits found (each one a thing a terminal agent never hits):
       data-state="creating"; measured 3-17 s, median 4 over the last 7
       sites) and the button is disabled; afterwards the flash is a
       role=status and each site row carries data-site-id and data-site-status.
-- [ ] fetch() of the skill from JavaScript is refused by the browser tool as
+- [x] fetch() of the skill from JavaScript is refused by the browser tool as
       "query string data"; reading it as a page works. The skill says so.
+      DONE: cic.skill() pages it in a form the tool accepts - verified live
+      2026-09-26 (contents 809 characters; a section in pages under 1,000,
+      each naming the next call), nothing blocked.
 - [x] Every result is cut at 1,000 characters; test failures had to be
       filtered and paged with cic.show. DONE by cic.sh, measured live:
       `cic.sh("php artisan test 2>&1 | grep -E 'FAIL|Tests:|Duration'")`
@@ -250,11 +253,15 @@ frame-ancestors none; no postMessage listener; every route checks the owner.
       scan finding on a file still byte for byte as cloned is
       malware_in_clone (review). A changed, added or back-dated file is the
       customer's own and treated as any other.
-- [ ] Masking is for accidents, not a boundary: `cut -d= -f2 .env` or
-      `{ raw: true }` show values. Said in the skill.
-- [ ] php -r / tinker (cic.eval) run any PHP in the site's own container:
+- [x] Masking is for accidents, not a boundary: `cut -d= -f2 .env` or
+      `{ raw: true }` show values. Said in the skill. Accepted by design:
+      the boundaries are the host's refusals (no secret into public/, none
+      written back as a marker), which do not depend on masking.
+- [x] php -r / tinker (cic.eval) run any PHP in the site's own container:
       the confirm gates are speed bumps against mistakes, not a boundary.
       Said in the skill; the container and its limits are the boundary.
+      Accepted by design, and what eval writes is held to the same rules
+      afterwards (malware scan, secrets swept out of public/).
 
 - [ ] A skill-creator style check: the skill tested with a fresh Claude in
       Chrome session (side panel, no terminal, no prior context) building
