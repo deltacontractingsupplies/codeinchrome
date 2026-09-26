@@ -5,6 +5,7 @@ namespace App\Console\Commands;
 use App\Audit\Audit;
 use App\Fleet\AgentClient;
 use App\Models\Site;
+use App\Support\BoundedSink;
 use Illuminate\Console\Command;
 use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\Log;
@@ -34,7 +35,7 @@ class FleetRollImage extends Command
 
                 continue;
             }
-            $this->line("$host: " . count($outdated) . ' site(s) on an outdated image');
+            $this->line("$host: ".count($outdated).' site(s) on an outdated image');
 
             foreach (array_slice($outdated, 0, (int) $this->option('limit')) as $s) {
                 $site = Site::where('host', $host)->where('site_id', $s['id'])->first();
@@ -68,15 +69,12 @@ class FleetRollImage extends Command
         $deadline = now()->addSeconds((int) config('fleet.roll_check_seconds', 90));
         $last = 'no attempt';
         while (now()->lt($deadline)) {
-            try {
-                $status = Http::timeout(15)->withOptions(['allow_redirects' => false])->get($site->url())->status();
-                if ($status < 500) {
-                    return;
-                }
-                $last = "HTTP $status";
-            } catch (\Throwable $e) {
-                $last = $e->getMessage();
+            // The status is all that is used: 64 KB of the answer at most (BoundedSink).
+            $answer = BoundedSink::get(Http::timeout(15)->withOptions(['allow_redirects' => false]), $site->url(), 64 << 10);
+            if ($answer !== null && $answer['status'] < 500) {
+                return;
             }
+            $last = $answer === null ? 'no answer' : "HTTP {$answer['status']}";
             // Never below a second: a zero interval is a tight loop against a
             // customer's site (and, in a test, exhausted memory in seconds).
             sleep(max(1, (int) config('fleet.roll_check_interval', 5)));

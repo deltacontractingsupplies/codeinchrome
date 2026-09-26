@@ -171,6 +171,21 @@ class LinkScannerTest extends TestCase
     }
 
     /** A fleet of three hosts; the agents render what $dom maps from URL to DOM. */
+    public function test_a_page_padded_past_the_cap_is_checked_as_far_as_it_and_goes_to_review(): void
+    {
+        $pad = str_repeat(' ', LinkScanner::MAX_ANSWER_BYTES);
+        $this->pages([
+            // A download link before the cap is still a ban; what is hidden
+            // after the padding is never read, and that the page ran on is
+            // itself a review - padding cannot buy a kit a clean result.
+            'https://shopx.codeinchrome.com/' => '<a href="/files/setup.exe">Get it</a>'.$pad.'<a href="https://evil.example/x.exe">x</a>',
+        ]);
+        $r = app(LinkScanner::class)->scan($this->site());
+        $this->assertCount(1, $r['ban']);
+        $this->assertStringContainsString('setup.exe', $r['ban'][0]);
+        $this->assertSame(['a page larger than 4 MB, checked only as far as that (https://shopx.codeinchrome.com/)'], $r['review']);
+    }
+
     private function rendering(array $html, array $dom, array &$renderedOn): void
     {
         config(['fleet.hosts' => ['h1' => ['ip' => '10.0.0.1', 'tunnel_port' => 9441, 'capacity' => 10],
