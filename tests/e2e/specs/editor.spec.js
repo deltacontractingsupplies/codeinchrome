@@ -807,6 +807,17 @@ Route::get('/', function () {
     expect(v.text.split('\n').at(-1)).toMatch(/^\[lines 1-\d+ of \d+ - (end of file|more: cic\.view\("\/routes\/web\.php", \{ from: \d+ \}\))\]$/);
     expect(v.text.length).toBeLessThan(1000);
 
+    // Stopped by `to`: never "end of file" while lines are left (a new agent
+    // trusted that footer and stopped reading, 2026-09-26). A global RegExp
+    // finds every matching line, not every other one.
+    const short = await page.evaluate(() => Promise.all([
+      cic.view('/routes/web.php', { to: 2 }),
+      cic.view('/routes/web.php', { match: /^\S/g, to: 6 }),
+      cic.view('/routes/web.php', { match: /^\S/, to: 6 }),
+    ]));
+    expect(short[0].text.split('\n').at(-1)).toBe(`[lines 1-2 of ${short[0].lines} - stopped at line 2 as asked; ${short[0].lines - 2} more after it]`);
+    expect(short[1].text).toBe(short[2].text);
+
     const parts = await page.evaluate(() => {
       const long = Array.from({ length: 120 }, (_, i) => `<div class="row" data-n="${i}">row ${i}</div>`).join('\n');
       return [cic.show(long), cic.show(long, 2)];

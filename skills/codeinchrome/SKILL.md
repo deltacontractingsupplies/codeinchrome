@@ -102,8 +102,9 @@ says before you tell the person you are finished.
      the site is missing, stop and tell the person exactly that. Do not create a site
      unless they asked you to (the dashboard's Create form makes one);
    - the page is still loading: wait a second and check again.
-4. Once it is the site object, run `await cic.hello()` and tell the person what it says:
-   it proves you are driving the editor, and the page shows "Agent connected".
+4. Once it is the site object, run `await cic.hello()` - it returns one line of text - and
+   tell the person what it says: it proves you are driving the editor, and the page shows
+   "Agent connected". (`cic.site` is `{ id, domain, url }`.)
 
 This skill is also served by the platform, for an agent that did not load it:
 `https://app.codeinchrome.com/agent/skill.md` (read the page text), or
@@ -122,7 +123,8 @@ base64 - which is most PHP files and `.env` - and you then see only
 ```
 
 Every page ends with a line like `[lines 1-24 of 60 - more: cic.view('/routes/web.php', { from: 25 })]`
-(or `... - end of file`): run exactly that call for the rest. **If you do not see that last
+(or `... - end of file`; a view you stopped with `to` says how many lines are left): run
+exactly that call for the rest. **If you do not see that last
 line, your tool cut the answer short** - ask for fewer lines (`{ from, to }`). The result's
 `next` field holds the same number (`null` at the end of the file).
 
@@ -130,6 +132,13 @@ A page is never longer than your tool shows in full (about 900 characters): `{ t
 narrows a page, it never makes one longer. To learn a big file, ask for its outline with
 `match` first; code that only needs the text inside your script can take it whole with
 `{ chars: Infinity }` and return just what it found.
+
+Several files in ONE call - the page limit is per answer, so share it out, and use
+`match` for the parts you need:
+```js
+(await Promise.all(['/routes/web.php', '/resources/views/layouts/app.blade.php']
+  .map((p) => cic.view(p, { match: 'Route::|<nav|href|@yield', chars: 420 })))).map((v) => v.text).join('\n')
+```
 
 Any other long text - a page's HTML from `cic.request`, a command's output - read it with
 `cic.show(text, part)`: the same shaping and the same last line. Printing raw HTML or anything
