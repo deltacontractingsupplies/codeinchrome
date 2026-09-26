@@ -104,6 +104,11 @@ Every page ends with a line like `[lines 1-24 of 60 - more: cic.view('/routes/we
 line, your tool cut the answer short** - ask for fewer lines (`{ from, to }`). The result's
 `next` field holds the same number (`null` at the end of the file).
 
+A page is never longer than your tool shows in full (about 900 characters): `{ to: 400 }`
+narrows a page, it never makes one longer. To learn a big file, ask for its outline with
+`match` first; code that only needs the text inside your script can take it whole with
+`{ chars: Infinity }` and return just what it found.
+
 Any other long text - a page's HTML from `cic.request`, a command's output - read it with
 `cic.show(text, part)`: the same shaping and the same last line. Printing raw HTML or anything
 with `=` in it gets `[BLOCKED]`:
