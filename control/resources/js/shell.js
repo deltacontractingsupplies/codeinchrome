@@ -12,64 +12,137 @@
  * against an in-memory tree (tests/js/shell.test.mjs) with `node --test`.
  */
 
+import { runAwk, AwkError } from './awk.js';
+
 const GLOB = /[*?[]/;
 
 /* ───────────────────────── parsing ───────────────────────── */
 
 class ShellSyntaxError extends Error {}
 
+// src[open] is "(": the index of the ")" that closes it, past quotes and
+// nested parentheses.
+function matchClose(src, open) {
+  let depth = 0;
+  for (let j = open; j < src.length; j++) {
+    const c = src[j];
+    if (c === '\\') { j++; continue; }
+    if (c === "'") { const e = src.indexOf("'", j + 1); if (e < 0) break; j = e; continue; }
+    if (c === '"') {
+      for (j++; j < src.length && src[j] !== '"'; j++) if (src[j] === '\\') j++;
+      continue;
+    }
+    if (c === '(') depth++;
+    if (c === ')' && --depth === 0) return j;
+  }
+  throw new ShellSyntaxError('unexpected end of input: a "(" is not closed');
+}
+
 /**
  * Words and operators, the way sh splits them: quotes, backslashes,
- * comments, fd redirections and here-documents. No variables and no
- * command substitution: `$` is an ordinary character, and code in quotes
- * (PHP, SQL, JavaScript) arrives exactly as written.
+ * comments, fd redirections and here-documents.
+ *
+ * `$NAME`, `${NAME}`, `${NAME:-default}`, `$?`, `$(command)` and
+ * `$((arithmetic))` are expansions, as in sh - outside single quotes, and not
+ * in a here-document's body (so PHP written with `cat > f <<EOF` arrives as
+ * written). A word keeps its raw text in `v`; `parts` says which pieces were
+ * quoted and which expand. A `$NAME` the shell has no value for stays as
+ * written: PHP, SQL and JavaScript in double quotes are not emptied out.
  */
 export function tokenize(src) {
   const tokens = [];
   const pendingHeredocs = [];
   let i = 0;
-  let word = null; // { v, glob, quoted }
+  let word = null; // { v, glob, quoted, parts, exp }
   const flush = () => {
     if (word !== null) tokens.push({ t: 'word', ...word });
     word = null;
   };
+  const start = () => (word ??= { v: '', glob: false, quoted: false, parts: [], exp: false });
+  // q: '' unquoted, 's' single-quoted or escaped, 'd' double-quoted.
+  const lit = (text, q) => {
+    start();
+    word.v += text;
+    const last = word.parts.at(-1);
+    if (last && last.s !== undefined && last.q === q) last.s += text;
+    else word.parts.push({ s: text, q });
+  };
   const add = (ch, glob = false) => {
-    word ??= { v: '', glob: false, quoted: false };
-    word.v += ch;
+    lit(ch, '');
     if (glob) word.glob = true;
   };
-  const op = (v) => {
+  const op = (v, nl = false) => {
     flush();
-    tokens.push({ t: 'op', v });
+    tokens.push(nl ? { t: 'op', v, nl: true } : { t: 'op', v });
+  };
+  // src[i] is "$": an expansion, or a plain "$".
+  const dollar = (q) => {
+    const n = src[i + 1] ?? '';
+    let part = null;
+    let end = i + 1;
+    if (n === '(' && src[i + 2] === '(') {
+      const close = matchClose(src, i + 1);
+      if (src[close - 1] !== ')') throw new ShellSyntaxError('$(( needs its closing "))"');
+      part = { e: 'arith', v: src.slice(i + 3, close - 1) };
+      end = close + 1;
+    } else if (n === '(') {
+      const close = matchClose(src, i + 1);
+      part = { e: 'sub', v: src.slice(i + 2, close) };
+      end = close + 1;
+    } else if (n === '{') {
+      const close = src.indexOf('}', i + 2);
+      if (close < 0) throw new ShellSyntaxError('${ needs its closing "}"');
+      const m = /^([A-Za-z_]\w*|\?)(?::?-(.*))?$/s.exec(src.slice(i + 2, close));
+      if (m) { part = { e: 'var', v: m[1], ...(m[2] !== undefined ? { def: m[2] } : {}) }; end = close + 1; }
+    } else if (/[A-Za-z_]/.test(n)) {
+      let k = i + 1;
+      while (k < src.length && /\w/.test(src[k])) k++;
+      part = { e: 'var', v: src.slice(i + 1, k) };
+      end = k;
+    } else if (n === '?') {
+      part = { e: 'var', v: '?' };
+      end = i + 2;
+    }
+    if (!part) { lit('$', q); i++; return; }
+    start();
+    part.q = q;
+    part.raw = src.slice(i, end);
+    word.v += part.raw;
+    word.parts.push(part);
+    word.exp = true;
+    i = end;
   };
 
   while (i < src.length) {
     const c = src[i];
     if (c === '\\') {
       if (src[i + 1] === '\n') { i += 2; continue; }
-      if (i + 1 < src.length) add(src[i + 1]);
+      if (i + 1 < src.length) lit(src[i + 1], 's');
       i += 2;
       continue;
     }
     if (c === "'") {
       const end = src.indexOf("'", i + 1);
       if (end < 0) throw new ShellSyntaxError('unexpected end of input: a single quote is not closed');
-      word ??= { v: '', glob: false, quoted: true };
+      start();
       word.quoted = true;
-      word.v += src.slice(i + 1, end);
+      lit(src.slice(i + 1, end), 's');
       i = end + 1;
       continue;
     }
     if (c === '"') {
-      word ??= { v: '', glob: false, quoted: true };
+      start();
       word.quoted = true;
+      lit('', 'd');
       i++;
       while (i < src.length && src[i] !== '"') {
         if (src[i] === '\\' && '"\\$`\n'.includes(src[i + 1])) {
-          if (src[i + 1] !== '\n') word.v += src[i + 1];
+          if (src[i + 1] !== '\n') lit(src[i + 1], 'd');
           i += 2;
+        } else if (src[i] === '$') {
+          dollar('d');
         } else {
-          word.v += src[i++];
+          lit(src[i++], 'd');
         }
       }
       if (i >= src.length) throw new ShellSyntaxError('unexpected end of input: a double quote is not closed');
@@ -81,7 +154,7 @@ export function tokenize(src) {
       continue;
     }
     if (c === '\n') {
-      op(';');
+      op(';', true);
       i++;
       // Here-documents start on the line after the command that asked for them.
       for (const h of pendingHeredocs.splice(0)) {
@@ -150,6 +223,7 @@ export function tokenize(src) {
       i += two ? 2 : 1;
       continue;
     }
+    if (c === '$') { dollar(''); continue; }
     add(c, c === '*' || c === '?' || c === '[');
     i++;
   }
@@ -159,59 +233,436 @@ export function tokenize(src) {
 }
 
 /**
- * Tokens -> [{ pipeline: [command], then: '&&' | '||' | ';' }], each command
- * { words: [{ v, glob }], redirects: [{ op, target }], stdin: string | null }.
+ * Tokens -> [{ pipeline: [element], then: '&&' | '||' | ';' }]. An element is
+ * a command { words, redirects, stdin, heredoc? } - each word { v, glob,
+ * parts, exp } - or a compound { compound: 'for' | 'while' | 'until' | 'if',
+ * ..., redirects }: for NAME in WORDS; do LIST; done, while/until LIST; do
+ * LIST; done, if LIST; then LIST; [elif LIST; then LIST;] [else LIST;] fi.
  */
+const REDIRECTS = ['>', '>>', '<', '2>', '2>>', '1>', '1>>', '&>', '&>>'];
+const KEYWORDS = ['for', 'while', 'until', 'if', 'then', 'elif', 'else', 'fi', 'do', 'done', 'in'];
+
 export function parse(src) {
   const tokens = tokenize(src);
-  const list = [];
-  let pipeline = [];
-  let cmd = null;
-  const newCmd = () => ({ words: [], redirects: [], stdin: null });
-  const endCmd = () => {
-    if (cmd && (cmd.words.length || cmd.redirects.length || cmd.stdin !== null)) pipeline.push(cmd);
-    else if (cmd) throw new ShellSyntaxError('syntax error: a command is missing');
-    cmd = null;
-  };
-  for (let k = 0; k < tokens.length; k++) {
-    const tok = tokens[k];
-    if (tok.t === 'word') {
-      cmd ??= newCmd();
-      cmd.words.push({ v: tok.v, glob: tok.glob });
-    } else if (tok.t === 'heredoc') {
-      cmd ??= newCmd();
-      cmd.heredoc = tok;
-    } else if (['>', '>>', '<', '2>', '2>>', '1>', '1>>', '&>', '&>>'].includes(tok.v)) {
-      cmd ??= newCmd();
-      const target = tokens[k + 1];
-      if (!target || target.t !== 'word') throw new ShellSyntaxError(`syntax error near "${tok.v}": it needs a file`);
-      cmd.redirects.push({ op: tok.v.replace(/^1/, ''), target: target.v });
-      k++;
-    } else if (tok.v === '2>&1' || tok.v === '1>&2') {
-      cmd ??= newCmd();
-      cmd.redirects.push({ op: tok.v });
-    } else if (tok.v === '|') {
-      if (!cmd) throw new ShellSyntaxError('syntax error near "|"');
-      endCmd();
-    } else {
-      // && || ;
-      if (!cmd && !pipeline.length) {
-        if (tok.v === ';') continue;
-        throw new ShellSyntaxError(`syntax error near "${tok.v}"`);
+  let k = 0;
+  const isOp = (tok, ...v) => tok && tok.t === 'op' && v.includes(tok.v);
+  const isKw = (tok, ...names) => tok && tok.t === 'word' && !tok.quoted && !tok.exp && names.includes(tok.v);
+  // A line may go on after |, && and || on the next line.
+  const skipNewlines = () => { while (tokens[k] && tokens[k].t === 'op' && tokens[k].nl) k++; };
+
+  function redirectsInto(node) {
+    for (;;) {
+      const tok = tokens[k];
+      if (tok && tok.t === 'heredoc') { node.heredoc = tok; k++; continue; }
+      if (tok && tok.t === 'op' && REDIRECTS.includes(tok.v)) {
+        const target = tokens[k + 1];
+        if (!target || target.t !== 'word') throw new ShellSyntaxError(`syntax error near "${tok.v}": it needs a file`);
+        node.redirects.push({ op: tok.v.replace(/^1/, ''), target: target.v, ...(target.exp ? { word: target } : {}) });
+        k += 2;
+        continue;
       }
-      if (!cmd && pipeline.length) throw new ShellSyntaxError(`syntax error near "${tok.v}"`);
-      endCmd();
-      list.push({ pipeline, then: tok.v });
-      pipeline = [];
+      if (isOp(tok, '2>&1', '1>&2')) { node.redirects.push({ op: tok.v }); k++; continue; }
+      return;
     }
   }
-  if (cmd) endCmd();
-  else if (pipeline.length) throw new ShellSyntaxError('syntax error: the command after "|" is missing');
-  if (pipeline.length) list.push({ pipeline, then: ';' });
+
+  function expectKw(name) {
+    while (isOp(tokens[k], ';')) k++;
+    if (!isKw(tokens[k], name)) throw new ShellSyntaxError(`syntax error: "${name}" is missing`);
+    k++;
+  }
+
+  function parseList(stops) {
+    const list = [];
+    for (;;) {
+      while (isOp(tokens[k], ';')) k++;
+      const tok = tokens[k];
+      if (!tok) {
+        if (stops.length) throw new ShellSyntaxError(`syntax error: "${stops.at(-1)}" is missing`);
+        return list;
+      }
+      if (stops.length && isKw(tok, ...stops)) return list;
+      if (tok.t === 'op' && tok.v !== ';') throw new ShellSyntaxError(`syntax error near "${tok.v}"`);
+      const pipeline = parsePipeline();
+      const nx = tokens[k];
+      if (isOp(nx, '&&', '||')) { k++; skipNewlines(); list.push({ pipeline, then: nx.v }); } else if (isOp(nx, ';')) { k++; list.push({ pipeline, then: ';' }); } else list.push({ pipeline, then: ';' });
+    }
+  }
+
+  function parsePipeline() {
+    const pipeline = [];
+    for (;;) {
+      pipeline.push(parseElement());
+      if (!isOp(tokens[k], '|')) return pipeline;
+      k++;
+      skipNewlines();
+      const nx = tokens[k];
+      if (!nx || (nx.t === 'op' && !REDIRECTS.includes(nx.v))) throw new ShellSyntaxError('syntax error: the command after "|" is missing');
+    }
+  }
+
+  function parseElement() {
+    const tok = tokens[k];
+    if (isKw(tok, 'then', 'elif', 'else', 'fi', 'do', 'done')) throw new ShellSyntaxError(`syntax error near unexpected "${tok.v}"`);
+    if (isKw(tok, 'for')) {
+      k++;
+      const name = tokens[k];
+      if (!name || name.t !== 'word' || !/^[A-Za-z_]\w*$/.test(name.v)) throw new ShellSyntaxError('for: a variable name must follow "for"');
+      k++;
+      let words = [];
+      if (isKw(tokens[k], 'in')) {
+        k++;
+        while (tokens[k] && tokens[k].t === 'word') words.push(tokens[k++]);
+      }
+      expectKw('do');
+      const body = parseList(['done']);
+      k++;
+      const node = { compound: 'for', name: name.v, words, body, redirects: [] };
+      redirectsInto(node);
+      return node;
+    }
+    if (isKw(tok, 'while', 'until')) {
+      k++;
+      const cond = parseList(['do']);
+      k++;
+      const body = parseList(['done']);
+      k++;
+      const node = { compound: tok.v, cond, body, redirects: [] };
+      redirectsInto(node);
+      return node;
+    }
+    if (isKw(tok, 'if')) {
+      k++;
+      const branches = [];
+      let otherwise = null;
+      for (;;) {
+        const cond = parseList(['then']);
+        k++;
+        const body = parseList(['elif', 'else', 'fi']);
+        branches.push({ cond, body });
+        const stop = tokens[k].v;
+        k++;
+        if (stop === 'elif') continue;
+        if (stop === 'else') { otherwise = parseList(['fi']); k++; }
+        break;
+      }
+      const node = { compound: 'if', branches, otherwise, redirects: [] };
+      redirectsInto(node);
+      return node;
+    }
+    // A simple command.
+    const cmd = { words: [], redirects: [], stdin: null };
+    for (;;) {
+      const t = tokens[k];
+      if (!t) break;
+      if (t.t === 'word') { cmd.words.push({ v: t.v, glob: t.glob, parts: t.parts, exp: t.exp, quoted: t.quoted }); k++; continue; }
+      const before = k;
+      redirectsInto(cmd);
+      if (k === before) break;
+    }
+    if (!cmd.words.length && !cmd.redirects.length && !cmd.heredoc) {
+      throw new ShellSyntaxError(tokens[k] ? `syntax error near "${tokens[k].v}"` : 'syntax error: a command is missing');
+    }
+    return cmd;
+  }
+
+  const list = parseList([]);
   return list;
 }
 
 /* ───────────────────────── helpers ───────────────────────── */
+
+/**
+ * A unified diff -> [{ path, created, deleted, noNewline, hunks: [{ oldStart,
+ * lines: [' kept', '-gone', '+new'] }] }]. `strip` drops leading path
+ * components (patch -pN); `reverse` swaps what was removed and added.
+ */
+export function parsePatch(text, { strip = 0, reverse = false } = {}) {
+  const lines = text.replace(/\r\n/g, '\n').split('\n');
+  const files = [];
+  let cur = null;
+  let hunk = null;
+  const clean = (p) => {
+    const path = p.replace(/\t.*$/, '').trim().replace(/^"(.*)"$/, '$1');
+    if (path === '/dev/null') return null;
+    return path.split('/').slice(strip).join('/') || path;
+  };
+  for (let k = 0; k < lines.length; k++) {
+    const line = lines[k];
+    if (line.startsWith('--- ') && lines[k + 1]?.startsWith('+++ ')) {
+      const from = clean(line.slice(4));
+      const to = clean(lines[k + 1].slice(4));
+      cur = { path: (reverse ? from ?? to : to ?? from), created: reverse ? to === null : from === null, deleted: reverse ? from === null : to === null, hunks: [], noNewline: false };
+      if (!cur.path) throw new Error('a diff names no file');
+      files.push(cur);
+      hunk = null;
+      k++;
+      continue;
+    }
+    const h = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/.exec(line);
+    if (h && cur) {
+      // The header's counts say where the hunk ends, as patch reads it.
+      const [oldN, newN] = [Number(h[2] ?? 1), Number(h[4] ?? 1)];
+      hunk = { oldStart: Number(reverse ? h[3] : h[1]), lines: [], left: reverse ? [newN, oldN] : [oldN, newN] };
+      cur.hunks.push(hunk);
+      continue;
+    }
+    if (line.startsWith('\\')) { if (cur) cur.noNewline = true; continue; }
+    if (!hunk) continue;
+    // An empty line is a context line whose leading space an editor trimmed.
+    const c = line === '' ? ' ' : line[0];
+    if (c !== ' ' && c !== '-' && c !== '+') { hunk = null; continue; }
+    const kind = reverse && c !== ' ' ? (c === '-' ? '+' : '-') : c;
+    hunk.lines.push(kind + line.slice(1));
+    if (kind !== '+') hunk.left[0]--;
+    if (kind !== '-') hunk.left[1]--;
+    if (hunk.left[0] <= 0 && hunk.left[1] <= 0) hunk = null;
+  }
+  return files;
+}
+
+/**
+ * Hunks applied to a file's text: each where its line numbers say, or - if
+ * the file has moved on - where its old lines are found nearest to that.
+ * -> { text, failed: [hunk numbers], offsets: [[hunk, lines]] }.
+ */
+export function applyHunks(text, hunks) {
+  const endsWithNl = text.endsWith('\n');
+  const lines = text === '' ? [] : text.split('\n');
+  if (endsWithNl) lines.pop();
+  const failed = [];
+  const offsets = [];
+  let shift = 0;
+  hunks.forEach((h, n) => {
+    const old = h.lines.filter((l) => l[0] !== '+').map((l) => l.slice(1));
+    const neu = h.lines.filter((l) => l[0] !== '-').map((l) => l.slice(1));
+    let pos;
+    let want;
+    if (!old.length) {
+      // Only additions: "@@ -5,0 +6,2 @@" goes after line 5.
+      want = Math.min(h.oldStart + shift, lines.length);
+      pos = want;
+    } else {
+      want = Math.max(0, h.oldStart - 1 + shift);
+      const at = (p) => p >= 0 && p + old.length <= lines.length && old.every((l, j) => lines[p + j] === l);
+      pos = -1;
+      for (let d = 0; d <= lines.length; d++) {
+        if (at(want - d)) { pos = want - d; break; }
+        if (at(want + d)) { pos = want + d; break; }
+      }
+      if (pos < 0) { failed.push(n + 1); return; }
+    }
+    if (pos !== want) offsets.push([n + 1, pos - want]);
+    lines.splice(pos, old.length, ...neu);
+    shift += neu.length - old.length + (pos - want);
+  });
+  return { text: lines.length ? lines.join('\n') + (endsWithNl || !text ? '\n' : '') : '', failed, offsets };
+}
+
+/**
+ * A Perl one-liner's statements -> (record) => { text, printed }.
+ * s/re/repl/flags (any delimiter, s{..}{..}), y/// and tr///, and
+ * print [$_] [if|unless /re/]. Replacements take $1, \1, $&, \n and \t.
+ */
+function perlProgram(src) {
+  const stmts = [];
+  let i = 0;
+  const skip = () => { while (i < src.length && /[\s;]/.test(src[i])) i++; };
+  const CLOSE = { '{': '}', '(': ')', '[': ']', '<': '>' };
+  const delimited = (open) => {
+    const close = CLOSE[open] ?? open;
+    let depth = 1;
+    let out = '';
+    for (i++; i < src.length; i++) {
+      const c = src[i];
+      if (c === '\\' && i + 1 < src.length) { out += c + src[i + 1]; i++; continue; }
+      if (close !== open && c === open) depth++;
+      if (c === close && --depth === 0) { i++; return out; }
+      out += c;
+    }
+    throw new Error('Substitution pattern not terminated');
+  };
+  const regexOf = (pat, flags) => {
+    let f = '';
+    for (const c of flags) if ('gimsu'.includes(c) && !f.includes(c)) f += c;
+    // Perl-only escapes JavaScript lacks.
+    return new RegExp(pat.replace(/\\A/g, '^').replace(/\\[zZ]/g, '$'), f);
+  };
+  const replacement = (r) => r
+    .replace(/\$\{(\d+)\}/g, '$$$1')
+    .replace(/\\(\d)/g, '$$$1')
+    .replace(/\\n/g, '\n').replace(/\\t/g, '\t')
+    .replace(/\\([^$\d])/g, '$1');
+  const condition = () => {
+    skip();
+    const m = /^(if|unless)\b/.exec(src.slice(i));
+    if (!m) return null;
+    i += m[1].length;
+    skip();
+    if (src[i] === 'm') i++;
+    if (src[i] !== '/' && !(src[i - 1] === 'm')) throw new Error('only "if /regex/" and "unless /regex/" are supported');
+    const pat = delimited(src[i]);
+    const fl = /^[a-z]*/.exec(src.slice(i))[0];
+    i += fl.length;
+    const re = regexOf(pat, fl);
+    return m[1] === 'if' ? (t) => re.test(t) : (t) => !re.test(t);
+  };
+  for (skip(); i < src.length; skip()) {
+    const rest = src.slice(i);
+    if (/^s\W/.test(rest)) {
+      i++;
+      const d = src[i];
+      const pat = delimited(d);
+      if (CLOSE[d]) { skip(); }
+      const repl = CLOSE[d] ? delimited(src[i]) : (i--, delimited(d));
+      const fl = /^[a-z]*/.exec(src.slice(i))[0];
+      i += fl.length;
+      if (fl.includes('e')) throw new Error('s///e runs code: not supported here');
+      const re = regexOf(pat, fl);
+      const to = replacement(repl);
+      const when = condition();
+      stmts.push((st) => { if (!when || when(st.text)) st.text = st.text.replace(re, to); });
+    } else if (/^(y|tr)\W/.test(rest)) {
+      i += rest.startsWith('tr') ? 2 : 1;
+      const d = src[i];
+      const from = expandTr(delimited(d));
+      i--;
+      const to = expandTr(delimited(d));
+      stmts.push((st) => { st.text = [...st.text].map((c) => { const k = from.indexOf(c); return k < 0 ? c : (to[Math.min(k, to.length - 1)] ?? c); }).join(''); });
+    } else if (/^print\b/.test(rest)) {
+      i += 5;
+      skip();
+      if (src.startsWith('$_', i)) i += 2;
+      const when = condition();
+      stmts.push((st) => { if (!when || when(st.text)) st.printed += st.text; });
+    } else if (/^(next|chomp)\b/.test(rest)) {
+      throw new Error(`"${/^\w+/.exec(rest)[0]}" is not supported here: use s///, tr/// and print [if /re/]`);
+    } else {
+      throw new Error(`cannot run "${rest.slice(0, 30)}" here: s///, tr/// and print [if /re/] are supported`);
+    }
+  }
+  return (record) => {
+    const st = { text: record, printed: '' };
+    for (const s of stmts) s(st);
+    return st;
+  };
+}
+
+function expandTr(set) {
+  return set.replace(/(.)-(.)/g, (m, a, b) => {
+    let out = '';
+    for (let c = a.charCodeAt(0); c <= b.charCodeAt(0); c++) out += String.fromCharCode(c);
+    return out;
+  });
+}
+
+/**
+ * {a,b} and {1..3}, as sh expands them - only where the braces are
+ * unquoted: "{a,b}" and '{a,b}' stay as written, and so do {} and {x}.
+ */
+export function braceExpand(s) {
+  for (let i = 0; i < s.length; i++) {
+    if (s[i] !== '{') continue;
+    let depth = 0;
+    const commas = [];
+    let j = i;
+    for (; j < s.length; j++) {
+      if (s[j] === '{') depth++;
+      else if (s[j] === '}') { if (--depth === 0) break; } else if (s[j] === ',' && depth === 1) commas.push(j);
+    }
+    if (j >= s.length) return [s];
+    const body = s.slice(i + 1, j);
+    let alts = null;
+    if (commas.length) {
+      alts = [];
+      let from = i + 1;
+      for (const c of [...commas, j]) { alts.push(s.slice(from, c)); from = c + 1; }
+    } else {
+      const n = /^(-?\d+)\.\.(-?\d+)(?:\.\.(-?\d+))?$/.exec(body);
+      const c = /^([a-zA-Z])\.\.([a-zA-Z])$/.exec(body);
+      if (n) {
+        const [a, b] = [Number(n[1]), Number(n[2])];
+        const step = Math.abs(Number(n[3] ?? 1)) || 1;
+        const width = /^-?0\d/.test(n[1]) || /^-?0\d/.test(n[2]) ? Math.max(n[1].length, n[2].length) : 0;
+        if (Math.abs(b - a) / step > 10000) throw new Error(`{${body}}: at most 10000 items`);
+        alts = [];
+        for (let x = a; a <= b ? x <= b : x >= b; x += a <= b ? step : -step) alts.push(width ? String(x).padStart(width, '0') : String(x));
+      } else if (c) {
+        const [a, b] = [c[1].charCodeAt(0), c[2].charCodeAt(0)];
+        alts = [];
+        for (let x = a; a <= b ? x <= b : x >= b; x += a <= b ? 1 : -1) alts.push(String.fromCharCode(x));
+      }
+    }
+    if (!alts) continue;
+    return alts.flatMap((alt) => braceExpand(s.slice(0, i) + alt + s.slice(j + 1)));
+  }
+  return [s];
+}
+
+const BRACE = /\{[^{}]*(,|\.\.)[^{}]*\}/;
+
+// A parsed word -> the words its unquoted braces make.
+function braceWords(w) {
+  if (!w.parts) return [w];
+  const at = w.parts.findIndex((p) => p.s !== undefined && p.q === '' && BRACE.test(p.s));
+  if (at < 0) return [w];
+  return braceExpand(w.parts[at].s).flatMap((alt) => {
+    const parts = [...w.parts.slice(0, at), { s: alt, q: '' }, ...w.parts.slice(at + 1)];
+    return braceWords({ ...w, parts, v: parts.map((p) => p.s ?? p.raw).join(''), glob: w.glob || GLOB.test(alt) });
+  });
+}
+
+/**
+ * $(( ... )): integers, + - * / % **, comparisons, && || !, parentheses and
+ * variables by name ($i or i; unset = 0). Parsed here - never eval'd.
+ */
+export function arith(expr, lookup) {
+  const src = String(expr).replace(/\$\{?([A-Za-z_]\w*)\}?/g, '$1');
+  const toks = src.match(/\s*(\d+|[A-Za-z_]\w*|\*\*|<=|>=|==|!=|&&|\|\||[-+*/%()<>!])/g)?.map((t) => t.trim()) ?? [];
+  if (toks.join('') !== src.replace(/\s+/g, '')) throw new Error(`$((${expr})): not an arithmetic expression`);
+  let k = 0;
+  const peek = () => toks[k];
+  const next = () => toks[k++];
+  const num = (v) => Math.trunc(Number(v) || 0);
+  const primary = () => {
+    const t = next();
+    if (t === '(') { const v = or(); if (next() !== ')') throw new Error(`$((${expr})): a ")" is missing`); return v; }
+    if (t === '-') return -primary();
+    if (t === '+') return primary();
+    if (t === '!') return primary() ? 0 : 1;
+    if (/^\d+$/.test(t ?? '')) return Number(t);
+    if (/^[A-Za-z_]\w*$/.test(t ?? '')) return num(lookup(t));
+    throw new Error(`$((${expr})): unexpected "${t ?? 'end'}"`);
+  };
+  const pow = () => { const b = primary(); return peek() === '**' ? (next(), b ** pow()) : b; };
+  const mul = () => {
+    let v = pow();
+    while (['*', '/', '%'].includes(peek())) {
+      const o = next();
+      const r = pow();
+      if (o !== '*' && r === 0) throw new Error(`$((${expr})): division by zero`);
+      v = o === '*' ? v * r : o === '/' ? Math.trunc(v / r) : v % r;
+    }
+    return v;
+  };
+  const add = () => { let v = mul(); while (['+', '-'].includes(peek())) v = next() === '+' ? v + mul() : v - mul(); return v; };
+  const rel = () => {
+    let v = add();
+    while (['<', '>', '<=', '>='].includes(peek())) {
+      const o = next();
+      const r = add();
+      v = Number(o === '<' ? v < r : o === '>' ? v > r : o === '<=' ? v <= r : v >= r);
+    }
+    return v;
+  };
+  const eq = () => { let v = rel(); while (['==', '!='].includes(peek())) v = next() === '==' ? Number(v === rel()) : Number(v !== rel()); return v; };
+  const and = () => { let v = eq(); while (peek() === '&&') { next(); const r = eq(); v = Number(Boolean(v) && Boolean(r)); } return v; };
+  function or() { let v = and(); while (peek() === '||') { next(); const r = and(); v = Number(Boolean(v) || Boolean(r)); } return v; }
+  if (!toks.length) return 0;
+  const v = or();
+  if (k < toks.length) throw new Error(`$((${expr})): unexpected "${toks[k]}"`);
+  return v;
+}
 
 /** Absolute site path of p, from cwd; never above the site's root. */
 export function resolvePath(cwd, p) {
@@ -620,7 +1071,9 @@ export function runSed(cmds, text, { quiet = false } = {}) {
  *   request(path, opts) query(sql, write) siteUrl
  */
 export function createShell(rawIo, { cwd = '/' } = {}) {
-  const state = { cwd };
+  // vars: the shell's variables (NAME=value, for, read), kept between calls
+  // like cwd; last: $?.
+  const state = { cwd, vars: new Map(), last: 0 };
   // Listings are remembered within one command line (cp and mv stat the
   // same folder more than once) and forgotten the moment anything writes.
   const listed = new Map();
@@ -854,7 +1307,48 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       const hasUpper = args.some((a) => !a.startsWith('-') && /[A-Z]/.test(a));
       return grep(['-rnE', ...(hasUpper ? [] : ['-i']), ...args.map((a) => (a === '-g' ? '--include' : a))], stdin);
     },
-    async find(args) { return find(args); },
+    // -exec CMD {} \; runs CMD once per path, -exec CMD {} + once with all of
+    // them; -delete is rm of each. The list comes first, then the runs, as
+    // xargs does them (bounded the same way).
+    async find(args, stdin, ctx) {
+      const at = args.findIndex((a) => a === '-exec' || a === '-execdir' || a === '-delete');
+      if (at < 0) return find(args);
+      let template;
+      let batch;
+      let rest;
+      if (args[at] === '-delete') {
+        template = ['rm', '-f', '{}'];
+        batch = true;
+        rest = [...args.slice(0, at), ...args.slice(at + 1)];
+      } else {
+        const end = args.findIndex((a, k) => k > at && (a === ';' || a === '+'));
+        if (end < 0) return fail(1, "find: missing argument to `-exec'");
+        template = args.slice(at + 1, end);
+        batch = args[end] === '+';
+        rest = [...args.slice(0, at), ...args.slice(end + 1)];
+      }
+      if (!template.length) return fail(1, "find: -exec needs a command");
+      const listed = await find(rest);
+      if (listed.code) return listed;
+      const paths = splitLines(listed.out);
+      if (!paths.length) return ok();
+      const runs = batch
+        ? [template.flatMap((a) => (a === '{}' ? paths : [a]))]
+        : paths.map((p) => template.map((a) => a.split('{}').join(p)));
+      if (runs.length > 100) return fail(1, `find: -exec would run ${runs.length} times; at most 100 - end it with {} + to run once, or narrow the search`);
+      let out = '';
+      let err = '';
+      let code = 0;
+      const needsConfirm = [];
+      for (const argv of runs) {
+        const r = await runArgv(argv, null, ctx);
+        out += r.out;
+        err += r.err;
+        if (r.code) code = 1;
+        if (r.needsConfirm) needsConfirm.push(...r.needsConfirm);
+      }
+      return { code, out, err, ...(needsConfirm.length ? { needsConfirm } : {}) };
+    },
     async tree(args) {
       const { flags, operands } = getopt(args, { bool: 'adf', value: 'L' });
       const t = operands[0] ?? '.';
@@ -1009,7 +1503,10 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       // save is a version already), taken out before getopt sees them.
       let inPlace = false;
       const rest = [];
-      for (const a of args) {
+      for (let k = 0; k < args.length; k++) {
+        const a = args[k];
+        // BSD's form, sed -i '' ...: the empty suffix is its own word.
+        if (a === '-i' && args[k + 1] === '') { inPlace = true; k++; continue; }
         if (/^-i/.test(a) || a === '--in-place' || a.startsWith('--in-place=')) inPlace = true;
         else if (/^-[nErsuz]+i/.test(a)) { inPlace = true; rest.push(a.slice(0, a.indexOf('i'))); } else rest.push(a);
       }
@@ -1050,6 +1547,116 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
         else err += lintNote(w);
       }
       return { code: err && !/syntax error/.test(err) ? 4 : 0, out: '', err };
+    },
+    // perl -pi -e 's/a/b/g' FILE..., perl -pe/-ne ..., -0/-0777 for whole files:
+    // the one-liners an agent edits with. s///, y/// (tr), print [if|unless
+    // /re/], with JavaScript's regular expressions (Perl's, for these).
+    async perl(args, stdin) {
+      const scripts = [];
+      const files = [];
+      let inPlace = false;
+      let print = false;
+      let loop = false;
+      let slurp = false;
+      for (let k = 0; k < args.length; k++) {
+        const a = args[k];
+        if (a === '--') { files.push(...args.slice(k + 1)); break; }
+        if (/^-[a-zA-Z0-9]/.test(a) && files.length === 0) {
+          const flags = a.slice(1);
+          for (let j = 0; j < flags.length; j++) {
+            const f = flags[j];
+            if (f === 'p') { print = true; loop = true; } else if (f === 'n') loop = true;
+            else if (f === 'i') { inPlace = true; break; } // -i or -i.bak: no backup, every save is a version
+            else if (f === '0') { slurp = true; while (/\d/.test(flags[j + 1] ?? '')) j++; } else if (f === 'e' || f === 'E') {
+              const rest = flags.slice(j + 1);
+              scripts.push(rest || args[++k]);
+              break;
+            } else if (f === 'l' || f === 'w' || f === 's' || f === 'C') { /* no effect here */ } else return fail(2, `perl: -${f} is not supported here (-p -n -i -e -0 are)`);
+          }
+          continue;
+        }
+        files.push(a);
+      }
+      if (!scripts.length) return fail(2, "perl: only one-liners run here: perl -pi -e 's/old/new/g' FILE");
+      if (!loop) return fail(2, "perl: only -p and -n one-liners run here (perl -pi -e 's/a/b/g' FILE, perl -ne 'print if /re/')");
+      let program;
+      try {
+        program = perlProgram(scripts.join(';'));
+      } catch (e) {
+        return fail(255, `perl: ${e.message}`);
+      }
+      const apply = (text) => {
+        const records = slurp ? [text] : text.match(/[^\n]*\n|[^\n]+$/g) ?? [];
+        let out = '';
+        for (const rec of records) {
+          // Perl's $ matches before a line's newline; JavaScript's only at the
+          // very end - so a line is run without it, and it is put back.
+          const nl = !slurp && rec.endsWith('\n') ? '\n' : '';
+          const r = program(nl ? rec.slice(0, -1) : rec);
+          out += r.printed.replace(/([^\n])$/, nl ? `$1${nl}` : '$1') + (print ? r.text + nl : '');
+        }
+        return out;
+      };
+      if (!inPlace) {
+        const { inputs, errors } = await readInputs(files, stdin, 'perl');
+        return { code: errors ? 2 : 0, out: inputs.map((x) => apply(x.text)).join(''), err: errors };
+      }
+      if (!files.length) return fail(2, 'perl: -i needs a file');
+      const abs = files.map((f) => resolvePath(state.cwd, f));
+      const reads = await Promise.all(abs.map((p) => io.read(p)));
+      let err = '';
+      const changes = [];
+      reads.forEach((r, k) => {
+        if (!r.ok) { err += `Can't open ${files[k]}: No such file or directory.\n`; return; }
+        const next = apply(r.content);
+        if (next !== r.content) changes.push({ path: abs[k], content: next, expect: r.revision });
+      });
+      if (changes.length) {
+        const w = await io.writeMany(changes);
+        if (!w.ok) err += `perl: ${w.hint ?? 'could not write'}\n`;
+        else err += lintNote(w);
+      }
+      return { code: err && !/syntax error/.test(err) ? 2 : 0, out: '', err };
+    },
+    // awk [-F sep] [-v var=value] 'program' [file...] (resources/js/awk.js).
+    async awk(args, stdin) {
+      let fs = null;
+      const vars = {};
+      let program = null;
+      const files = [];
+      const unescape = (v) => v.replace(/\\t/g, '\t').replace(/\\n/g, '\n').replace(/\\\\/g, '\\');
+      for (let k = 0; k < args.length; k++) {
+        const a = args[k];
+        if (program === null && a === '--') { program = args[++k] ?? ''; continue; }
+        if (program === null && a === '-F') { fs = unescape(args[++k] ?? ' '); continue; }
+        if (program === null && a.startsWith('-F')) { fs = unescape(a.slice(2)); continue; }
+        if (program === null && (a === '-v' || a.startsWith('-v'))) {
+          const kv = a === '-v' ? args[++k] ?? '' : a.slice(2);
+          const m = /^([A-Za-z_]\w*)=(.*)$/s.exec(kv);
+          if (!m) return fail(2, `awk: -v needs var=value, not "${kv}"`);
+          vars[m[1]] = unescape(m[2]);
+          continue;
+        }
+        if (program === null && a === '-f') {
+          const r = await io.read(resolvePath(state.cwd, args[++k] ?? ''));
+          if (!r.ok) return fail(2, `awk: can't open file ${args[k]}`);
+          program = r.content;
+          continue;
+        }
+        if (program === null) { program = a; continue; }
+        // var=value among the files is an assignment, as in awk.
+        const m = /^([A-Za-z_]\w*)=(.*)$/s.exec(a);
+        if (m) vars[m[1]] = m[2]; else files.push(a);
+      }
+      if (program === null) return fail(2, "usage: awk [-F sep] [-v var=value] 'program' [file ...]");
+      const { inputs, errors } = await readInputs(files, stdin, 'awk');
+      try {
+        const r = runAwk(program, inputs, { fs, vars });
+        return { code: errors ? 2 : r.code, out: r.out, err: errors };
+      } catch (e) {
+        if (e instanceof AwkError) return fail(2, `awk: ${e.message}`);
+        throw e;
+      }
     },
     async diff(args, stdin) {
       const { flags, operands } = getopt(args, { bool: 'uqNawbBr', value: 'U' });
@@ -1203,6 +1810,83 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       return ok();
     },
     async true() { return ok(); },
+    async ':'() { return ok(); },
+    // read [-r] [NAME...]: one line of the loop's (or the pipe's) input.
+    async read(args, stdin, ctx) {
+      const names = [];
+      let raw = false;
+      for (let k = 0; k < args.length; k++) {
+        if (args[k] === '-r') raw = true;
+        else if (/^-[pdnt]$/.test(args[k])) k++;
+        else if (!args[k].startsWith('-')) names.push(args[k]);
+      }
+      const src = stdin !== null && stdin !== undefined ? { text: stdin, pos: 0 } : ctx.stream;
+      if (!src || src.pos >= src.text.length) return { code: 1, out: '', err: '' };
+      const nl = src.text.indexOf('\n', src.pos);
+      let line = src.text.slice(src.pos, nl < 0 ? src.text.length : nl);
+      src.pos = nl < 0 ? src.text.length : nl + 1;
+      if (!raw) line = line.replace(/\\(.)/g, '$1');
+      const ifs = state.vars.has('IFS') ? state.vars.get('IFS') : ' \t\n';
+      if (!names.length) { state.vars.set('REPLY', line); return ok(); }
+      const trimmed = ifs === '' ? line : line.replace(/^[ \t]+|[ \t]+$/g, '');
+      if (names.length === 1) { state.vars.set(names[0], trimmed); return ok(); }
+      const fields = trimmed.split(/[ \t]+/);
+      names.forEach((n, k) => state.vars.set(n, k === names.length - 1 ? fields.slice(k).join(' ') : (fields[k] ?? '')));
+      return ok();
+    },
+    async break(args) { return { code: 0, out: '', err: '', brk: Math.max(1, Number(args[0]) || 1) }; },
+    async continue(args) { return { code: 0, out: '', err: '', cont: Math.max(1, Number(args[0]) || 1) }; },
+    async export(args) {
+      for (const a of args) {
+        const m = /^([A-Za-z_]\w*)=(.*)$/s.exec(a);
+        if (m) state.vars.set(m[1], m[2]);
+        else if (!/^-/.test(a) && !state.vars.has(a)) state.vars.set(a, '');
+      }
+      return ok();
+    },
+    async local(args) { return commands.export(args); },
+    async unset(args) { for (const a of args) if (!a.startsWith('-')) state.vars.delete(a); return ok(); },
+    async env() { return ok(joinLines([...state.vars].map(([k, v]) => `${k}=${v}`))); },
+    async printenv(args) {
+      if (!args.length) return commands.env();
+      const vals = args.filter((a) => state.vars.has(a)).map((a) => state.vars.get(a));
+      return { code: vals.length === args.length ? 0 : 1, out: joinLines(vals), err: '' };
+    },
+    // set -e (stop at a failure nothing tests); -u, -x, -o pipefail are accepted.
+    async set(args, stdin, ctx) {
+      for (const a of args) {
+        if (/^-[a-z]*e/.test(a)) ctx.opts.errexit = true;
+        if (/^\+[a-z]*e/.test(a)) ctx.opts.errexit = false;
+      }
+      return ok();
+    },
+    async seq(args) {
+      let sep = '\n';
+      const ns = [];
+      for (let k = 0; k < args.length; k++) {
+        if (args[k] === '-s') sep = args[++k] ?? '';
+        else if (args[k].startsWith('-s')) sep = args[k].slice(2);
+        else if (args[k] === '-w') continue;
+        else ns.push(Number(args[k]));
+      }
+      if (!ns.length || ns.length > 3 || ns.some((x) => Number.isNaN(x))) return fail(1, 'seq: seq LAST, seq FIRST LAST or seq FIRST STEP LAST');
+      const [first, step, last] = ns.length === 1 ? [1, 1, ns[0]] : ns.length === 2 ? [ns[0], 1, ns[1]] : ns;
+      if (!step || Math.abs((last - first) / step) > 100000) return fail(1, 'seq: at most 100000 numbers');
+      const out = [];
+      for (let x = first; step > 0 ? x <= last : x >= last; x += step) out.push(String(x));
+      return ok(out.length ? `${out.join(sep)}\n` : '');
+    },
+    // time CMD: the command, then how long it took (as bash prints it).
+    async time(args, stdin, ctx) {
+      const t0 = Date.now();
+      const r = await runArgv(args, stdin, ctx);
+      const s = (Date.now() - t0) / 1000;
+      return { ...r, err: `${r.err}\nreal\t${Math.floor(s / 60)}m${(s % 60).toFixed(3)}s\n` };
+    },
+    async '[['(args) {
+      if (args.at(-1) !== ']]') return fail(2, '[[: missing `]]\'');
+      return testExpr(args.slice(0, -1).map((a) => (a === '==' ? '=' : a)));
+    },
     async false() { return { code: 1, out: '', err: '' }; },
     async test(args) { return testExpr(args); },
     async '['(args) {
@@ -1218,17 +1902,19 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       return ok(`${[
         'cic.sh - the shell\'s commands, run against this live site (no real shell anywhere).',
         'Files: ls [-laRth] cat [-n] head/tail [-n N] wc [-lwc] stat touch mkdir [-p] cp [-r] mv rm [-rf] rmdir tree [-L N] du [-sh] diff [-u]',
-        'Search: grep [-rniEFwlLcovq] [-A/-B/-C N] [--include=GLOB] [--exclude-dir=D]  find [-name/-iname/-path GLOB] [-type f|d] [-maxdepth N] [-newer F] [-mmin/-mtime ±N]  rg',
-        'Edit: sed [-n] [-i] [-E] \'s/a/b/g; 3,5d; /re/p\'   echo/printf ... > file   cat > file <<\'EOF\' ... EOF   tee [-a]',
-        'Text: sort [-rnuk] uniq [-cdu] cut [-d -f] tr nl xargs [-n -I] basename dirname',
-        'Laravel: php artisan ...  composer ...  php -r \'code\' (runs in the booted app)  mysql -e \'SQL\'  curl [-i -X -d -H -o -w] /path',
-        'History: git log/diff/show over every saved version (there is no git repository: every save is already a version)',
-        'Also: cd pwd | && || ; > >> < 2>&1 globs (*.php)  - no $VARIABLES or $(substitution).',
+        'Search: grep [-rniEFPwlLcovq] [-A/-B/-C N] [--include=GLOB] [--exclude-dir=D]  find [-name/-iname/-path GLOB] [-type f|d] [-maxdepth N] [-newer F] [-exec CMD {} \\; | {} +] [-delete]  rg  git grep',
+        'Edit: sed [-n] [-i [\'\']] [-E] \'s/a/b/g; 3,5d; /re/p\'   perl -pi -e \'s/a(?=b)/c/g\' [-0]   patch -p1 < x.diff / git apply   echo/printf ... > file   cat > file <<\'EOF\' ... EOF   tee [-a]',
+        'Text: awk [-F -v] \'{print $2}\'  sort [-rnuk] uniq [-cdu] cut [-d -f] tr nl seq xargs [-n -I] basename dirname',
+        'Laravel: php artisan ...  composer ...  php -r \'code\' (runs in the booted app)  php -l FILE  mysql -e \'SQL\'  curl [-i -X -d -H -o -w] /path',
+        'History: git log/diff/show over every saved version (there is no git repository: every save is already a version; git add/commit do nothing)',
+        'Shell: X=1 $X ${X:-d} $? $(cmd) $((i+1)) {a,b} {1..5}  for/while/until/if ... read break continue set -e  cd pwd | && || ; > >> < 2>&1 globs (*.php)',
+        'A here-document body is never expanded, and an unset $name stays as written: PHP in double quotes arrives as sent.',
         'Deleting a folder, a destructive artisan command or a SQL write needs cic.sh(command, { confirm: true }).',
       ].join('\n')}`);
     },
     async history() { return fail(1, 'history: use git log -- FILE: every save of every file is a version'); },
-    async git(args, stdin, ctx) { return git(args, ctx); },
+    async git(args, stdin, ctx) { return git(args, ctx, stdin); },
+    async patch(args, stdin) { return applyPatch(args, stdin, { strip: 0 }); },
     async php(args, stdin, ctx) { return php(args, stdin, ctx); },
     async artisan(args, stdin, ctx) { return tool('artisan', args, ctx); },
     async composer(args, stdin, ctx) { return tool('composer', args, ctx); },
@@ -1246,6 +1932,10 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     chmod: 'modes are set by the host: PHP files are readable, only public/index.php runs', chown: 'files belong to the site already',
     kill: 'processes are managed by the host', ps: 'processes are managed by the host', top: 'processes are managed by the host',
     zip: 'use cic.zip(from, to)', unzip: 'use cic.unzip(archive, into)', tar: 'use cic.zip / cic.unzip',
+    jq: 'no jq: read the JSON in your script - JSON.parse((await cic.read(path)).content) - or php -r \'print_r(json_decode(file_get_contents("composer.json"), true));\'',
+    ruby: 'there is no Ruby on a site', go: 'there is no Go on a site',
+    bash: 'this is the shell: run the commands themselves (a script file: cat it and pass the text to cic.sh)', sh: 'this is the shell: run the commands themselves',
+    source: 'there are no shell script files to source: pass the lines to cic.sh', '.': 'there are no shell script files to source: pass the lines to cic.sh',
   };
 
   async function headTail(name, args, stdin) {
@@ -1355,8 +2045,8 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     let opts;
     try {
       opts = getopt(args, {
-        bool: 'rRnHhiylLcvoqsEFwxIUZ', value: 'eABCmf',
-        long: { include: 'value', exclude: 'value', 'exclude-dir': 'value', 'include-dir': 'value', color: 'value', colour: 'value', 'line-number': 'bool', recursive: 'bool', 'ignore-case': 'bool', 'files-with-matches': 'bool', count: 'bool', 'only-matching': 'bool', 'invert-match': 'bool', 'word-regexp': 'bool', 'extended-regexp': 'bool', 'fixed-strings': 'bool', quiet: 'bool', 'no-filename': 'bool', 'with-filename': 'bool', 'max-count': 'value', 'files-without-match': 'bool', context: 'value', 'after-context': 'value', 'before-context': 'value', 'no-messages': 'bool', regexp: 'value', 'null': 'bool', 'binary-files': 'value' },
+        bool: 'rRnHhiylLcvoqsEFPwxIUZ', value: 'eABCmf',
+        long: { include: 'value', exclude: 'value', 'exclude-dir': 'value', 'include-dir': 'value', color: 'value', colour: 'value', 'line-number': 'bool', recursive: 'bool', 'ignore-case': 'bool', 'files-with-matches': 'bool', count: 'bool', 'only-matching': 'bool', 'invert-match': 'bool', 'word-regexp': 'bool', 'extended-regexp': 'bool', 'perl-regexp': 'bool', 'fixed-strings': 'bool', quiet: 'bool', 'no-filename': 'bool', 'with-filename': 'bool', 'max-count': 'value', 'files-without-match': 'bool', context: 'value', 'after-context': 'value', 'before-context': 'value', 'no-messages': 'bool', regexp: 'value', 'null': 'bool', 'binary-files': 'value' },
       });
     } catch (e) {
       return fail(2, `grep: ${e.message}`);
@@ -1372,7 +2062,8 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     const recursive = f.r || f.R || f.recursive;
     const icase = f.i || f.y || f['ignore-case'];
     const fixed = f.F || f['fixed-strings'];
-    const ere = f.E || f['extended-regexp'];
+    // -P: JavaScript's regular expressions, which are Perl's for grep's purposes.
+    const ere = f.E || f['extended-regexp'] || f.P || f['perl-regexp'];
     const word = f.w || f['word-regexp'];
     const invert = f.v || f['invert-match'];
     const only = f.o || f['only-matching'];
@@ -1469,7 +2160,10 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     // Plain files named on the line: read them (in one call) and match here.
     const plain = [];
     const trees = [];
-    const local = invert || filesWithout || before || after;
+    // Lookaround is not in RE2 (the host's search): such a pattern is matched
+    // here, in whole files.
+    const lookaround = /\(\?<?[=!]/.test(source);
+    const local = invert || filesWithout || before || after || lookaround;
     for (const s of sites) {
       const abs = resolvePath(state.cwd, s);
       if (!recursive) { plain.push(s); continue; }
@@ -1496,7 +2190,7 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
         if (!r.ok) { errors += `grep: ${t}: ${r.hint}\n`; continue; }
         files = r.entries.map((e) => e.path).filter((p) => !excluded(p) && !/(^|\/)\.env(\..*)?$/.test(p));
         if (r.truncated) errors += `grep: ${t}: only the first 200 files were read for -v/-L/context; name a smaller folder\n`;
-        if (!invert && !filesWithout) {
+        if (!invert && !filesWithout && !lookaround) {
           const g = await io.grep({ pattern: source, regex: true, icase, word, under: abs, include: includes, limit: 500 });
           const hitFiles = new Set((g.hits ?? []).map((h) => h.path));
           files = files.filter((p) => hitFiles.has(p));
@@ -1505,8 +2199,18 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
         for (const p of files) if (read.files[p] !== undefined) results.push({ name: display(p), ...emit(display(p), read.files[p]) });
         continue;
       }
-      const g = await io.grep({ pattern: source, regex: true, icase, word, under: abs, include: includes, limit: 500 });
+      // -c names every file, 0 included, as grep does: the list comes with the search.
+      const [g, every] = await Promise.all([
+        io.grep({ pattern: source, regex: true, icase, word, under: abs, include: includes, limit: 500 }),
+        count && !quiet ? io.find({ under: abs, type: 'f', limit: 2000 }) : null,
+      ]);
       if (!g.ok) { errors += /no such/i.test(g.hint ?? '') ? `grep: ${t}: No such file or directory\n` : `grep: ${g.hint}\n`; continue; }
+      if (every?.ok) {
+        const seen = new Set(g.hits.map((h) => h.path));
+        const zeros = every.entries.map((e) => e.path)
+          .filter((p) => !seen.has(p) && !excluded(p) && !/(^|\/)\.env(\..*)?$/.test(p) && (!includes.length || includes.some((x) => globToRegExp(x).test(baseName(p)))));
+        for (const p of zeros) results.push({ name: display(p), out: [], hits: 0, path: p });
+      }
       if (g.truncated) errors += 'grep: stopped at 500 matching lines; narrow the pattern or the folder\n';
       const byFile = new Map();
       for (const h of g.hits) {
@@ -1528,6 +2232,7 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
         results.push({ name, out, hits: capped.length });
       }
     }
+    if (count) results.sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0));
     return finish(results, errors);
   }
 
@@ -1576,8 +2281,8 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
         } else if (a === '-empty') o.empty = true;
         else if (a === '-size') o.size = need(a);
         else if (a === '-print' || a === '-print0' || a === '-follow' || a === '-xdev') { /* the default */ }
-        else if (a === '-exec' || a === '-execdir' || a === '-ok' || a === '-delete') {
-          throw new Error(`${a} is not available: pipe the list instead, e.g. find . -name '*.log' | xargs rm`);
+        else if (a === '-ok') {
+          throw new Error('-ok asks at a terminal, and there is none: use -exec');
         } else if (a === '-o' || a === '-or' || a === '(' || a === ')') {
           throw new Error(`${a}: alternatives are not supported; run find twice, or use -regex-free globs`);
         } else throw new Error(`unknown predicate \`${a}'`);
@@ -1636,9 +2341,17 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     return { code: err && !out ? 1 : 0, out, err };
   }
 
-  async function git(args, ctx) {
+  async function git(args, ctx, stdin) {
     const sub = args[0];
     const rest = args.slice(1);
+    // What an agent types out of habit, mapped to what it means here.
+    if (sub === 'grep') return commands.grep(['-r', '-I', ...rest.filter((a) => a !== '--')], null);
+    if (sub === 'mv') return copyMove('mv', rest.filter((a) => a !== '--' && a !== '-f'));
+    if (sub === 'rm') return commands.rm(rest.filter((a) => a !== '--' && a !== '--cached' && a !== '-q'), null, ctx);
+    if (sub === 'apply') return applyPatch(rest, stdin, { strip: 1, check: rest.includes('--check') });
+    if (['add', 'commit', 'stage', 'push', 'pull', 'fetch'].includes(sub)) {
+      return { code: 0, out: '', err: `git ${sub}: nothing to do - every save is already a version (git log -- FILE lists them)\n` };
+    }
     const pathArg = () => {
       const dd = rest.indexOf('--');
       const cands = dd >= 0 ? rest.slice(dd + 1) : rest.filter((a) => !a.startsWith('-') && !/^[0-9a-f]{4,40}$/i.test(a) && !/^HEAD/.test(a));
@@ -1780,10 +2493,102 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     if (args[0] === '-r') return evalPhp(args[1] ?? '');
     if (args[0] === '-v' || args[0] === '--version') return evalPhp('echo "PHP ".PHP_VERSION." (codeinchrome site)\\n";');
     if (args[0] === '-m') return evalPhp('echo implode("\\n", get_loaded_extensions())."\\n";');
-    if (args[0] === '-l') return fail(1, 'php -l: every PHP file is linted as it is saved: the write reports "PHP syntax error" if there is one');
+    if (args[0] === '-l') return phpLint(args.slice(1).filter((a) => !a.startsWith('-')));
     if (args[0] === 'vendor/bin/pest' || args[0] === 'vendor/bin/phpunit') return tool('artisan', ['test', ...args.slice(1)], ctx);
     if (!args.length && stdin) return evalPhp(stdin.replace(/^<\?php\s*/, ''));
     return fail(1, 'php: php artisan ..., php -r \'code\' (in the booted app), php -v, php -m');
+  }
+
+  // patch [-pN] [-R] [--dry-run] [-i FILE] [FILE] < diff, git apply [--check]
+  // [-R] [FILE...]: a unified diff applied to the site - every file read in
+  // one call, every change written in one, each checked against what was read.
+  async function applyPatch(args, stdin, { strip = 0, check = false } = {}) {
+    let reverse = false;
+    const sources = [];
+    let target = null;
+    for (let k = 0; k < args.length; k++) {
+      const a = args[k];
+      if (/^-p\d+$/.test(a)) strip = Number(a.slice(2));
+      else if (a === '-p') strip = Number(args[++k]);
+      else if (a === '-R' || a === '--reverse') reverse = true;
+      else if (a === '--dry-run' || a === '--check') check = true;
+      else if (a === '-i' || a === '--input') sources.push(args[++k]);
+      else if (a.startsWith('-')) continue; // -u, -N, --verbose, -f: no effect here
+      else if (!sources.length && /\.(diff|patch)$/.test(a)) sources.push(a);
+      else target = a;
+    }
+    let text = stdin ?? '';
+    if (sources.length) {
+      const r = await io.readMany(sources.map((f) => resolvePath(state.cwd, f)));
+      const missing = sources.find((f) => r.files[resolvePath(state.cwd, f)] === undefined);
+      if (missing) return fail(2, `can't open patch file ${missing}`);
+      text = sources.map((f) => r.files[resolvePath(state.cwd, f)]).join('\n');
+    }
+    let patches;
+    try {
+      patches = parsePatch(text, { strip, reverse });
+    } catch (e) {
+      return fail(2, `patch: ${e.message}`);
+    }
+    if (!patches.length) return fail(2, 'patch: no diff found in the input (it needs --- a/FILE, +++ b/FILE and @@ lines)');
+    if (target && patches.length === 1) patches[0].path = target;
+    const paths = [...new Set(patches.filter((x) => !x.created).map((x) => resolvePath(state.cwd, x.path)))];
+    const reads = await Promise.all(paths.map((p) => io.read(p)));
+    const current = new Map(paths.map((p, k) => [p, reads[k].ok ? reads[k].content : undefined]));
+    const revisions = Object.fromEntries(paths.map((p, k) => [p, reads[k].revision ?? '']));
+    let out = '';
+    let err = '';
+    const writes = new Map();
+    const removals = [];
+    for (const x of patches) {
+      const abs = resolvePath(state.cwd, x.path);
+      out += `patching file ${x.path}\n`;
+      if (x.created) {
+        if (current.get(abs) !== undefined || writes.has(abs)) { err += `patch: ${x.path} already exists\n`; continue; }
+        writes.set(abs, { content: x.hunks.flatMap((h) => h.lines.filter((l) => l[0] === '+').map((l) => l.slice(1))).join('\n') + (x.noNewline ? '' : '\n'), expect: 'absent' });
+        continue;
+      }
+      const before = writes.get(abs)?.content ?? current.get(abs);
+      if (before === undefined) { err += `patch: can't find file to patch: ${x.path}\n`; continue; }
+      if (x.deleted) { removals.push(abs); continue; }
+      const r = applyHunks(before, x.hunks);
+      if (r.failed.length) { err += r.failed.map((n) => `Hunk #${n} FAILED on ${x.path}: its lines are not in the file\n`).join(''); continue; }
+      if (r.offsets.length) out += r.offsets.map(([n, off]) => `Hunk #${n} succeeded at an offset of ${off} lines.\n`).join('');
+      writes.set(abs, { content: r.text, expect: writes.get(abs)?.expect ?? revisions[abs] ?? '' });
+    }
+    if (err) return { code: 1, out, err: `${err}patch: nothing was changed - every hunk must apply\n` };
+    if (check) return { code: 0, out: out.replace(/^patching file /gm, 'checking file '), err: '' };
+    if (writes.size) {
+      const w = await io.writeMany([...writes].map(([path, f]) => ({ path, content: f.content, expect: f.expect })));
+      if (!w.ok) return fail(1, `patch: ${w.hint ?? 'could not write'}`);
+      err += lintNote(w);
+    }
+    for (const p of removals) {
+      const r = await io.remove(p);
+      if (!r.ok) err += `patch: cannot remove ${p}: ${r.hint}\n`;
+    }
+    return { code: err && !/syntax error/.test(err) ? 1 : 0, out, err };
+  }
+
+  // php -l FILE...: PHP's own parser (token_get_all with TOKEN_PARSE raises
+  // the ParseError php -l reports), run in the site for every file at once.
+  async function phpLint(files) {
+    if (!files.length) return fail(1, 'php -l: name the files to check');
+    const pairs = files.map((f) => [resolvePath(state.cwd, f).replace(/^\/+/, ''), f]);
+    const b64 = btoa(String.fromCharCode(...new TextEncoder().encode(JSON.stringify(pairs))));
+    const code = `$out = ''; $bad = 0;
+foreach (json_decode(base64_decode('${b64}'), true) as [$rel, $shown]) {
+  $p = base_path($rel);
+  if (! is_file($p)) { $out .= "Could not open input file: $shown\\n"; $bad = 1; continue; }
+  try { token_get_all(file_get_contents($p), TOKEN_PARSE); $out .= "No syntax errors detected in $shown\\n"; }
+  catch (\\ParseError $e) { $out .= 'PHP Parse error:  '.$e->getMessage()." in $shown on line ".$e->getLine()."\\nErrors parsing $shown\\n"; $bad = 255; }
+}
+return $out.'__cic_exit='.$bad;`;
+    const r = await io.eval(code);
+    const text = String(r.output ?? '');
+    const m = /__cic_exit=(\d+)\s*$/.exec(text);
+    if (!m) return fail(1, `php -l: ${r.hint ?? r.error ?? (text || 'no answer from the site')}`);
+    return { code: Number(m[1]), out: text.slice(0, m.index), err: '' };
   }
 
   async function evalPhp(code) {
@@ -1895,21 +2700,117 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     }
   }
 
-  async function runCommand(cmd, stdin, ctx) {
-    const argv = await expandGlobs(cmd.words);
+  /* ───────────── expansion ───────────── */
+
+  const assignmentOf = (w) => {
+    const p0 = w.parts?.[0];
+    if (!p0 || p0.s === undefined || p0.q !== '') return null;
+    return /^([A-Za-z_]\w*)=/.exec(p0.s)?.[1] ?? null;
+  };
+
+  function varValue(part) {
+    const n = part.v;
+    if (n === '?') return String(state.last);
+    if (state.vars.has(n)) return state.vars.get(n);
+    if (n === 'PWD') return state.cwd;
+    if (n === 'HOME') return '/';
+    if (part.def !== undefined) return part.def;
+    return null; // no value: left as written
+  }
+
+  // One expansion's text. `literal` when it stays as written.
+  async function partValue(part, ctx, errs) {
+    if (part.e === 'var') {
+      const v = varValue(part);
+      return v === null ? { text: part.raw, literal: true } : { text: v };
+    }
+    if (part.e === 'arith') return { text: String(arith(part.v, (n) => state.vars.get(n))) };
+    // $(command): the same shell, its output without trailing newlines.
+    let list;
+    try {
+      list = parse(part.v);
+    } catch (e) {
+      errs.push(`cic.sh: $(${part.v}): ${e.message}\n`);
+      return { text: '' };
+    }
+    const r = await runList(list, { ...ctx, stream: null, cond: false });
+    errs.push(r.err);
+    state.last = r.code;
+    if (r.needsConfirm) errs.push(`cic.sh: $(${part.v}) needs confirmation; it did not run\n`);
+    return { text: r.out.replace(/\n+$/, '') };
+  }
+
+  // A word's text with every expansion done and no splitting (assignments,
+  // redirect targets, "for" items that were quoted).
+  async function wordValue(w, ctx, errs, skip = 0) {
+    if (!w.parts) return w.v.slice(skip);
+    let text = '';
+    for (let k = 0; k < w.parts.length; k++) {
+      const p = w.parts[k];
+      if (p.s !== undefined) text += k === 0 ? p.s.slice(skip) : p.s;
+      else text += (await partValue(p, ctx, errs)).text;
+    }
+    return text;
+  }
+
+  // Words -> [{ v, glob }]: braces, then expansions, then splitting of what an
+  // unquoted expansion produced, as sh does. An unquoted expansion that is
+  // empty leaves no word at all.
+  async function expandWords(words, ctx, errs) {
+    const out = [];
+    for (const word of words.flatMap(braceWords)) {
+      if (!word.exp) { out.push({ v: word.v, glob: word.glob }); continue; }
+      const fields = [];
+      let cur = null;
+      let glob = false;
+      for (const p of word.parts) {
+        if (p.s !== undefined) {
+          cur = (cur ?? '') + p.s;
+          if (p.q === '' && GLOB.test(p.s)) glob = true;
+          continue;
+        }
+        const { text, literal } = await partValue(p, ctx, errs);
+        if (p.q === 'd' || literal) { cur = (cur ?? '') + text; continue; }
+        const pieces = text.split(/[ \t\n]+/);
+        for (let j = 0; j < pieces.length; j++) {
+          if (j > 0 && cur !== null) { fields.push(cur); cur = null; }
+          if (pieces[j] !== '') cur = (cur ?? '') + pieces[j];
+        }
+      }
+      if (cur !== null) fields.push(cur);
+      for (const f of fields) out.push({ v: f, glob });
+    }
+    return out;
+  }
+
+  /* ───────────── running ───────────── */
+
+  const flagsOf = (r) => ({
+    ...(r.exit ? { exit: true } : {}), ...(r.brk ? { brk: r.brk } : {}), ...(r.cont ? { cont: r.cont } : {}),
+    ...(r.needsConfirm?.length ? { needsConfirm: r.needsConfirm } : {}),
+  });
+
+  async function targetOf(r, ctx, errs) {
+    return r.word ? wordValue(r.word, ctx, errs) : r.target;
+  }
+
+  async function inputOf(node, stdin, ctx, errs) {
     let input = stdin;
-    for (const r of cmd.redirects) {
+    for (const r of node.redirects) {
       if (r.op !== '<') continue;
-      const f = await io.read(resolvePath(state.cwd, r.target));
-      if (!f.ok) return fail(1, `cic.sh: ${r.target}: No such file or directory`);
+      const target = await targetOf(r, ctx, errs);
+      const f = await io.read(resolvePath(state.cwd, target));
+      if (!f.ok) return { missing: target };
       input = f.content;
     }
-    if (cmd.heredoc) input = cmd.heredoc.body;
-    const res = argv.length ? await runArgv(argv, input, ctx) : ok(input ?? '');
+    if (node.heredoc) input = node.heredoc.body;
+    return { input };
+  }
+
+  async function redirectOutput(res, redirects, ctx, errs) {
     let { out, err } = res;
-    const { exit, needsConfirm } = res;
-    let code = res.code;
-    for (const r of cmd.redirects) {
+    let { code } = res;
+    for (const r of redirects) {
       if (r.op === '<') continue;
       if (r.op === '2>&1') { out += err; err = ''; continue; }
       if (r.op === '1>&2') { err += out; out = ''; continue; }
@@ -1917,13 +2818,149 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
       const both = r.op.startsWith('&');
       const data = both ? out + err : toErr ? err : out;
       if (toErr) err = ''; else if (both) { out = ''; err = ''; } else out = '';
-      if (r.target === '/dev/null') continue;
-      if (r.target === '/dev/stderr') { err += data; continue; }
-      if (r.target === '/dev/stdout') { out += data; continue; }
-      const w = await writeFile(resolvePath(state.cwd, r.target), data, { append: r.op.endsWith('>>') });
-      if (!w.ok) { err += `cic.sh: ${r.target}: ${w.hint}\n`; code = 1; } else err += lintNote(w);
+      const target = await targetOf(r, ctx, errs);
+      if (target === '/dev/null') continue;
+      if (target === '/dev/stderr') { err += data; continue; }
+      if (target === '/dev/stdout') { out += data; continue; }
+      const w = await writeFile(resolvePath(state.cwd, target), data, { append: r.op.endsWith('>>') });
+      if (!w.ok) { err += `cic.sh: ${target}: ${w.hint}\n`; code = 1; } else err += lintNote(w);
     }
-    return { code, out, err, exit, needsConfirm };
+    return { ...res, code, out, err: errs.join('') + err };
+  }
+
+  async function runCommand(cmd, stdin, ctx) {
+    const errs = [];
+    let n = 0;
+    while (n < cmd.words.length && assignmentOf(cmd.words[n])) n++;
+    const assigns = cmd.words.slice(0, n);
+    const words = cmd.words.slice(n);
+    const values = [];
+    for (const a of assigns) {
+      const name = assignmentOf(a);
+      values.push([name, await wordValue(a, ctx, errs, name.length + 1)]);
+    }
+    // NAME=value alone sets it for what follows; before a command, only for it.
+    if (!words.length && !cmd.redirects.length && !cmd.heredoc) {
+      for (const [n, v] of values) state.vars.set(n, v);
+      return { code: 0, out: '', err: errs.join('') };
+    }
+    const saved = values.map(([n]) => [n, state.vars.has(n) ? state.vars.get(n) : undefined]);
+    for (const [n, v] of values) state.vars.set(n, v);
+    try {
+      let argv;
+      try {
+        argv = await expandGlobs(await expandWords(words, ctx, errs));
+      } catch (e) {
+        return { code: 1, out: '', err: `${errs.join('')}cic.sh: ${e.message}\n` };
+      }
+      const { input, missing } = await inputOf(cmd, stdin, ctx, errs);
+      if (missing !== undefined) return fail(1, `${errs.join('')}cic.sh: ${missing}: No such file or directory`);
+      const res = argv.length ? await runArgv(argv.map((w) => (typeof w === 'string' ? w : w.v)), input, ctx) : ok(input ?? '');
+      return redirectOutput(res, cmd.redirects, ctx, errs);
+    } finally {
+      if (words.length) for (const [n, v] of saved) (v === undefined ? state.vars.delete(n) : state.vars.set(n, v));
+    }
+  }
+
+  async function runCompound(node, stdin, ctx) {
+    const errs = [];
+    const { input, missing } = await inputOf(node, stdin, ctx, errs);
+    if (missing !== undefined) return fail(1, `cic.sh: ${missing}: No such file or directory`);
+    const inner = { ...ctx, stream: input !== null && input !== undefined ? { text: input, pos: 0 } : ctx.stream };
+    const res = { code: 0, out: '', err: '' };
+    let flags = {};
+    const take = (r) => { res.out += r.out; res.err += r.err; res.code = r.code; };
+    // What a loop body's break/continue/exit means for the loop: true = stop it.
+    const loopStops = (r) => {
+      if (r.exit || r.needsConfirm) { flags = flagsOf(r); return true; }
+      if (r.brk) { if (r.brk > 1) flags = { brk: r.brk - 1 }; return true; }
+      if (r.cont > 1) { flags = { cont: r.cont - 1 }; return true; }
+      return false;
+    };
+    if (node.compound === 'if') {
+      let ran = false;
+      for (const b of node.branches) {
+        const c = await runList(b.cond, { ...inner, cond: true });
+        take(c);
+        if (c.exit || c.needsConfirm) { flags = flagsOf(c); ran = true; break; }
+        if (c.code === 0) { const r = await runList(b.body, inner); take(r); flags = flagsOf(r); ran = true; break; }
+      }
+      if (!ran) {
+        if (node.otherwise) { const r = await runList(node.otherwise, inner); take(r); flags = flagsOf(r); } else res.code = 0;
+      }
+    } else if (node.compound === 'for') {
+      let items;
+      try {
+        items = (await expandGlobs(await expandWords(node.words, ctx, errs))).map((w) => (typeof w === 'string' ? w : w.v));
+      } catch (e) {
+        return fail(1, `for: ${e.message}`);
+      }
+      if (items.length > 10000) return fail(1, `for: ${items.length} items; at most 10000`);
+      for (const it of items) {
+        state.vars.set(node.name, it);
+        const r = await runList(node.body, inner);
+        take(r);
+        if (loopStops(r)) break;
+      }
+    } else {
+      // while / until: bounded, since every turn may be a request to the site.
+      for (let turn = 1; ; turn++) {
+        if (turn > 1000) { res.err += `${node.compound}: stopped after 1000 turns - does the loop ever end?\n`; res.code = 1; break; }
+        const c = await runList(node.cond, { ...inner, cond: true });
+        res.out += c.out;
+        res.err += c.err;
+        if (c.exit || c.needsConfirm) { flags = flagsOf(c); break; }
+        if ((c.code === 0) !== (node.compound === 'while')) break;
+        const r = await runList(node.body, inner);
+        take(r);
+        if (loopStops(r)) break;
+      }
+    }
+    return redirectOutput({ ...res, ...flags }, node.redirects, ctx, errs);
+  }
+
+  async function runPipeline(pipeline, ctx) {
+    let input = null;
+    let out = '';
+    let err = '';
+    let code = 0;
+    let flags = {};
+    const needsConfirm = [];
+    for (let k = 0; k < pipeline.length; k++) {
+      const el = pipeline[k];
+      const r = el.compound ? await runCompound(el, input, ctx) : await runCommand(el, input, ctx);
+      err += r.err;
+      code = r.code;
+      if (k === pipeline.length - 1) out += r.out;
+      else input = r.out;
+      flags = { ...flags, ...flagsOf({ ...r, needsConfirm: undefined }) };
+      if (r.needsConfirm) needsConfirm.push(...r.needsConfirm);
+    }
+    return { code, out, err, ...flags, ...(needsConfirm.length ? { needsConfirm } : {}) };
+  }
+
+  // A list: a && b runs b only if a succeeded, a || b only if it failed; a
+  // skipped pipeline leaves the status as it was, as in sh. A refusal that
+  // needs confirming stops everything: what follows may depend on it.
+  async function runList(list, ctx) {
+    let out = '';
+    let err = '';
+    let code = 0;
+    let joined = ';';
+    for (const { pipeline, then } of list) {
+      const skip = (joined === '&&' && code !== 0) || (joined === '||' && code === 0);
+      joined = then;
+      if (skip) continue;
+      const r = await runPipeline(pipeline, ctx);
+      out += r.out;
+      err += r.err;
+      code = r.code;
+      state.last = code;
+      if (r.needsConfirm || r.exit || r.brk || r.cont) return { code, out, err, ...flagsOf(r) };
+      // set -e: a failure that nothing tests ends the line.
+      if (ctx.opts?.errexit && code !== 0 && !ctx.cond && then === ';') return { code, out, err, exit: true };
+    }
+    return { code, out, err };
   }
 
   /** Run a command line -> { code, stdout, stderr }. */
@@ -1934,39 +2971,13 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     } catch (e) {
       return { code: 2, stdout: '', stderr: `cic.sh: ${e.message}\n` };
     }
-    const ctx = { confirm };
-    const needsConfirm = [];
     listed.clear();
-    let stdout = '';
-    let stderr = '';
-    let code = 0;
-    let joined = ';'; // how this pipeline joins the one before it
-    for (const { pipeline, then } of list) {
-      // a && b runs b only if a succeeded, a || b only if it failed; a
-      // skipped pipeline leaves the status as it was, as in sh.
-      const skip = (joined === '&&' && code !== 0) || (joined === '||' && code === 0);
-      joined = then;
-      if (skip) continue;
-      let input = null;
-      let exited = false;
-      for (let k = 0; k < pipeline.length; k++) {
-        const r = await runCommand(pipeline[k], input, ctx);
-        stderr += r.err;
-        code = r.code;
-        if (k === pipeline.length - 1) stdout += r.out;
-        else input = r.out;
-        exited = exited || Boolean(r.exit);
-        if (r.needsConfirm) needsConfirm.push(...r.needsConfirm);
-      }
-      // A refusal that needs confirming stops the line: what follows may
-      // depend on it, and confirming runs only the refused command.
-      if (needsConfirm.length) {
-        stderr += `cic.sh: stopped - nothing after this ran. To go ahead: ${needsConfirm.map((c) => `cic.sh(${JSON.stringify(c)}, { confirm: true })`).join(', then ')}\n`;
-        break;
-      }
-      if (exited) break;
+    const r = await runList(list, { confirm, opts: { errexit: false }, stream: null, cond: false });
+    let stderr = r.err;
+    if (r.needsConfirm?.length) {
+      stderr += `cic.sh: stopped - nothing after this ran. To go ahead: ${r.needsConfirm.map((c) => `cic.sh(${JSON.stringify(c)}, { confirm: true })`).join(', then ')}\n`;
     }
-    return { code, stdout, stderr, ...(needsConfirm.length ? { needsConfirm } : {}) };
+    return { code: r.code, stdout: r.out, stderr, ...(r.needsConfirm?.length ? { needsConfirm: r.needsConfirm } : {}) };
   }
 
   commands.exit = async (args) => ({ code: Number(args[0] ?? 0) || 0, out: '', err: '', exit: true });

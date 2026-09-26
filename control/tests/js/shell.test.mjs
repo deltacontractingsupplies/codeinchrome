@@ -75,7 +75,9 @@ function memorySite(files = {}) {
     },
     async writeMany(list) {
       calls.push(['writeMany', list.map((f) => f.path)]);
-      if (list.some((f) => f.expect && nodes.get(f.path)?.revision !== f.expect)) return { ok: false, hint: 'a file changed since it was read' };
+      // As the host checks: "absent" = must not exist yet; a revision = must still be it.
+      const stale = (f) => (f.expect === 'absent' ? nodes.has(f.path) : f.expect && nodes.get(f.path)?.revision !== f.expect);
+      if (list.some(stale)) return { ok: false, hint: 'a file changed since it was read, or already exists' };
       for (const f of list) put(f.path, f.content);
       return { ok: true, written: list.map((f) => ({ path: f.path })) };
     },
@@ -283,7 +285,7 @@ test('writing: heredocs, echo, >> and tee, with PHP written exactly as sent', as
   assert.equal(io.nodes.get('/kv.txt').content, 'a=1\nb=2\n');
   r = await sh(io, 'cat nope 2>/dev/null; echo $?');
   assert.equal(r.stderr, '');
-  assert.equal(r.stdout, '$?\n'); // no variables: $ is an ordinary character
+  assert.equal(r.stdout, '1\n'); // $? is the last command's status, as in sh
 });
 
 test('grep speaks grep: -rn, BRE alternation, -E, -i, -w, -l, -c, -o, -v, context, --include', async () => {
@@ -328,7 +330,15 @@ test('find speaks find, and says what it did not enter', async () => {
   assert.equal((await sh(io, 'find vendor -iname "cart.php"')).stdout, 'vendor/acme/lib/Cart.php\n');
   assert.equal((await sh(io, 'find . -path "*Models*" -name "I*"')).stdout, './app/Models/Item.php\n');
   assert.equal((await sh(io, 'find app ! -name "*.php"')).stdout, 'app\napp/Models\n');
-  assert.match((await sh(io, 'find . -exec rm {} ;')).stderr, /-exec is not available/);
+  // An unescaped ; ends the command, as in sh; \; and + end -exec.
+  assert.match((await sh(io, 'find . -exec rm {} ;')).stderr, /missing argument to `-exec'/);
+  let x = await sh(io, 'find app -name "*.php" -exec grep -l "class Item" {} \\;');
+  assert.equal(x.stdout, 'app/Models/Item.php\n', x.stderr);
+  const fresh = site(); // the logs above were removed
+  x = await sh(fresh, "find storage/logs -name '*.log' -exec cat {} +");
+  assert.equal(x.stdout, 'one\ntwo\n', x.stderr);
+  x = await sh(fresh, 'find storage/logs -name b.log -delete && ls storage/logs');
+  assert.equal(x.stdout, 'a.log\n', x.stderr);
   assert.match((await sh(io, 'find nowhere')).stderr, /'nowhere': No such file or directory/);
   const tree = await sh(io, 'tree app');
   assert.equal(tree.stdout, 'app\n└── Models\n    ├── Cart.php\n    └── Item.php\n\n1 directories, 2 files\n');
@@ -566,3 +576,150 @@ test('git clone into / replaces the site, only when confirmed', async () => {
   assert.match((await sh(io, 'git clone --status')).stdout, /^clone-replace: done - .*\(backup a0000001\)/);
 });
 
+
+test('variables, $(...), $((...)) and braces, as sh does them - and PHP in quotes left alone', async () => {
+  const io = site();
+  let r = await sh(io, 'X=5; echo $X "${X}" \'$X\' ${Y:-dflt} $UNSET_THING "$user"');
+  assert.equal(r.stdout, '5 5 $X dflt $UNSET_THING $user\n', r.stderr);
+  assert.equal((await sh(io, 'echo $((X * 2 + 1)) $(( (7 - 1) / 4 ))')).stdout, '11 1\n');
+  // Kept between calls, like cwd.
+  assert.equal((await sh(io, 'echo "$X"')).stdout, '5\n');
+  r = await sh(io, 'N=$(grep -rl Cart app | wc -l); echo "files: $N"');
+  assert.equal(r.stdout, 'files: 1\n', r.stderr);
+  // An unquoted $(...) splits into words; a quoted one does not.
+  assert.equal((await sh(io, 'for f in $(ls app/Models); do echo "[$f]"; done')).stdout, '[Cart.php]\n[Item.php]\n');
+  assert.equal((await sh(io, 'for f in "$(ls app/Models)"; do echo "[$f]"; done')).stdout, '[Cart.php\nItem.php]\n');
+  assert.equal((await sh(io, 'A=; echo x${A}y $A | wc -w')).stdout.trim(), '1');
+  assert.equal((await sh(io, 'mkdir -p out/{a,b} && ls out')).stdout, 'a\nb\n');
+  assert.equal((await sh(io, 'echo {1..3} {a,b}.txt "{a,b}" \'{c,d}\' {} x{y}')).stdout, '1 2 3 a.txt b.txt {a,b} {c,d} {} x{y}\n');
+  assert.equal((await sh(io, 'echo {01..03}')).stdout, '01 02 03\n');
+  // A here-document is never expanded: PHP arrives as written.
+  await sh(io, "cat > t.php <<EOF\n<?php $x = $(date); echo \"$X\";\nEOF");
+  assert.equal(io.nodes.get('/t.php').content, '<?php $x = $(date); echo "$X";\n');
+  assert.equal((await sh(io, 'echo $?; false; echo $?')).stdout, '0\n1\n');
+  assert.equal((await sh(io, 'echo $((1 / 0))')).code, 1);
+});
+
+test('for, while, until, if, read, break and continue - and loops that never end are stopped', async () => {
+  const io = site();
+  assert.equal((await sh(io, 'for i in 1 2 3; do if [ $i = 2 ]; then continue; fi; echo $i; done')).stdout, '1\n3\n');
+  assert.equal((await sh(io, 'for i in $(seq 1 10); do [ $i -gt 3 ] && break; echo $i; done')).stdout, '1\n2\n3\n');
+  assert.equal((await sh(io, "printf 'a b\\nc\\n' | while read -r one rest; do echo \"<$one|$rest>\"; done")).stdout, '<a|b>\n<c|>\n');
+  assert.equal((await sh(io, 'i=0; while [ $i -lt 3 ]; do i=$((i+1)); done; echo $i')).stdout, '3\n');
+  assert.equal((await sh(io, 'i=0; until [ $i -ge 2 ]; do i=$((i+1)); echo turn $i; done')).stdout, 'turn 1\nturn 2\n');
+  assert.equal((await sh(io, 'if grep -q Item app/Models/Item.php; then echo yes; else echo no; fi')).stdout, 'yes\n');
+  assert.equal((await sh(io, 'if false; then echo a; elif true; then echo b; else echo c; fi')).stdout, 'b\n');
+  // Loops in pipelines and with redirections; the multi-line form.
+  assert.equal((await sh(io, 'for f in app/Models/*.php; do echo $f; done | sort -r')).stdout, 'app/Models/Item.php\napp/Models/Cart.php\n');
+  await sh(io, 'for f in a b; do echo $f; done > list.txt');
+  assert.equal(io.nodes.get('/list.txt').content, 'a\nb\n');
+  assert.equal((await sh(io, 'while read -r l; do echo "- $l"; done < list.txt')).stdout, '- a\n- b\n');
+  assert.equal((await sh(io, 'for f in a b\ndo\n  echo $f\ndone')).stdout, 'a\nb\n');
+  assert.equal((await sh(io, 'echo abc |\n  tr a-c A-C &&\n  echo done')).stdout, 'ABC\ndone\n');
+  // The edit an agent makes most: every file that mentions it, changed in place.
+  const r = await sh(io, 'for f in $(grep -rl Cart app routes); do sed -i "s/Cart/Basket/g" "$f"; done; grep -rc Basket app/Models/Cart.php routes/web.php');
+  assert.equal(r.stdout, 'app/Models/Cart.php:1\nroutes/web.php:2\n', r.stderr);
+  const stuck = await sh(io, 'while true; do :; done');
+  assert.equal(stuck.code, 1);
+  assert.match(stuck.stderr, /stopped after 1000 turns/);
+  assert.throws(() => parse('for x in a; do echo'), /"done" is missing/);
+  assert.throws(() => parse('if true; then echo'), /"fi" is missing/);
+  assert.throws(() => parse('done'), /unexpected "done"/);
+});
+
+test('set -e stops at a failure nothing tests', async () => {
+  const io = site();
+  let r = await sh(io, 'set -e; false; echo never');
+  assert.equal(r.stdout, '');
+  assert.equal(r.code, 1);
+  r = await sh(io, 'set -e; false || echo recovered; if false; then :; fi; echo after');
+  assert.equal(r.stdout, 'recovered\nafter\n');
+});
+
+test('awk, perl -pi and sed -i \'\' - the one-liners agents edit and count with', async () => {
+  const io = site();
+  await sh(io, "printf 'id:name:n\\n1:ana:5\\n2:bob:12\\n3:ana:7\\n' > u.txt");
+  assert.equal((await sh(io, "awk -F: 'NR>1 {print $2}' u.txt")).stdout, 'ana\nbob\nana\n');
+  assert.equal((await sh(io, "awk -F: 'NR>1 {s+=$3} END {print s}' u.txt")).stdout, '24\n');
+  assert.equal((await sh(io, "awk -F: 'NR>1 {n[$2]++} END {for (k in n) print k, n[k]}' u.txt | sort")).stdout, 'ana 2\nbob 1\n');
+  assert.equal((await sh(io, "cat u.txt | awk -F: -v min=6 'NR>1 && $3 > min {printf \"%s=%d\\n\", $2, $3}'")).stdout, 'bob=12\nana=7\n');
+  assert.match((await sh(io, "awk '{print $1 > \"f\"}' u.txt")).stderr, /not supported here/);
+  // perl -pi with lookahead - JavaScript's regular expressions are Perl's here.
+  let r = await sh(io, "perl -pi -e 's/\\bCart\\b(?=\\s+extends)/Basket/g' app/Models/Cart.php");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(io.nodes.get('/app/Models/Cart.php').content, /class Basket extends Model/);
+  assert.equal((await sh(io, "perl -ne 'print if /Route::post/' routes/web.php")).stdout, "Route::post('/cart', [CartController::class, 'add']);\n");
+  assert.equal((await sh(io, "echo 'a-b' | perl -pe 's/(\\w)-(\\w)/$2-$1/; tr/a-z/A-Z/'")).stdout, 'B-A\n');
+  assert.equal((await sh(io, "echo 'end' | perl -pe 's/d$/D/'")).stdout, 'enD\n');
+  r = await sh(io, "perl -0pi -e 's/\\{\\n\\s+protected/{\\n    public/' app/Models/Cart.php");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(io.nodes.get('/app/Models/Cart.php').content, /\{\n {4}public \$fillable/);
+  assert.match((await sh(io, "perl -e 'system(\"x\")'")).stderr, /only -p and -n one-liners/);
+  // BSD sed: the empty backup suffix is its own word.
+  r = await sh(io, "sed -i '' 's/Basket/Cart/' app/Models/Cart.php && grep -c 'class Cart' app/Models/Cart.php");
+  assert.equal(r.stdout, '1\n', r.stderr);
+});
+
+test('grep -P with lookaround, grep -c with its zeros, git grep, git mv and git add', async () => {
+  const io = site();
+  assert.equal((await sh(io, "grep -rP 'Cart(?=Controller)' routes")).stdout.split('\n').filter(Boolean).length, 2);
+  assert.equal((await sh(io, 'grep -rc Cart app/Models')).stdout, 'app/Models/Cart.php:1\napp/Models/Item.php:0\n');
+  assert.equal((await sh(io, 'git grep -n "class Item"')).stdout, 'app/Models/Item.php:3:class Item extends Model {}\n');
+  assert.equal((await sh(io, 'git mv app/Models/Item.php app/Models/Thing.php && ls app/Models')).stdout, 'Cart.php\nThing.php\n');
+  const r = await sh(io, 'git add -A && git commit -m "x" && echo chained');
+  assert.equal(r.stdout, 'chained\n');
+  assert.match(r.stderr, /every save is already a version/);
+});
+
+test('patch and git apply: hunks where they belong, or nowhere', async () => {
+  const io = site();
+  const diff = [
+    '--- a/app/Models/Item.php',
+    '+++ b/app/Models/Item.php',
+    '@@ -1,3 +1,4 @@',
+    ' <?php',
+    ' ',
+    '-class Item extends Model {}',
+    '+class Item extends Model',
+    '+{}',
+    '--- /dev/null',
+    '+++ b/app/Models/Tag.php',
+    '@@ -0,0 +1,2 @@',
+    '+<?php',
+    '+class Tag {}',
+    '',
+  ].join('\n');
+  await sh(io, `cat > fix.diff <<'EOF'\n${diff}EOF`);
+  let r = await sh(io, 'git apply --check fix.diff');
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(io.nodes.get('/app/Models/Item.php').content, '<?php\n\nclass Item extends Model {}\n');
+  r = await sh(io, 'git apply fix.diff');
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(io.nodes.get('/app/Models/Item.php').content, '<?php\n\nclass Item extends Model\n{}\n');
+  assert.equal(io.nodes.get('/app/Models/Tag.php').content, '<?php\nclass Tag {}\n');
+  // A hunk whose lines are no longer there changes nothing at all.
+  r = await sh(io, 'patch -p1 < fix.diff');
+  assert.equal(r.code, 1);
+  assert.match(r.stderr, /FAILED|already exists/);
+  assert.equal(io.nodes.get('/app/Models/Item.php').content, '<?php\n\nclass Item extends Model\n{}\n');
+  // Reversed, from a pipe, one line further down: found by its lines.
+  await sh(io, "sed -i '1i\\// moved' app/Models/Item.php");
+  r = await sh(io, "sed -n '1,9p' fix.diff | patch -p1 -R");
+  assert.equal(r.code, 0, r.stderr);
+  assert.match(r.stdout, /offset of 1 lines/);
+  assert.equal(io.nodes.get('/app/Models/Item.php').content, '// moved\n<?php\n\nclass Item extends Model {}\n');
+});
+
+test('php -l asks the site\'s own PHP parser, for every file in one call', async () => {
+  const io = site();
+  let asked = null;
+  io.eval = async (code) => {
+    asked = JSON.parse(Buffer.from(/base64_decode\('([^']+)'\)/.exec(code)[1], 'base64').toString());
+    return { ok: true, output: 'No syntax errors detected in app/Models/Item.php\nPHP Parse error:  syntax error in b.php on line 1\nErrors parsing b.php\n__cic_exit=255' };
+  };
+  const r = await sh(io, 'php -l app/Models/Item.php b.php');
+  assert.deepEqual(asked, [['app/Models/Item.php', 'app/Models/Item.php'], ['b.php', 'b.php']]);
+  assert.equal(r.code, 255);
+  assert.match(r.stdout, /No syntax errors detected in app\/Models\/Item\.php/);
+  assert.equal((await sh(io, 'php -l app/Models/Item.php && echo linted')).stdout.includes('linted'), false);
+});

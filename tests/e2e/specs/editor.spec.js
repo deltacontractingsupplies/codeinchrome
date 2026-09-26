@@ -818,6 +818,17 @@ Route::get('/', function () {
     expect(short[0].text.split('\n').at(-1)).toBe(`[lines 1-2 of ${short[0].lines} - stopped at line 2 as asked; ${short[0].lines - 2} more after it]`);
     expect(short[1].text).toBe(short[2].text);
 
+    // The shell as a terminal agent uses it, on the real site: php -l by the
+    // site's own PHP, variables and loops, and paths shown whole.
+    const shell = await page.evaluate(async () => [
+      await cic.sh('cd / && php -l routes/web.php'),
+      await cic.sh('cd / && D=routes; for f in $(ls $D); do echo "file: $D/$f"; done | head -1'),
+      await cic.sh('echo resources/views/admin/components/navigation/sidebar/item.blade.php'),
+    ]);
+    expect(shell[0]).toMatch(/No syntax errors detected in routes\/web\.php\n\[exit 0/);
+    expect(shell[1]).toMatch(/^file: routes\/\S+\.php\n\[exit 0/);
+    expect(shell[2]).toContain('resources/views/admin/components/navigation/sidebar/item.blade.php');
+
     const parts = await page.evaluate(() => {
       const long = Array.from({ length: 120 }, (_, i) => `<div class="row" data-n="${i}">row ${i}</div>`).join('\n');
       return [cic.show(long), cic.show(long, 2)];
