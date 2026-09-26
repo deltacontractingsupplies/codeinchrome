@@ -169,4 +169,75 @@ class LinkScannerTest extends TestCase
         $this->assertStringStartsWith('Mozilla/5.0', $seen[0], 'no self-identifying User-Agent');
         $this->assertStringNotContainsString('codeinchrome', $seen[0]);
     }
+
+    /** A fleet of three hosts; the agents render what $dom maps from URL to DOM. */
+    private function rendering(array $html, array $dom, array &$renderedOn): void
+    {
+        config(['fleet.hosts' => ['h1' => ['ip' => '10.0.0.1', 'tunnel_port' => 9441, 'capacity' => 10],
+            'h3' => ['ip' => '10.0.0.3', 'tunnel_port' => 9443, 'capacity' => 10], 'h4' => ['ip' => '10.0.0.4', 'tunnel_port' => 9444, 'capacity' => 10]],
+            'fleet.tokens' => ['h1' => 't1', 'h3' => 't3', 'h4' => 't4']]);
+        Http::fake(function ($request) use ($html, $dom, &$renderedOn) {
+            if (str_ends_with(parse_url($request->url(), PHP_URL_PATH), '/v1/render')) {
+                $renderedOn[] = parse_url($request->url(), PHP_URL_PORT);
+
+                return Http::response(['ok' => true, 'render' => ['dom' => $dom[$request['url']] ?? '', 'ms' => 900]]);
+            }
+
+            return isset($html[$request->url()]) ? Http::response($html[$request->url()], 200, ['Content-Type' => 'text/html']) : Http::response('not found', 404);
+        });
+    }
+
+    public function test_a_kit_built_by_javascript_is_found_in_the_rendered_page(): void
+    {
+        $renderedOn = [];
+        // The HTML is innocent; the script writes a ClickFix page after load.
+        $this->rendering(
+            ['https://shopx.codeinchrome.com/' => '<p>Loading</p><script src="/app.js"></script>'],
+            ['https://shopx.codeinchrome.com/' => '<p>Verify you are human: press Win+R, then Ctrl+V</p>'
+                .'<script>navigator.clipboard.writeText("powershell -enc AAAA")</script>'],
+            $renderedOn);
+        $r = app(LinkScanner::class)->scan($this->site(), render: true);
+        $this->assertCount(1, $r['ban'], implode("\n", $r['ban']));
+        $this->assertStringContainsString('ClickFix', $r['ban'][0]);
+        $this->assertStringContainsString('after its scripts ran', $r['ban'][0]);
+        // Rendered by another host than the site's own (h1), whose address a kit could learn.
+        $this->assertNotEmpty($renderedOn);
+        $this->assertNotContains(9441, $renderedOn);
+    }
+
+    public function test_what_the_html_already_shows_is_not_reported_twice(): void
+    {
+        $renderedOn = [];
+        $page = '<a href="https://bit.ly/x">deal</a>';
+        $this->rendering(['https://shopx.codeinchrome.com/' => $page], ['https://shopx.codeinchrome.com/' => $page], $renderedOn);
+        $r = app(LinkScanner::class)->scan($this->site(), render: true);
+        $this->assertCount(1, $r['review'], implode("\n", $r['review']));
+    }
+
+    public function test_rendering_is_once_a_day_on_the_hourly_scan_and_always_for_a_report(): void
+    {
+        $renderedOn = [];
+        $this->rendering(['https://shopx.codeinchrome.com/' => '<p>hi</p>'], ['https://shopx.codeinchrome.com/' => '<p>hi</p>'], $renderedOn);
+        $site = $this->site();
+        app(LinkScanner::class)->scan($site);
+        app(LinkScanner::class)->scan($site);
+        $this->assertCount(1, $renderedOn, 'the second hourly scan the same day renders nothing');
+        app(LinkScanner::class)->scan($site, render: true);
+        $this->assertCount(2, $renderedOn, 'a report renders regardless');
+        $this->travel(25)->hours();
+        app(LinkScanner::class)->scan($site);
+        $this->assertCount(3, $renderedOn, 'and the next day it renders again');
+    }
+
+    public function test_a_renderer_that_fails_does_not_fail_the_scan(): void
+    {
+        config(['fleet.hosts' => ['h1' => ['ip' => '10.0.0.1', 'tunnel_port' => 9441, 'capacity' => 10], 'h3' => ['ip' => '10.0.0.3', 'tunnel_port' => 9443, 'capacity' => 10]],
+            'fleet.tokens' => ['h1' => 't1', 'h3' => 't3']]);
+        Http::fake(fn ($request) => str_contains($request->url(), '/v1/render')
+            ? Http::response(['ok' => false, 'error' => 'cannot_render'], 400)
+            : Http::response('<a href="https://bit.ly/x">deal</a>', 200, ['Content-Type' => 'text/html']));
+        $r = app(LinkScanner::class)->scan($this->site(), render: true);
+        $this->assertCount(1, $r['review'], 'the HTML is still read');
+    }
 }
+

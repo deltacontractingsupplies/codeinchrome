@@ -48,6 +48,11 @@ say "building the base image"
 ssh_ 'mkdir -p /opt/codeinchrome/images/laravel-8.3'
 scp -q infra/images/laravel-8.3/Dockerfile infra/images/laravel-8.3/cic-start "root@$ip:/opt/codeinchrome/images/laravel-8.3/"
 ssh_ 'cd /opt/codeinchrome/images/laravel-8.3 && docker build -q -t codeinchrome/laravel:8.3 . >/dev/null && echo "  image built and self-verified"'
+# The link scanner's page renderer (audit A15): Chromium, run by the agent
+# in a throwaway container with every privilege taken away (render.go).
+ssh_ 'mkdir -p /opt/codeinchrome/images/render'
+scp -q infra/images/render/Dockerfile "root@$ip:/opt/codeinchrome/images/render/"
+ssh_ 'cd /opt/codeinchrome/images/render && docker build -q -t codeinchrome/render:1 . >/dev/null && echo "  renderer image built"'
 
 say "installing the agent"
 scp -q agent/bin/cic-agent-linux "root@$ip:/opt/codeinchrome/bin/cic-agent.new"

@@ -491,7 +491,8 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	// When a person last loaded each site (sites/visits.go): control pauses
 	// free sites nobody has visited or edited for 30 days.
 	mux.HandleFunc("GET /v1/visits", func(w http.ResponseWriter, r *http.Request) {
-		v, err := mgr.LastVisits()
+		// ignore: the fleet's own addresses (the control plane knows them).
+		v, err := mgr.LastVisits(r.URL.Query()["ignore"]...)
 		if err != nil {
 			writeJSON(w, http.StatusInternalServerError, fail("visits_unreadable", err.Error()))
 			return
@@ -558,6 +559,23 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 			return
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"hits": res.Hits, "truncated": res.Truncated}))
+	})
+	// A hosted page as a browser has it after its scripts ran (render.go),
+	// for the link scanner.
+	mux.HandleFunc("POST /v1/render", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 4<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("invalid_body", "send JSON: url"))
+			return
+		}
+		res, err := mgr.RenderURL(r.Context(), body.URL)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_render", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"render": res}))
 	})
 	// The site itself replaced by a public GitHub repository, after a backup.
 	mux.HandleFunc("POST /v1/sites/{id}/clone-replace", func(w http.ResponseWriter, r *http.Request) {

@@ -58,7 +58,7 @@ class AbuseReportController extends Controller
                 ."Look, then: php artisan abuse:resume {$site->site_id}   or   php artisan abuse:ban ".($site->user?->email ?? '<email>'));
         }
         dispatch(function () use ($site) {
-            $r = app(\App\Abuse\LinkScanner::class)->scan($site);
+            $r = app(\App\Abuse\LinkScanner::class)->scan($site, render: true);
             if ($r['ban'] !== []) {
                 app(\App\Abuse\Enforcer::class)->ban($site->user, "After an abuse report, the site's pages:\n".implode("\n", $r['ban']));
             } elseif ($r['review'] !== []) {

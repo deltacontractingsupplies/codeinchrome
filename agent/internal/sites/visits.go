@@ -3,6 +3,7 @@ package sites
 import (
 	"encoding/json"
 	"io"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -31,8 +32,16 @@ var notAVisitor = regexp.MustCompile(`(?i)^codeinchrome|bot\b|bot/|crawl|spider|
 	`headless|lighthouse|pingdom|uptime|monitor|scanner|^curl/|^wget/|^python|^go-http-client|^java/|^okhttp|` +
 	`^php|^guzzle|^axios|^node-fetch|^libwww|^apache-httpclient|^ruby|^scrapy|^masscan|^zgrab|^nuclei`)
 
-// LastVisits reports every site on this host.
-func (m *Manager) LastVisits() ([]SiteVisit, error) {
+// LastVisits reports every site on this host. Requests from the addresses
+// in ignore - the fleet's own hosts, whose page renderer reads sites like a
+// browser (render.go) - are not visits.
+func (m *Manager) LastVisits(ignore ...string) ([]SiteVisit, error) {
+	skip := map[string]bool{}
+	for _, ip := range ignore {
+		if a, err := netip.ParseAddr(strings.TrimSpace(ip)); err == nil {
+			skip[a.Unmap().String()] = true
+		}
+	}
 	entries, err := os.ReadDir(m.cfg.Root)
 	if err != nil {
 		return nil, err
@@ -45,7 +54,7 @@ func (m *Manager) LastVisits() ([]SiteVisit, error) {
 		if _, err := m.load(e.Name()); err != nil {
 			continue // not a site
 		}
-		last, _ := lastVisit(filepath.Join(caddyLogDir, e.Name()+".log"))
+		last, _ := lastVisit(filepath.Join(caddyLogDir, e.Name()+".log"), skip)
 		out = append(out, SiteVisit{Site: e.Name(), Last: last})
 	}
 	return out, nil
@@ -53,7 +62,7 @@ func (m *Manager) LastVisits() ([]SiteVisit, error) {
 
 // lastVisit reads the log from its end, a chunk at a time, and returns the
 // time of the newest request that a person made and the site answered.
-func lastVisit(path string) (int64, error) {
+func lastVisit(path string, skip map[string]bool) (int64, error) {
 	f, err := os.Open(path)
 	if err != nil {
 		return 0, err
@@ -81,7 +90,7 @@ func lastVisit(path string) (int64, error) {
 			carry, first = []byte(lines[0]), 1
 		}
 		for i := len(lines) - 1; i >= first; i-- {
-			if ts, ok := humanVisit(lines[i]); ok {
+			if ts, ok := humanVisit(lines[i], skip); ok {
 				return ts, nil
 			}
 		}
@@ -91,7 +100,7 @@ func lastVisit(path string) (int64, error) {
 }
 
 // humanVisit decides one Caddy JSON access-log line.
-func humanVisit(line string) (int64, bool) {
+func humanVisit(line string, skip map[string]bool) (int64, bool) {
 	if !strings.Contains(line, `"request"`) {
 		return 0, false
 	}
@@ -99,8 +108,9 @@ func humanVisit(line string) (int64, bool) {
 		TS      float64 `json:"ts"`
 		Status  int     `json:"status"`
 		Request struct {
-			Method  string              `json:"method"`
-			Headers map[string][]string `json:"headers"`
+			Method   string              `json:"method"`
+			ClientIP string              `json:"client_ip"`
+			Headers  map[string][]string `json:"headers"`
 		} `json:"request"`
 	}
 	if json.Unmarshal([]byte(line), &e) != nil || e.TS <= 0 {
@@ -112,6 +122,9 @@ func humanVisit(line string) (int64, bool) {
 	}
 	if len(e.Request.Headers["X-Cic-Probe"]) > 0 {
 		return 0, false // the platform's own check, looking like a browser
+	}
+	if a, err := netip.ParseAddr(e.Request.ClientIP); err == nil && skip[a.Unmap().String()] {
+		return 0, false // the fleet's own renderer: a browser, but ours
 	}
 	ua := strings.TrimSpace(strings.Join(e.Request.Headers["User-Agent"], " "))
 	if ua == "" || notAVisitor.MatchString(ua) {

@@ -40,7 +40,10 @@ class SitesIdle extends Command
         $reachable = [];
         foreach ($sites->pluck('host')->unique() as $host) {
             try {
-                $reported = collect(AgentClient::for($host)->visits()['sites'] ?? [])->pluck('last', 'site');
+                // The fleet's own addresses are not visitors: its page renderer
+                // reads sites like a browser (App\Abuse\LinkScanner).
+                $fleet = collect(config('fleet.hosts', []))->pluck('ip')->filter()->values()->all();
+                $reported = collect(AgentClient::for($host)->visits($fleet)['sites'] ?? [])->pluck('last', 'site');
                 $reachable[$host] = true;
             } catch (\Throwable $e) {
                 $this->warn("$host: visits unreadable, its sites are left alone: {$e->getMessage()}");

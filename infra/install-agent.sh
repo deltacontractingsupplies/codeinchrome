@@ -233,6 +233,8 @@ Description=codeinchrome: rebuild the Laravel base image with upstream security 
 Type=oneshot
 WorkingDirectory=/opt/codeinchrome/images/laravel-8.3
 ExecStart=/usr/bin/docker build --pull -q -t codeinchrome/laravel:8.3 .
+# The page renderer too: Chromium's security fixes arrive the same way.
+ExecStart=/usr/bin/docker build --pull -q -t codeinchrome/render:1 /opt/codeinchrome/images/render
 ExecStartPost=/usr/bin/docker image prune -f
 Nice=10
 UNIT

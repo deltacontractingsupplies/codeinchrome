@@ -54,8 +54,18 @@ class LinkScanner
         'www.sandbox.paypal.com', 'accounts.google.com', 'appleid.apple.com'];
 
     /** @return array{ban: list<string>, review: list<string>, pages: int} */
-    public function scan(Site $site): array
+    /** Pages rendered in a browser per scan (audit A15): a browser costs. */
+    public const RENDER_PAGES = 3;
+
+    /**
+     * $render: also read the first pages as a browser has them once their
+     * scripts ran - always for a report, otherwise once a day per site (the
+     * scan itself is hourly).
+     */
+    public function scan(Site $site, ?bool $render = null): array
     {
+        $render ??= \Illuminate\Support\Facades\Cache::add("linkscan.rendered.{$site->id}", true, now()->addDay());
+        $rendered = 0;
         $own = array_map('strtolower', array_merge([$site->domain], $site->domains()->pluck('domain')->all()));
         // The home page, and every GET route without parameters: a kit at a
         // path nothing links to was never fetched.
@@ -89,72 +99,106 @@ class LinkScanner
             }
             $pages++;
             $html = $res->body();
-            foreach ($this->links($html, $url) as [$kind, $target]) {
-                $host = strtolower((string) parse_url($target, PHP_URL_HOST));
-                $path = (string) parse_url($target, PHP_URL_PATH);
-                $internal = $host === '' || in_array($host, $own, true);
-                // Followed only if it looks like a page: a PDF or an image is not one.
-                $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-                if ($internal && $kind === 'a' && in_array($ext, ['', 'html', 'htm', 'php'], true)
-                    && count($queue) + count($seen) < self::MAX_PAGES * 3) {
-                    $queue[] = $target;
-                }
-                // A program on this site is refused at the edge anyway, so a
-                // link to one is the owner's doing; a link elsewhere can be a
-                // visitor's comment, so it goes to a person (the second
-                // security audit, 2026-09-25: harmless GitHub release links
-                // banned accounts).
-                if (preg_match(self::EXECUTABLE, $path) && $internal) {
-                    $ban[] = "links to a program download on the site itself: $target (on $url)";
-                } elseif (preg_match(self::EXECUTABLE, $path)) {
-                    $review[] = "links to a program download elsewhere: $target (on $url)";
-                } elseif (preg_match(self::ARCHIVE, $path) && ! $internal) {
-                    $review[] = "links to an archive elsewhere: $target (on $url)";
-                }
-                if ($internal) {
-                    continue;
-                }
-                if (in_array($host, self::SHORTENERS, true)) {
-                    $review[] = "links through a URL shortener, which hides where it goes: $target (on $url)";
-                } elseif (filter_var($host, FILTER_VALIDATE_IP)) {
-                    $review[] = "links to a bare IP address: $target (on $url)";
-                } elseif ($kind === 'form' && ! $this->allowed($host, $path)) {
-                    $review[] = "a form posts what is typed to another site: $host (on $url)";
-                } elseif ($kind === 'refresh' && ! $this->allowed($host, $path)) {
-                    // The edge refuses the same redirect sent as a header.
-                    $ban[] = "sends visitors on to another site with a meta refresh: $target (on $url)";
-                } elseif (in_array($kind, ['iframe', 'script', 'js-redirect'], true) && ! $this->allowed($host, $path)) {
-                    $review[] = ['iframe' => 'frames another site', 'script' => 'runs a script from another site', 'js-redirect' => 'sends visitors on to another site from a script'][$kind].": $target (on $url)";
-                }
-            }
-            // "ClickFix" fake CAPTCHA pages (Trend Micro, 2025-26, on Lovable,
-            // Netlify and Vercel): the page's script puts a command on the
-            // clipboard and tells the visitor to press Win+R and paste it.
-            // Both halves make the attack: a command put on the clipboard AND
-            // the visitor told to press Win+R and paste it. Either alone is
-            // also a documentation page's "copy the install command" button.
-            $clipboardCommand = preg_match('/(clipboard\.writeText|execCommand\(\s*["\']copy)[\s\S]{0,600}(powershell|mshta|cmd(\.exe)?\s*\/c|curl[^|<]{0,200}\|\s*(ba)?sh|iex\b|Invoke-WebRequest|-enc(odedcommand)?\b)/i', $html) === 1;
-            $winR = preg_match('/\b(win(dows)?(\s*key)?\s*\+\s*r|⊞\s*\+\s*r)\b/iu', strip_tags($html)) === 1
-                && preg_match('/(ctrl\s*\+\s*v|paste|verify|human|captcha)/i', strip_tags($html)) === 1;
-            if ($clipboardCommand && $winR) {
-                $ban[] = "puts a command on the visitor's clipboard and tells them to press Win+R and paste it: a ClickFix malware page (on $url)";
-            } elseif ($clipboardCommand) {
-                $review[] = "puts a command (PowerShell, mshta or a shell) on the visitor's clipboard (on $url)";
-            } elseif ($winR) {
-                $review[] = "tells visitors to press Win+R and paste something: possible ClickFix fake CAPTCHA (on $url)";
-            }
-            if (preg_match('/<input[^>]+type\s*=\s*["\']?password/i', $html)) {
-                $text = strtolower(strip_tags($html));
-                foreach (self::BRANDS as $brand) {
-                    if (preg_match('/\b'.preg_quote($brand, '/').'\b/', $text)) {
-                        $review[] = "a password form on a page that names \"$brand\": possible phishing (on $url)";
-                        break;
-                    }
-                }
+            $this->inspect($html, $url, $url, $own, $ban, $review, $queue, $seen);
+            // The same page as a browser has it once its scripts ran: a kit that
+            // builds its form, frame or "press Win+R" in JavaScript is invisible
+            // in the HTML (audit A15). Rendered on another host than the site's.
+            if ($render && $rendered < self::RENDER_PAGES && ($dom = $this->rendered($site, $url)) !== null) {
+                $rendered++;
+                $jsBan = $jsReview = [];
+                $this->inspect($dom, $url, "$url, after its scripts ran", $own, $jsBan, $jsReview, $queue, $seen);
+                // Only what the HTML alone did not already show.
+                $new = fn (array $found, array $known) => array_filter($found,
+                    fn ($m) => ! in_array(str_replace(', after its scripts ran)', ')', $m), $known, true));
+                array_push($ban, ...$new($jsBan, $ban));
+                array_push($review, ...$new($jsReview, $review));
             }
         }
 
         return ['ban' => array_values(array_unique($ban)), 'review' => array_values(array_unique($review)), 'pages' => $pages];
+    }
+
+    /** One page's HTML (or rendered DOM) against every rule; findings added in place. */
+    private function inspect(string $html, string $url, string $where, array $own, array &$ban, array &$review, array &$queue, array $seen): void
+    {
+        foreach ($this->links($html, $url) as [$kind, $target]) {
+            $host = strtolower((string) parse_url($target, PHP_URL_HOST));
+            $path = (string) parse_url($target, PHP_URL_PATH);
+            $internal = $host === '' || in_array($host, $own, true);
+            // Followed only if it looks like a page: a PDF or an image is not one.
+            $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+            if ($internal && $kind === 'a' && in_array($ext, ['', 'html', 'htm', 'php'], true)
+                && count($queue) + count($seen) < self::MAX_PAGES * 3) {
+                $queue[] = $target;
+            }
+            // A program on this site is refused at the edge anyway, so a
+            // link to one is the owner's doing; a link elsewhere can be a
+            // visitor's comment, so it goes to a person (the second
+            // security audit, 2026-09-25: harmless GitHub release links
+            // banned accounts).
+            if (preg_match(self::EXECUTABLE, $path) && $internal) {
+                $ban[] = "links to a program download on the site itself: $target (on $where)";
+            } elseif (preg_match(self::EXECUTABLE, $path)) {
+                $review[] = "links to a program download elsewhere: $target (on $where)";
+            } elseif (preg_match(self::ARCHIVE, $path) && ! $internal) {
+                $review[] = "links to an archive elsewhere: $target (on $where)";
+            }
+            if ($internal) {
+                continue;
+            }
+            if (in_array($host, self::SHORTENERS, true)) {
+                $review[] = "links through a URL shortener, which hides where it goes: $target (on $where)";
+            } elseif (filter_var($host, FILTER_VALIDATE_IP)) {
+                $review[] = "links to a bare IP address: $target (on $where)";
+            } elseif ($kind === 'form' && ! $this->allowed($host, $path)) {
+                $review[] = "a form posts what is typed to another site: $host (on $where)";
+            } elseif ($kind === 'refresh' && ! $this->allowed($host, $path)) {
+                // The edge refuses the same redirect sent as a header.
+                $ban[] = "sends visitors on to another site with a meta refresh: $target (on $where)";
+            } elseif (in_array($kind, ['iframe', 'script', 'js-redirect'], true) && ! $this->allowed($host, $path)) {
+                $review[] = ['iframe' => 'frames another site', 'script' => 'runs a script from another site', 'js-redirect' => 'sends visitors on to another site from a script'][$kind].": $target (on $where)";
+            }
+        }
+        // "ClickFix" fake CAPTCHA pages (Trend Micro, 2025-26, on Lovable,
+        // Netlify and Vercel): the page's script puts a command on the
+        // clipboard and tells the visitor to press Win+R and paste it.
+        // Both halves make the attack: a command put on the clipboard AND
+        // the visitor told to press Win+R and paste it. Either alone is
+        // also a documentation page's "copy the install command" button.
+        $clipboardCommand = preg_match('/(clipboard\.writeText|execCommand\(\s*["\']copy)[\s\S]{0,600}(powershell|mshta|cmd(\.exe)?\s*\/c|curl[^|<]{0,200}\|\s*(ba)?sh|iex\b|Invoke-WebRequest|-enc(odedcommand)?\b)/i', $html) === 1;
+        $winR = preg_match('/\b(win(dows)?(\s*key)?\s*\+\s*r|⊞\s*\+\s*r)\b/iu', strip_tags($html)) === 1
+            && preg_match('/(ctrl\s*\+\s*v|paste|verify|human|captcha)/i', strip_tags($html)) === 1;
+        if ($clipboardCommand && $winR) {
+            $ban[] = "puts a command on the visitor's clipboard and tells them to press Win+R and paste it: a ClickFix malware page (on $where)";
+        } elseif ($clipboardCommand) {
+            $review[] = "puts a command (PowerShell, mshta or a shell) on the visitor's clipboard (on $where)";
+        } elseif ($winR) {
+            $review[] = "tells visitors to press Win+R and paste something: possible ClickFix fake CAPTCHA (on $where)";
+        }
+        if (preg_match('/<input[^>]+type\s*=\s*["\']?password/i', $html)) {
+            $text = strtolower(strip_tags($html));
+            foreach (self::BRANDS as $brand) {
+                if (preg_match('/\b'.preg_quote($brand, '/').'\b/', $text)) {
+                    $review[] = "a password form on a page that names \"$brand\": possible phishing (on $where)";
+                    break;
+                }
+            }
+        }
+    }
+
+    /** The page rendered on another host than the site's; null if that fails. */
+    private function rendered(Site $site, string $url): ?string
+    {
+        $hosts = array_keys(config('fleet.hosts', []));
+        $others = array_values(array_diff($hosts, [$site->host]));
+        $host = $others ? $others[crc32($site->site_id) % count($others)] : $site->host;
+        try {
+            $dom = \App\Fleet\AgentClient::for($host)->render($url)['dom'] ?? '';
+        } catch (\Throwable) {
+            return null; // the raw read still counts; a renderer that failed proves nothing
+        }
+
+        return is_string($dom) && $dom !== '' ? $dom : null;
     }
 
     /**
