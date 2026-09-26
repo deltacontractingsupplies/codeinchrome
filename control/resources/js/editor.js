@@ -57,6 +57,7 @@ const SITE = {
   githubLinkUrl: root.dataset.githubLink,
   githubPushUrl: root.dataset.githubPush,
   signInLinkUrl: root.dataset.signInLink,
+  screensUrl: root.dataset.screens,
   commandLiveUrl: root.dataset.commandLive,
   dbSnapshotsUrl: root.dataset.dbSnapshots,
   dbSnapshotRestoreUrl: root.dataset.dbSnapshotRestore,
@@ -2172,6 +2173,36 @@ async function restoreSnapshot(name, { confirm = false, interactive = true } = {
   }
   return r;
 }
+/* Every screen size (ScreensController): a page at phone, tablet and desktop
+ * size side by side over the editor, so a person - or an agent taking ONE
+ * screenshot - sees all three at once. */
+async function showScreens(path = '/') {
+  status(`Showing ${path} at every screen size…`);
+  const r = await apiAt(SITE.screensUrl, 'POST', {}, { path });
+  if (!r.ok) {
+    status(r.hint ?? 'The page could not be shown.', true);
+    return r;
+  }
+  $('screensTitle').textContent = `${r.url} at every screen size`;
+  $('screensRow').replaceChildren(...r.shots.map((s) => {
+    const fig = document.createElement('figure');
+    const img = document.createElement('img');
+    img.src = `data:image/png;base64,${s.png}`;
+    img.alt = `${path} on a ${s.name}, ${s.width}×${s.height}`;
+    img.style.aspectRatio = `${s.width} / ${s.height}`;
+    const cap = document.createElement('figcaption');
+    cap.textContent = `${s.name} · ${s.width}×${s.height}`;
+    fig.style.flexGrow = String(s.width);
+    fig.append(img, cap);
+    return fig;
+  }));
+  $('screens').hidden = false;
+  status(`${path} at every screen size`);
+  return { ok: true, url: r.url, sizes: r.shots.map((s) => `${s.name} ${s.width}×${s.height}`),
+    hint: 'Shown side by side over the editor: take ONE screenshot of this tab to see all three.' };
+}
+$('screensClose').addEventListener('click', () => { $('screens').hidden = true; });
+document.addEventListener('keydown', (e) => { if (e.key === 'Escape' && !$('screens').hidden) $('screens').hidden = true; });
 
 $('modeHistory').addEventListener('click', () => setMode('history'));
 $('modeExt').addEventListener('click', () => setMode('ext'));
@@ -2735,6 +2766,8 @@ false. Nothing is paraphrased.
   cic.github.push()            push now - after the key is added on GitHub ("waiting_for_key" until then)
   cic.signInUrl(path, { as })  a one-time link (10 minutes, once) that opens the site in a new tab
                                signed in as the app's user \`as\` (default 1) - scripts and forms work
+  cic.screens(path)            the page at phone, tablet and desktop size, side by side over
+                               the editor - then ONE screenshot of this tab shows all three
   cic.db.export()              download the whole database as .sql.gz
   cic.db.import(blob, { confirm }) load a .sql or .sql.gz File/Blob (95 MB at most).
                                Refused with "needs_confirm" unless confirm: true. The current
@@ -3823,6 +3856,9 @@ const cicApi = {
   // already signed in as the app's user `as` - a real session: scripts run,
   // forms work. Open it in a NEW tab with your browser tool. No password.
   signInUrl: (path = '/', { as = 1, guard } = {}) => apiAt(SITE.signInLinkUrl, 'POST', {}, { user: as, path, ...(guard ? { guard } : {}) }),
+  // The page at phone, tablet and desktop size, side by side over the
+  // editor: one call, then ONE screenshot of this tab shows all three.
+  screens: (path = '/') => showScreens(String(path)),
   // The Laravel names the editor completes, straight from the site.
   laravel: Object.freeze({
     routes: async () => ({ ok: true, names: await laravel.routeNames() }),

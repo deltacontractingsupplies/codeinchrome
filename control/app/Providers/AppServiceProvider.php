@@ -141,6 +141,8 @@ class AppServiceProvider extends ServiceProvider
         // The public demo source pages: generous for a reader, not for a scraper.
         RateLimiter::for('demo-code', fn (Request $r) => Limit::perMinute(120)->by($ip($r)));
         RateLimiter::for('logs', fn (Request $r) => Limit::perMinute(60)->by($by($r)));
+        // Three browser runs on a shared renderer each: a few a minute is plenty.
+        RateLimiter::for('screens', fn (Request $r) => Limit::perMinute(6)->by($by($r)));
         // A running command's output, polled every ~400 ms while it runs.
         RateLimiter::for('command-live', fn (Request $r) => Limit::perMinute(240)->by($by($r)));
         RateLimiter::for('billing', fn (Request $r) => Limit::perMinute(10)->by($by($r)));

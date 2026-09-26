@@ -588,6 +588,25 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"render": res}))
 	})
+	// A hosted page at phone, tablet and desktop size (sites.RenderShots): the
+	// editor shows them side by side, so an agent checks every screen in one
+	// look.
+	mux.HandleFunc("POST /v1/render/shots", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			URL string `json:"url"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 8<<10)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("invalid_body", "send JSON: url"))
+			return
+		}
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(3 * time.Minute))
+		shots, err := mgr.RenderShots(r.Context(), body.URL)
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_render", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"shots": shots}))
+	})
 	// The site itself replaced by a public GitHub repository, after a backup.
 	mux.HandleFunc("POST /v1/sites/{id}/clone-replace", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
