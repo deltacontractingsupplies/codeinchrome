@@ -6,6 +6,7 @@ import (
 	"compress/gzip"
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -78,5 +79,59 @@ func TestAPausedSiteIsNotMoved(t *testing.T) {
 	m.save(Site{ID: id, Suspended: true})
 	if err := m.ExportFiles(context.Background(), id, &bytes.Buffer{}); err == nil || !strings.Contains(err.Error(), "paused") {
 		t.Fatalf("a paused site was exported: %v", err)
+	}
+}
+
+// A moved Laravel site arrives without its compiled views and file cache
+// (transferExcludes); the unpack must leave their directories in place, or
+// every page on the new host is a 500. Runs the real script against a
+// directory standing in for /var/www/html.
+func TestUnpackRecreatesTheDirectoriesTheTransferLeftOut(t *testing.T) {
+	// The script uses GNU tar's flags, as the site containers have it; a
+	// Mac's bsdtar refuses --no-overwrite-dir. CI (Ubuntu) runs this.
+	if out, _ := exec.Command("tar", "--version").Output(); !strings.Contains(string(out), "GNU tar") {
+		t.Skip("needs GNU tar (the site containers' tar); this tar is: " + strings.SplitN(string(out), "\n", 2)[0])
+	}
+	archive := tarGz(t, map[string]string{
+		"./routes/web.php":               "<?php",
+		"./storage/framework/":           "",
+		"./storage/framework/sessions/":  "",
+		"./storage/framework/.gitignore": "*",
+		"./storage/logs/":                "",
+	})
+	root := t.TempDir()
+	args := unpackScript(root)
+	cmd := exec.Command(args[0], args[1:]...)
+	cmd.Stdin = bytes.NewReader(archive)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("unpack: %v: %s", err, out)
+	}
+	for _, d := range []string{"storage/framework/views", "storage/framework/cache/data", "storage/framework/sessions"} {
+		if info, err := os.Stat(filepath.Join(root, d)); err != nil || !info.IsDir() {
+			t.Errorf("%s missing after the unpack: %v", d, err)
+		}
+	}
+	if b, _ := os.ReadFile(filepath.Join(root, "routes/web.php")); string(b) != "<?php" {
+		t.Errorf("the site's own files did not arrive: %q", b)
+	}
+
+	// Not a Laravel tree: nothing is invented.
+	plain := t.TempDir()
+	args = unpackScript(plain)
+	cmd = exec.Command(args[0], args[1:]...)
+	cmd.Stdin = bytes.NewReader(tarGz(t, map[string]string{"./index.html": "hi"}))
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("unpack: %v: %s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(plain, "storage")); err == nil {
+		t.Error("a storage/ directory was created in a site that had none")
+	}
+
+	// A broken archive fails the unpack instead of reporting success.
+	args = unpackScript(t.TempDir())
+	cmd = exec.Command(args[0], args[1:]...)
+	cmd.Stdin = strings.NewReader("not a tar")
+	if err := cmd.Run(); err == nil {
+		t.Error("a broken archive unpacked without an error")
 	}
 }

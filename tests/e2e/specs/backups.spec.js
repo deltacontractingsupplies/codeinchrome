@@ -89,6 +89,10 @@ test('back up, change the site, restore it, and the restore can itself be undone
     await expect(async () => {
       const [address] = await waitForDns(`${siteName}.codeinchrome.com`);
       expect((await httpsGet(`${siteName}.codeinchrome.com`, '/kept.txt', address)).body).toBe('the original');
+      // A page Laravel renders, not only a static file: backups leave out
+      // the compiled views, and a restore that did not recreate their
+      // directory answered every page with a 500 while kept.txt still served.
+      expect((await httpsGet(`${siteName}.codeinchrome.com`, '/', address)).status).toBe(200);
     }).toPass({ timeout: 60_000 });
     await page.goto(`/sites/${siteName}/edit`);
     await expect(page.locator('#sbMsg')).toHaveText('Ready');

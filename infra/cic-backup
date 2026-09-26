@@ -178,6 +178,13 @@ print(dbs[0]["short_id"] if dbs else "")' "$which")
     chmod 0700 "$vol/history.git"
   fi
   rm -rf "$staging" "$vol/.replaced-$$"
+  # Backups leave out the compiled views and the file cache (backup_site),
+  # so the restored tree has no directories for them - and Laravel answers
+  # EVERY page with a 500 ("Please provide a valid cache path") until they
+  # exist. Found 2026-09-26 on a live store after a restore.
+  if [[ -d $app/storage/framework ]]; then
+    mkdir -p "$app/storage/framework/cache/data" "$app/storage/framework/views"
+  fi
   chown -R 33:33 "$app"
 
   # The restore is itself a version: what the site held before it stays one

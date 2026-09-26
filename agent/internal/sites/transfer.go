@@ -31,6 +31,18 @@ import (
 // transferExcludes are regenerated on the target: compiled views and caches.
 var transferExcludes = []string{"./storage/framework/cache", "./storage/framework/views", "./storage/framework/sessions/*"}
 
+// unpackScript unpacks the tar on stdin into root, then recreates the
+// directories transferExcludes left out. Laravel does not create them itself:
+// without storage/framework/views every page is a 500 ("Please provide a
+// valid cache path") - what a whole-site restore did to a live store on
+// 2026-09-26, and what a move would have done the same way.
+func unpackScript(root string) []string {
+	return []string{"sh", "-c", `tar -C "$1" -xzf - --no-same-owner --no-overwrite-dir || exit
+if [ -d "$1/storage/framework" ]; then
+  mkdir -p "$1/storage/framework/cache/data" "$1/storage/framework/views" "$1/storage/framework/sessions"
+fi`, "unpack", root}
+}
+
 // transferCommand runs tar in a site's container; a variable so tests can
 // stand in for Docker.
 var transferCommand = func(ctx context.Context, container string, args ...string) *exec.Cmd {
@@ -74,7 +86,7 @@ func (m *Manager) ImportFiles(ctx context.Context, id string, r io.Reader) error
 	if out, err := clear.CombinedOutput(); err != nil {
 		return fmt.Errorf("clear the target: %v: %s", err, strings.TrimSpace(string(out)))
 	}
-	cmd := transferCommand(ctx, site.Container, "tar", "-C", "/var/www/html", "-xzf", "-", "--no-same-owner", "--no-overwrite-dir")
+	cmd := transferCommand(ctx, site.Container, unpackScript("/var/www/html")...)
 	cmd.Stdin = r
 	var stderr cappedBuffer
 	stderr.limit = 4 << 10

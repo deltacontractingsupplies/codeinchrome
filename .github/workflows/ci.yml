@@ -106,7 +106,7 @@ jobs:
       - name: shellcheck
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq shellcheck
-          shellcheck -S warning infra/*.sh infra/hooks/* .github/cla/*.sh
+          shellcheck -S warning infra/*.sh infra/cic-backup infra/cic-backup-maintain infra/cic-mount infra/hooks/* .github/cla/*.sh
       - name: the contributor-agreement check
         run: bash .github/cla/test.sh
       - name: workflow audit (zizmor)
