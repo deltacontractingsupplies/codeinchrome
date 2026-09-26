@@ -51,9 +51,12 @@ class LinkScanner
 
     /** Where a free site may post a form or send a visitor without review (the edge guard's list). */
     private const ALLOWED_HOSTS = ['checkout.stripe.com', 'billing.stripe.com', 'connect.stripe.com', 'paypal.com', 'www.paypal.com',
-        'www.sandbox.paypal.com', 'accounts.google.com', 'appleid.apple.com'];
+        'www.sandbox.paypal.com', 'accounts.google.com', 'appleid.apple.com',
+        // Cloudflare's own analytics beacon, which Cloudflare - our CDN, not
+        // the site - adds to pages it serves (seen on every page of every
+        // site in a dry run, 2026-09-26).
+        'static.cloudflareinsights.com'];
 
-    /** @return array{ban: list<string>, review: list<string>, pages: int} */
     /** The site's own script files read per scan. */
     public const MAX_SCRIPTS = 5;
 
@@ -63,6 +66,8 @@ class LinkScanner
     public const RENDER_PAGES = 3;
 
     /**
+     * @return array{ban: list<string>, review: list<string>, pages: int}
+     *
      * $render: also read the first pages as a browser has them once their
      * scripts ran - always for a report, otherwise once a day per site (the
      * scan itself is hourly).

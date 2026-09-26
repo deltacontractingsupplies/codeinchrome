@@ -300,5 +300,12 @@ class LinkScannerTest extends TestCase
         app(LinkScanner::class)->scan($this->site(), render: false);
         $this->assertCount(5, array_filter($fetched, fn ($u) => str_contains($u, '/js/')));
     }
+
+    public function test_cloudflares_own_analytics_beacon_is_not_the_sites_doing(): void
+    {
+        $this->pages(['https://shopx.codeinchrome.com/' => '<p>Shop</p><script defer src="https://static.cloudflareinsights.com/beacon.min.js/v31edd6df95"></script>']);
+        $r = app(LinkScanner::class)->scan($this->site(), render: false);
+        $this->assertSame([], $r['review']);
+    }
 }
 
