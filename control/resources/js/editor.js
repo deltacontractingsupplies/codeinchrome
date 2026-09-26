@@ -1790,17 +1790,35 @@ async function revealInTree(path) {
   renderTree();
 }
 
-async function refreshAncestors(path) {
-  // Expand and reload every directory down to the new file, so it is visible.
-  const parts = norm(path).split('/').filter(Boolean);
-  let dir = '/';
-  await loadDir('/');
-  for (const part of parts.slice(0, -1)) {
-    dir = dir === '/' ? `/${part}` : `${dir}/${part}`;
-    expanded.add(dir);
-    await loadDir(dir);
+// Expand every folder down to each path, so it is visible, and reload those
+// folders - and, with everyOpen, every other open one - then draw the tree
+// once. All the listings are asked for at once: each is a round trip to the
+// host, and one after another they took seconds (2.8 s for a mkdir with a
+// dozen folders open, measured 2026-09-26) where together they take one.
+async function reloadTree(paths, { everyOpen = false } = {}) {
+  const dirs = new Set(['/']);
+  for (const path of paths) {
+    let dir = '';
+    for (const part of norm(path).split('/').filter(Boolean).slice(0, -1)) {
+      dir = `${dir}/${part}`;
+      expanded.add(dir);
+      dirs.add(dir);
+    }
   }
+  if (everyOpen) for (const dir of expanded) if (listings.has(dir)) dirs.add(dir);
+  await Promise.all([...dirs].map((dir) => loadDir(dir)));
   renderTree();
+}
+
+async function refreshAncestors(path) {
+  await reloadTree([path]);
+}
+
+// The same, for a caller that has its answer already: the file is saved or
+// the folder made, and a person or an agent waiting on the call should not
+// also wait for the tree to catch up.
+function refreshInBackground(paths, options) {
+  reloadTree(paths, options).catch(() => {});
 }
 
 async function removeFile(path) {
@@ -2511,7 +2529,7 @@ const shellIo = {
   removeTree: (path, confirm) => deleteFolder(path, { confirm }),
   removeEmptyDir: async (path) => {
     const r = await apiAt(SITE.treeUrl, 'DELETE', { path, empty: 1 });
-    if (r.ok) await reloadAround(parentOf(path));
+    if (r.ok) reloadAroundInBackground(parentOf(path));
     return r;
   },
   grep: (o) => apiAt(SITE.grepUrl, 'GET', shellQuery(o)),
@@ -2524,7 +2542,7 @@ const shellIo = {
   query: (sql, write) => apiAt(SITE.dbQueryUrl, 'POST', {}, { sql, write }),
   clone: async (o) => {
     const r = await apiAt(SITE.cloneUrl, 'POST', {}, o);
-    if (r.ok && !o.replace) (async () => { await reloadAround(o.into); })();
+    if (r.ok && !o.replace) reloadAroundInBackground(o.into);
     return r;
   },
   operation: () => apiAt(SITE.operationUrl, 'GET'),
@@ -3067,14 +3085,16 @@ async function siteRequest(path, options = {}) {
  */
 
 async function reloadAround(...paths) {
-  for (const p of paths) await refreshAncestors(p);
-  for (const dir of ['/', ...expanded]) if (listings.has(dir)) await loadDir(dir);
-  renderTree();
+  await reloadTree(paths, { everyOpen: true });
+}
+
+function reloadAroundInBackground(...paths) {
+  refreshInBackground(paths, { everyOpen: true });
 }
 
 async function mkdirAt(path) {
   const res = await apiAt(SITE.mkdirUrl, 'POST', {}, { path: norm(path) });
-  if (res.ok) { expanded.add(norm(path)); await reloadAround(norm(path)); status(`Created ${norm(path)}/`); }
+  if (res.ok) { expanded.add(norm(path)); reloadAroundInBackground(norm(path)); status(`Created ${norm(path)}/`); }
   else status(`${norm(path)}: ${res.hint}`, true);
   return res;
 }
@@ -3091,7 +3111,7 @@ async function movePath(from, to) {
       if (active === key) active = to + key.slice(from.length);
     }
   }
-  await reloadAround(from, to);
+  reloadAroundInBackground(from, to);
   show(active);
   status(`Moved ${from} → ${to}`);
   return res;
@@ -3099,21 +3119,21 @@ async function movePath(from, to) {
 
 async function copyPath(from, to) {
   const res = await apiAt(SITE.copyUrl, 'POST', {}, { from: norm(from), to: norm(to) });
-  if (res.ok) { await reloadAround(norm(to)); status(`Copied to ${norm(to)}`); }
+  if (res.ok) { reloadAroundInBackground(norm(to)); status(`Copied to ${norm(to)}`); }
   else status(`${norm(from)}: ${res.hint}`, true);
   return res;
 }
 
 async function zipPath(from, to) {
   const res = await apiAt(SITE.zipUrl, 'POST', {}, { from: norm(from), to: norm(to) });
-  if (res.ok) { await reloadAround(norm(to)); status(`Archived to ${norm(to)} (secrets left out)`); }
+  if (res.ok) { reloadAroundInBackground(norm(to)); status(`Archived to ${norm(to)} (secrets left out)`); }
   else status(`${norm(from)}: ${res.hint}`, true);
   return res;
 }
 
 async function unzipPath(archive, into) {
   const res = await apiAt(SITE.unzipUrl, 'POST', {}, { archive: norm(archive), into: norm(into) });
-  if (res.ok) { expanded.add(norm(into)); await reloadAround(norm(into)); status(`Extracted into ${norm(into)}/`); }
+  if (res.ok) { expanded.add(norm(into)); reloadAroundInBackground(norm(into)); status(`Extracted into ${norm(into)}/`); }
   else status(`${norm(archive)}: ${res.hint}`, true);
   return res;
 }
@@ -3125,7 +3145,7 @@ async function deleteFolder(path, { confirm = false } = {}) {
     for (const key of [...tabs.keys()]) if (key.startsWith(path + '/') && !tabs.get(key).dirty) tabs.delete(key);
     expanded.delete(path);
     listings.delete(path);
-    await reloadAround(parentOf(path));
+    reloadAroundInBackground(parentOf(path));
     show(tabs.has(active) ? active : ([...tabs.keys()][0] ?? null));
     status(`Deleted ${path}/ - its files are in the bin (History)`);
   } else {
@@ -3652,7 +3672,7 @@ const cicApi = {
         res.note = 'Written unconditionally: no revision was checked, so a concurrent change would have been overwritten. Read the file first, or pass expect.';
       }
       agentWrote(path, content, res.revision, { created: res.created });
-      await refreshAncestors(path);
+      refreshInBackground([path]);
       status(`Agent wrote ${path}`);
     }
     return res;
@@ -3681,7 +3701,7 @@ const cicApi = {
       // One refresh per folder, not per file, and in the background: the
       // files are saved, and the caller should not wait for the tree.
       const oneEach = new Map(list.map((f) => [f.path.slice(0, f.path.lastIndexOf('/')) || '/', f.path]));
-      (async () => { for (const p of oneEach.values()) await refreshAncestors(p); })();
+      refreshInBackground([...oneEach.values()]);
       status(`Agent wrote ${res.written.length} files`);
     }
     return res;
