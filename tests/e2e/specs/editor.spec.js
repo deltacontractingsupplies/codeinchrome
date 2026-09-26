@@ -216,6 +216,33 @@ test('a person and an agent can both edit a real site, without erasing each othe
     await expectShown(page, /edited by the agent/);
   });
 
+  await test.step('a 150-file write keeps the editor responsive, with one preview tab', async () => {
+    // The longest gap between animation frames while the editor follows a
+    // big write: a frozen page would show seconds here.
+    const r = await page.evaluate(async () => {
+      let last = performance.now();
+      let worst = 0;
+      let on = true;
+      const tick = (t) => { worst = Math.max(worst, t - last); last = t; if (on) requestAnimationFrame(tick); };
+      requestAnimationFrame(tick);
+      const files = {};
+      for (let i = 0; i < 150; i++) files[`/app/Bulk/Item${i}.php`] = `<?php\n\nnamespace App\\Bulk;\n\nclass Item${i} {}\n`;
+      const t0 = performance.now();
+      const res = await window.cic.writeMany(files);
+      await new Promise((ok) => setTimeout(ok, 1500)); // the tree and the follow tab catch up
+      on = false;
+      return { ok: res.ok, written: res.written?.length, ms: Math.round(performance.now() - t0), worstFrameMs: Math.round(worst),
+        previews: document.querySelectorAll('#tabs .tab.agent-preview').length };
+    });
+    expect(r.ok).toBe(true);
+    expect(r.written).toBe(150);
+    expect(r.previews, 'a big write opens one preview tab, not 150').toBeLessThanOrEqual(1);
+    expect(r.worstFrameMs, `the page froze for ${r.worstFrameMs} ms`).toBeLessThan(1000);
+    test.info().annotations.push({ type: 'bulk write', description: `150 files in ${r.ms} ms, longest frame gap ${r.worstFrameMs} ms` });
+    const gone = await page.evaluate(() => window.cic.rmdir('/app/Bulk', { confirm: true }));
+    expect(gone.ok, gone.hint).toBe(true);
+  });
+
   await test.step('the person sees each file the agent writes as it is written, not at the end', async () => {
     // A file that is NOT open: following the agent opens it in a preview tab,
     // with the lines it wrote highlighted, and the step is in the Agent panel.
