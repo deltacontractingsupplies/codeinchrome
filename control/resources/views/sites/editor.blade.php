@@ -68,6 +68,7 @@
                 <p>This page is the editor of the live site. Agents build here, by running JavaScript in this page - never on their own computer.</p>
                 <p><code>await cic.help()</code> lists every call. The fast path: <code>cic.writeMany({...})</code>, <code>cic.run('artisan', [...])</code>, <code>cic.request('/path')</code>.</p>
                 <p>No codeinchrome skill loaded? Read it first: <code>await cic.skill()</code>, or whole at <a href="{{ route('agent.skill') }}" target="_blank" rel="noopener">{{ route('agent.skill') }}</a>. Then <code>await cic.hello()</code>.</p>
+                <p>Using Claude? Add the skill once and every chat knows it: in Claude, <strong>Customize → Plugins → Add marketplace</strong>, then enter <code>{{ trim((string) parse_url(config('legal.source.url'), PHP_URL_PATH), '/') }}</code>.</p>
                 <p>This editor is open source: <a href="{{ config('legal.source.url') }}" target="_blank" rel="noopener">codeinchrome on GitHub</a>.</p>
             </div>
         </details>

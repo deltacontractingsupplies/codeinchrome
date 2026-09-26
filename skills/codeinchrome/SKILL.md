@@ -60,6 +60,25 @@ A page in a route closure, or HTML in a PHP string, is a failure, not a shortcut
 - **Tests for what you build**: a feature test per page and action
   (`make:test ItemTest`), run with `await cic.run('artisan', ['test'])`.
 
+## Tested, secure, no duplicates, every screen size (required)
+
+- **Look before you build.** `cic.overview()` and `cic.grep('Invoice|invoice')`: if the app
+  already has a model, controller, component or layout that does it, extend that one -
+  never a second copy. Markup used twice is a Blade component; logic used twice is one
+  method. One layout.
+- **Keep a todo list** (your own todo tool) for anything with more than one step, and
+  tick each item only when it is built AND tested. Never say "done" with an item open.
+- **Every private page is authorized, and a test proves it.** `auth` middleware plus a
+  Policy (`make:policy`) for every model action. For each one a feature test shows a
+  guest is sent to log in and ANOTHER user gets 403/404 on someone else's record -
+  `/items/{id}` fetched by id is the classic leak. Admin pages behind a gate or role,
+  tested the same way. Never trust an id, a price or a role sent by the browser.
+- **Validation is tested too**: a test posts bad input and gets the errors back.
+- **Tests run on the test database only, each rolled back** (Step 4) - this site is live.
+- **Every screen size.** Open each page you built (`cic.lookUrl`, below) and check it at
+  phone 390×844, tablet 820×1180 and desktop 1440×900 (resize your browser window, one
+  screenshot each): nothing cut off, no sideways scroll, buttons big enough to tap.
+
 If a senior Laravel reviewer would reject it, it is not done. `cic.check()` reports
 code that breaks these rules (a page built in `routes/web.php`, for one): fix what it
 says before you tell the person you are finished.
