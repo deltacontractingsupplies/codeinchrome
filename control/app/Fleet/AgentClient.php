@@ -93,10 +93,10 @@ class AgentClient
         return $this->send('get', "/v1/sites/$id")['site'] ?? [];
     }
 
-    public function createSite(string $id, string $domain, string $cpu, string $memory, int $diskGb = 1): array
+    public function createSite(string $id, string $domain, string $cpu, string $memory, int $diskGb = 1, int $cpuWeight = 1024): array
     {
         return $this->send('post', '/v1/sites', [
-            'id' => $id, 'domain' => $domain, 'cpuLimit' => $cpu, 'memLimit' => $memory, 'diskGb' => $diskGb,
+            'id' => $id, 'domain' => $domain, 'cpuLimit' => $cpu, 'cpuWeight' => $cpuWeight, 'memLimit' => $memory, 'diskGb' => $diskGb,
         ])['site'] ?? [];
     }
 
@@ -107,10 +107,10 @@ class AgentClient
      *
      * @return array<string, string>
      */
-    public function setLimits(string $id, string $cpu, string $memory, int $diskGb): array
+    public function setLimits(string $id, string $cpu, string $memory, int $diskGb, int $cpuWeight = 1024): array
     {
         return $this->send('put', "/v1/sites/$id/limits", [
-            'cpuLimit' => $cpu, 'memLimit' => $memory, 'diskGb' => $diskGb,
+            'cpuLimit' => $cpu, 'cpuWeight' => $cpuWeight, 'memLimit' => $memory, 'diskGb' => $diskGb,
         ])['applied'] ?? [];
     }
 
@@ -450,7 +450,7 @@ class AgentClient
      */
     /**
      * @return array{findings: array, incomplete: ?string} incomplete: why part of
-     * the scan (ClamAV) could not run - the rules' findings still count.
+     *                                                     the scan (ClamAV) could not run - the rules' findings still count.
      */
     public function scanSite(string $id): array
     {
@@ -624,7 +624,7 @@ class AgentClient
      * A site's files or version history as a gzipped tar stream, for moving
      * the site to another host (SiteMover). $kind: files | history.
      */
-    public function transferExport(string $id, string $kind): \Psr\Http\Message\StreamInterface
+    public function transferExport(string $id, string $kind): StreamInterface
     {
         try {
             $response = Http::timeout(7200)->withToken($this->token)->withOptions(['stream' => true])

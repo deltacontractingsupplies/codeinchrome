@@ -31,6 +31,11 @@ type Config struct {
 	// the host knows which site looked up which name (audit A21).
 	SiteDNS string
 
+	// CPUBurst: every site's CPU cap is at least this many CPUs, so it can use
+	// idle cores (cpupolicy.go); its plan's weight decides contention. 0: the
+	// plan's CPU is a hard cap, as before.
+	CPUBurst float64
+
 	// Root password for the host's MySQL, from /opt/codeinchrome/etc/mysql.env.
 	// Empty means this host has no database server, and creating a site fails
 	// with that reason rather than producing a site without a database.
@@ -74,7 +79,10 @@ type Site struct {
 	Root      string    `json:"root"`
 	CreatedAt time.Time `json:"createdAt"`
 	CPULimit  string    `json:"cpuLimit"`
-	MemLimit  string    `json:"memLimit"`
+	// CPUWeight is the site's --cpu-shares when the host is busy (cpupolicy.go):
+	// the plan's, from the control plane; 0 is the default weight.
+	CPUWeight int    `json:"cpuWeight,omitempty"`
+	MemLimit  string `json:"memLimit"`
 
 	// Port is FIXED at creation and published explicitly on the host loopback.
 	//

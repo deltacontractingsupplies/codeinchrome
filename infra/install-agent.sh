@@ -316,6 +316,10 @@ install -d -o root -g root -m 0755 /usr/local/libexec/cic-dns
 install -o root -g root -m 0755 "$CIC/bin/cic-agent" /usr/local/libexec/cic-dns/cic-agent
 dns_gw=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)
 site_dns_flag=""
+# Every site may use up to this many CPUs while the host has them idle; its
+# plan's weight decides who gets them when it is busy (agent cpupolicy.go).
+# Half the host's cores: one site can never take all of it.
+cpu_burst=${CIC_CPU_BURST:-$(( $(nproc) / 2 ))}
 if [[ -n $dns_gw ]]; then
   cat > /etc/systemd/system/cic-dns.service <<UNIT
 [Unit]
@@ -371,7 +375,7 @@ EnvironmentFile=$CIC/etc/agent.env
 # The leading "-" makes it optional: a host without MySQL still runs the agent,
 # and creating a site there fails with that reason instead.
 EnvironmentFile=-$CIC/etc/mysql.env
-ExecStart=$CIC/bin/cic-agent -addr 127.0.0.1:9440 $origin_flags $site_dns_flag
+ExecStart=$CIC/bin/cic-agent -addr 127.0.0.1:9440 $origin_flags $site_dns_flag -cpu-burst $cpu_burst
 Restart=always
 RestartSec=3
 
@@ -413,6 +417,7 @@ check "agent not on public iface" '! has "0.0.0.0:9440" ss -ltn'
 check "token file is 0600"       '[[ "$(stat -c %a '"$CIC"'/etc/agent.env)" == "600" ]]'
 check "caddy active"             'systemctl is-active caddy'
 check "sites' DNS forwarder active" 'systemctl is-active cic-dns'
+check "sites burst into idle CPU (-cpu-burst $cpu_burst)" '[[ $(docker ps -q --filter label=codeinchrome.site | head -1) == "" ]] || [[ "$(docker inspect $(docker ps -q --filter label=codeinchrome.site | head -1) -f {{.HostConfig.NanoCpus}})" -ge $(( cpu_burst * 1000000000 )) ]]'
 check "DNS forwarder has a memory ceiling" '[[ "$(systemctl show cic-dns -p MemoryMax --value)" != infinity ]]'
 check "DNS forwarder rate-limited per site" 'iptables -S INPUT | grep -q -- "-j CIC-DNSFWD" && ! iptables -S INPUT | grep -E -- "--dport 53 -j ACCEPT" && iptables -S CIC-DNSFWD | grep -q hashlimit'
 # Origin pulls (A33): a live platform site answers the probe's certificate

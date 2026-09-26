@@ -15,11 +15,12 @@ import (
 
 // CreateOpts is what the control plane sends to stand a site up.
 type CreateOpts struct {
-	ID       string `json:"id"`
-	Domain   string `json:"domain"`
-	CPULimit string `json:"cpuLimit"` // docker --cpus, e.g. "0.5"
-	MemLimit string `json:"memLimit"` // docker --memory, e.g. "512m"
-	DiskGB   int    `json:"diskGb"`   // size of the site's own filesystem
+	ID        string `json:"id"`
+	Domain    string `json:"domain"`
+	CPULimit  string `json:"cpuLimit"`  // the plan's CPU, e.g. "0.5" (cpupolicy.go)
+	CPUWeight int    `json:"cpuWeight"` // --cpu-shares when the host is busy; 0 = default
+	MemLimit  string `json:"memLimit"`  // docker --memory, e.g. "512m"
+	DiskGB    int    `json:"diskGb"`    // size of the site's own filesystem
 }
 
 const (
@@ -126,6 +127,7 @@ func (m *Manager) Create(ctx context.Context, o CreateOpts) (Site, error) {
 		Root:      dir,
 		CreatedAt: time.Now().UTC(),
 		CPULimit:  o.CPULimit,
+		CPUWeight: o.CPUWeight,
 		MemLimit:  o.MemLimit,
 		DiskGB:    o.DiskGB,
 	}
@@ -381,11 +383,12 @@ func (m *Manager) runArgs(s Site) []string {
 		"--label", "codeinchrome.site="+s.ID,
 		"--label", "codeinchrome.host="+m.cfg.HostID,
 		"--label", "codeinchrome.runspec="+m.runSpec(),
-
-		// Resource ceilings. Mining stops being a policing problem and becomes
-		// arithmetic: capped at half a core, it earns cents, and sustained load
-		// at the ceiling is an obvious alarm.
-		"--cpus", s.CPULimit,
+	)
+	// CPU: the plan's share, bursting into idle cores at the plan's weight
+	// (cpupolicy.go). Sustained load at the cap is still an alarm: the abuse
+	// CPU watch pauses a site that runs at it for long.
+	args = append(args, m.cpuArgs(s.CPULimit, s.CPUWeight)...)
+	args = append(args,
 		"--memory", s.MemLimit,
 		"--memory-swap", s.MemLimit, // no swap escape hatch
 		"--pids-limit", "256",
@@ -882,9 +885,10 @@ func validDomain(d string) error {
 // same - a customer keeps what they have and cannot add more. The answer says
 // which parts were applied, so a refused shrink is never reported as done.
 type LimitsOpts struct {
-	CPULimit string `json:"cpuLimit"`
-	MemLimit string `json:"memLimit"`
-	DiskGB   int    `json:"diskGb"`
+	CPULimit  string `json:"cpuLimit"`
+	CPUWeight int    `json:"cpuWeight"` // 0: unchanged
+	MemLimit  string `json:"memLimit"`
+	DiskGB    int    `json:"diskGb"`
 }
 
 func (m *Manager) SetLimits(ctx context.Context, id string, o LimitsOpts) (map[string]string, error) {
@@ -900,21 +904,31 @@ func (m *Manager) SetLimits(ctx context.Context, id string, o LimitsOpts) (map[s
 	}
 	applied := map[string]string{}
 
-	if o.CPULimit != "" || o.MemLimit != "" {
+	if o.CPULimit != "" || o.CPUWeight != 0 || o.MemLimit != "" {
 		args := []string{"update"}
-		if o.CPULimit != "" {
-			args = append(args, "--cpus", o.CPULimit)
+		if o.CPULimit != "" || o.CPUWeight != 0 {
+			cpu, weight := site.CPULimit, site.CPUWeight
+			if o.CPULimit != "" {
+				cpu = o.CPULimit
+			}
+			if o.CPUWeight != 0 {
+				weight = o.CPUWeight
+			}
+			args = append(args, m.cpuArgs(cpu, weight)...)
 		}
 		if o.MemLimit != "" {
 			// --memory-swap equal to --memory: no swap escape hatch, as at creation.
 			args = append(args, "--memory", o.MemLimit, "--memory-swap", o.MemLimit)
 		}
 		args = append(args, m.container(id))
-		if _, err := run(ctx, 60*time.Second, "docker", args...); err != nil {
+		if _, err := runDocker(ctx, 60*time.Second, args...); err != nil {
 			applied["cpuMemory"] = "failed: " + err.Error()
 		} else {
 			if o.CPULimit != "" {
 				site.CPULimit = o.CPULimit
+			}
+			if o.CPUWeight != 0 {
+				site.CPUWeight = cpuWeight(o.CPUWeight)
 			}
 			if o.MemLimit != "" {
 				site.MemLimit = o.MemLimit

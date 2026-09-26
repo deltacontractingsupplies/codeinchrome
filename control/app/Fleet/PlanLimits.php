@@ -31,7 +31,7 @@ class PlanLimits
     {
         try {
             $applied = AgentClient::for($site->host)->setLimits(
-                $site->site_id, $plan['cpu'], $plan['memory'], (int) $plan['disk_gb'],
+                $site->site_id, $plan['cpu'], $plan['memory'], (int) $plan['disk_gb'], (int) ($plan['cpu_weight'] ?? 1024),
             );
         } catch (\Throwable $e) {
             $site->update(['limits_pending' => true]);
@@ -56,6 +56,7 @@ class PlanLimits
 
         $site->update([
             'cpu_limit' => $plan['cpu'],
+            'cpu_weight' => (int) ($plan['cpu_weight'] ?? 1024),
             'memory_limit' => $plan['memory'],
             'disk_gb' => max((int) $site->disk_gb, (int) $plan['disk_gb']),
             'limits_pending' => false,

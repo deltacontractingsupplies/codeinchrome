@@ -55,6 +55,11 @@ return [
             'name' => 'Free trial', 'price' => 0, 'variant_id' => null,
             // The trial runs at Starter's speed: the point is to feel the real thing.
             'sites' => 1, 'cpu' => '0.5', 'memory' => '384m', 'disk_gb' => 2, 'storage_gb' => 2,
+            // Every site bursts into idle CPU (agent -cpu-burst); when the host
+            // is busy, CPU is split by weight - a free site a quarter of a paid
+            // one's, so a trial runs at full speed on a quiet host and never
+            // slows a customer who pays (owner, 2026-09-26).
+            'cpu_weight' => 256,
             'custom_domains' => false,
             // Queue worker, scheduler, Reverb: each takes memory and a
             // database connection, so they come with the paid plan.
@@ -71,6 +76,7 @@ return [
             // overcommitted (fleet.stock.overcommit.disk) so this does not
             // halve how many fit - sites use ~0.7 GB of their 5 GB (measured).
             'sites' => 3, 'cpu' => '0.5', 'memory' => '384m', 'disk_gb' => 5, 'storage_gb' => 15,
+            'cpu_weight' => 1024,
             'custom_domains' => true,
             'background' => true,
         ],
