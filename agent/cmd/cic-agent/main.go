@@ -18,20 +18,29 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/codeinchrome/agent/internal/api"
+	"github.com/codeinchrome/agent/internal/dnsfwd"
 	"github.com/codeinchrome/agent/internal/sites"
 )
 
 var version = "dev" // overwritten at build time from agent/VERSION; "dev" means an unstamped build
 
 func main() {
+	// cic-agent dns: the sites' DNS forwarder (internal/dnsfwd), run as its
+	// own service (cic-dns) so an agent restart never interrupts a lookup.
+	if len(os.Args) > 1 && os.Args[1] == "dns" {
+		runDNS(os.Args[2:])
+		return
+	}
 	var (
 		addr     = flag.String("addr", "127.0.0.1:9440", "listen address")
 		root     = flag.String("root", "/srv/customers", "customer data root")
@@ -43,6 +52,7 @@ func main() {
 		clientCA = flag.String("origin-client-ca", "", "require Cloudflare's origin-pull client certificate (and the probe's) on the platform names: this CA pool")
 		probeCrt = flag.String("probe-cert", "", "client certificate the agent's own edge checks present (with -origin-client-ca)")
 		probeKey = flag.String("probe-key", "", "private key for -probe-cert")
+		siteDNS  = flag.String("site-dns", "", "the host's DNS forwarder (cic-dns) for sites, once proven to answer")
 	)
 	flag.Parse()
 
@@ -73,6 +83,7 @@ func main() {
 		OriginClientCA: *clientCA,
 		ProbeCert:      *probeCrt,
 		ProbeKey:       *probeKey,
+		SiteDNS:        *siteDNS,
 	})
 	if err != nil {
 		fatal("cannot start site manager: %v", err)
@@ -174,4 +185,34 @@ func authenticated(token string, next http.Handler) http.Handler {
 func fatal(format string, a ...any) {
 	fmt.Fprintf(os.Stderr, "cic-agent: "+format+"\n", a...)
 	os.Exit(1)
+}
+
+func runDNS(args []string) {
+	fs := flag.NewFlagSet("dns", flag.ExitOnError)
+	listen := fs.String("listen", "", "address:port to answer on (the docker0 gateway, :53)")
+	resolv := fs.String("resolv", "/run/systemd/resolve/resolv.conf", "the host's real resolvers")
+	logPath := fs.String("log", "/var/log/cic-dns/queries.log", "one JSON line per question")
+	maxLog := fs.Int64("max-log", 50<<20, "bytes before the log starts over (one previous file kept)")
+	_ = fs.Parse(args)
+	ups := dnsfwd.Upstreams(*resolv)
+	if *listen == "" || len(ups) == 0 {
+		fatal("dns: -listen is required and %s must name a resolver", *resolv)
+	}
+	if err := os.MkdirAll(filepath.Dir(*logPath), 0o700); err != nil {
+		fatal("dns: %v", err)
+	}
+	f := &dnsfwd.Forwarder{Upstreams: ups, Log: &dnsfwd.RotatingFile{Path: *logPath, Max: *maxLog}}
+	pc, err := net.ListenPacket("udp", *listen)
+	if err != nil {
+		fatal("dns: %v", err)
+	}
+	l, err := net.Listen("tcp", *listen)
+	if err != nil {
+		fatal("dns: %v", err)
+	}
+	slog.Info("dns forwarder", "listen", *listen, "upstreams", ups)
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go f.ServeTCP(ctx, l)
+	_ = f.ServeUDP(ctx, pc)
 }

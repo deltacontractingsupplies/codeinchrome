@@ -403,6 +403,12 @@ class AgentClient
         return $this->send('get', '/v1/visits'.($ignore ? '?'.implode('&', array_map(fn ($ip) => 'ignore='.rawurlencode($ip), $ignore)) : ''));
     }
 
+    /** Which names each site looked up since $since: ['site' => ['name' => count]] (agent dnsreport.go). */
+    public function dnsLookups(int $since): array
+    {
+        return $this->send('get', "/v1/dns?since=$since")['sites'] ?? [];
+    }
+
     /** A hosted page's DOM after its scripts ran (agent render.go): ['dom' => ..., 'ms' => ...]. */
     public function render(string $url): array
     {

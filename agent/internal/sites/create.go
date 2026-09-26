@@ -371,9 +371,16 @@ func (m *Manager) runArgs(s Site) []string {
 		"--name", s.Container,
 		"--restart", "unless-stopped",
 		"--network", m.network(s.ID),
-		"--label", "codeinchrome.site=" + s.ID,
-		"--label", "codeinchrome.host=" + m.cfg.HostID,
-		"--label", "codeinchrome.runspec=" + m.runSpec(),
+	}
+	if m.cfg.SiteDNS != "" {
+		// Docker's resolver in the container asks this upstream from the
+		// container's own address, so the host sees which site asked.
+		args = append(args, "--dns", m.cfg.SiteDNS)
+	}
+	args = append(args,
+		"--label", "codeinchrome.site="+s.ID,
+		"--label", "codeinchrome.host="+m.cfg.HostID,
+		"--label", "codeinchrome.runspec="+m.runSpec(),
 
 		// Resource ceilings. Mining stops being a policing problem and becomes
 		// arithmetic: capped at half a core, it earns cents, and sustained load
@@ -395,16 +402,16 @@ func (m *Manager) runArgs(s Site) []string {
 		"--tmpfs", "/tmp:rw,noexec,nosuid,size=64m",
 		"--tmpfs", "/run:rw,noexec,nosuid,size=16m",
 
-		"-v", m.appDir(s.ID) + ":/var/www/html:rw",
+		"-v", m.appDir(s.ID)+":/var/www/html:rw",
 		// The host's MySQL, which binds the docker gateway and nothing public.
-		"--add-host", dbHostForSites + ":host-gateway",
+		"--add-host", dbHostForSites+":host-gateway",
 		// Fixed, loopback-only. Not ephemeral: see Site.Port for the 502 that
 		// taught us the difference.
 		"--publish", fmt.Sprintf("127.0.0.1:%d:8080", s.Port),
 		// The background processes cic-start runs (see background.go).
-		"--env", "CIC_QUEUE=" + boolEnv(s.Queue),
-		"--env", "CIC_SCHEDULER=" + boolEnv(s.Scheduler),
-		"--env", "CIC_REVERB=" + boolEnv(s.Reverb && s.WSPort != 0),
+		"--env", "CIC_QUEUE="+boolEnv(s.Queue),
+		"--env", "CIC_SCHEDULER="+boolEnv(s.Scheduler),
+		"--env", "CIC_REVERB="+boolEnv(s.Reverb && s.WSPort != 0),
 		// Laravel's debug page shows a visitor the request, the stack and the
 		// values around the failure - on a public site that is how secrets
 		// leak. A real environment variable wins over .env (Laravel's dotenv
@@ -413,7 +420,7 @@ func (m *Manager) runArgs(s Site) []string {
 		// read in the editor instead (cic.logs, Boost's last-error). Apache
 		// passes it to PHP with PassEnv (the image's cic-env.conf).
 		"--env", "APP_DEBUG=false",
-	}
+	)
 	// Disk I/O ceilings (diskio.go).
 	args = append(args, m.ioArgs()...)
 	if s.PHP != (PHPSettings{}) {

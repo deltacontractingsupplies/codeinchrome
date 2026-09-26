@@ -499,6 +499,16 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		}
 		writeJSON(w, http.StatusOK, ok(resp{"sites": v}))
 	})
+	// Which names each site looked up (sites/dnsreport.go), since a time.
+	mux.HandleFunc("GET /v1/dns", func(w http.ResponseWriter, r *http.Request) {
+		secs, _ := strconv.ParseInt(r.URL.Query().Get("since"), 10, 64)
+		rep, err := mgr.DNSReport(r.Context(), time.Unix(secs, 0))
+		if err != nil {
+			writeJSON(w, http.StatusInternalServerError, fail("dns_unreadable", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"sites": rep}))
+	})
 	// Every site's CPU counter (sites/cpu.go), for spotting a miner.
 	mux.HandleFunc("GET /v1/cpu", func(w http.ResponseWriter, r *http.Request) {
 		cpu, err := mgr.CPU(r.Context())
