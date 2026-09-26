@@ -89,7 +89,7 @@ tested, and verified on production before it is ticked.
 - [ ] T2. A headless browser for the agent: visit pages as a visitor, click
       through a flow, and take screenshots at phone, tablet and desktop widths
       (responsiveness) - built on the renderer the link scanner already uses.
-      PART 2026-09-26 (agent 0.49.0): cic.screens(path) - the page at phone, tablet and desktop size, side by side over the editor, so one screenshot checks all three; rendered on another host than the site's in the link scanner's locked-down browser (a real screenshot proved on h4: 390x844 in 2.4 s). LEFT: pages behind the app's login (with a T1 sign-in link as the target), and a measured sideways-scroll check at each width.
+      PART 2026-09-26 (agent 0.49.0): cic.screens(path) - the page at phone, tablet and desktop size, side by side over the editor, so one screenshot checks all three; rendered on another host than the site's in the link scanner's locked-down browser (a real screenshot proved on h4: 390x844 in 2.4 s). Behind the app's login too (2026-09-26, agent 0.50.0): cic.screens(path, { as }) - one sign-in link per size, each opened by the renderer. LEFT: a measured sideways-scroll check at each width (today the agent judges it from the three pictures).
 - [x] T3. Tests never touch live data: the site's tests run on their own
       database with every test rolled back; RefreshDatabase, migrate:fresh,
       db:wipe and friends are refused by the platform, not only discouraged.

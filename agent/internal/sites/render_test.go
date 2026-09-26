@@ -137,3 +137,40 @@ func TestAPageIsShotAtEveryScreenSizeLockedDown(t *testing.T) {
 		t.Fatal("another site was shot")
 	}
 }
+
+// Behind the app's login: a sign-in link per size (each is used once).
+func TestEachScreenSizeCanHaveItsOwnAddress(t *testing.T) {
+	m := &Manager{cfg: Config{PlatformDomain: "codeinchrome.com"}}
+	var targets []string
+	orig := renderDocker
+	t.Cleanup(func() { renderDocker = orig })
+	renderDocker = func(ctx context.Context, args ...string) *exec.Cmd {
+		if args[0] != "run" {
+			return exec.CommandContext(ctx, "true")
+		}
+		targets = append(targets, args[len(args)-1])
+		var host, file string
+		for i, a := range args {
+			if a == "-v" {
+				host = strings.SplitN(args[i+1], ":", 2)[0]
+			}
+			if strings.HasPrefix(a, "--screenshot=/out/") {
+				file = strings.TrimPrefix(a, "--screenshot=/out/")
+			}
+		}
+		return exec.CommandContext(ctx, "sh", "-c", `printf '\211PNGfake' > "$1"`, "sh", host+"/"+file)
+	}
+	links := []string{"https://shop.codeinchrome.com/__codeinchrome/sign-in?n=1", "https://shop.codeinchrome.com/__codeinchrome/sign-in?n=2", "https://shop.codeinchrome.com/__codeinchrome/sign-in?n=3"}
+	if _, err := m.RenderShotsEach(context.Background(), links); err != nil {
+		t.Fatal(err)
+	}
+	if strings.Join(targets, " ") != strings.Join(links, " ") {
+		t.Fatalf("each size did not get its own link: %v", targets)
+	}
+	if _, err := m.RenderShotsEach(context.Background(), links[:2]); err == nil {
+		t.Fatal("two addresses for three sizes were accepted")
+	}
+	if _, err := m.RenderShotsEach(context.Background(), []string{links[0], "https://evil.example/", links[2]}); err == nil {
+		t.Fatal("another site was accepted among the addresses")
+	}
+}

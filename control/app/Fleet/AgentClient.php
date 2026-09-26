@@ -457,10 +457,12 @@ class AgentClient
      *
      * @return list<array{name: string, width: int, height: int, png: string}>
      */
-    public function renderShots(string $url): array
+    /** @param  string|list<string>  $url  one address, or one per screen size (sign-in links are used once) */
+    public function renderShots(string|array $url): array
     {
         try {
-            $response = Http::timeout(170)->acceptJson()->withToken($this->token)->post($this->baseUrl.'/v1/render/shots', ['url' => $url]);
+            $response = Http::timeout(170)->acceptJson()->withToken($this->token)->post($this->baseUrl.'/v1/render/shots',
+                is_array($url) ? ['urls' => array_values($url)] : ['url' => $url]);
         } catch (ConnectionException $e) {
             throw new AgentUnreachable("Cannot reach the agent on [{$this->host}] to show the page.", previous: $e);
         }

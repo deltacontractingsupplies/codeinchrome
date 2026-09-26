@@ -2,6 +2,7 @@
 
 namespace Tests\Feature;
 
+use App\Fleet\SignInLink;
 use App\Models\Site;
 use App\Models\User;
 use Illuminate\Support\Facades\Http;
@@ -35,5 +36,38 @@ class ScreensTest extends TestCase
             $this->actingAs($owner)->postJson(route('sites.screens', $site), ['path' => $bad])->assertStatus(422);
         }
         $this->actingAs(User::factory()->create())->postJson(route('sites.screens', $site), ['path' => '/'])->assertNotFound();
+    }
+
+    public function test_behind_the_login_each_size_gets_its_own_sign_in_link(): void
+    {
+        config(['fleet.hosts' => [
+            'h1' => ['ip' => '10.0.0.1', 'tunnel_port' => 9441, 'capacity' => 10],
+            'h3' => ['ip' => '10.0.0.3', 'tunnel_port' => 9443, 'capacity' => 10],
+        ], 'fleet.tokens' => ['h1' => str_repeat('a', 64), 'h3' => str_repeat('b', 64)]]);
+        Http::fake(['127.0.0.1:944*/v1/render/shots' => Http::response(['ok' => true, 'shots' => []])]);
+        $owner = User::factory()->create();
+        $site = Site::create(['user_id' => $owner->id, 'site_id' => 'shop', 'domain' => 'shop.codeinchrome.com',
+            'host' => 'h1', 'status' => 'live', 'cpu_limit' => '0.5', 'memory_limit' => '384m', 'port' => 20001]);
+
+        $this->actingAs($owner)->postJson(route('sites.screens', $site), ['path' => '/admin', 'as' => 2])->assertOk()->assertJsonPath('signedInAs', 2);
+
+        Http::assertSent(function ($r) {
+            $urls = $r['urls'] ?? [];
+            if (count($urls) !== 3 || count(array_unique($urls)) !== 3) {
+                return false;
+            }
+            foreach ($urls as $u) {
+                parse_str((string) parse_url($u, PHP_URL_QUERY), $q);
+                // Signed with the SITE's host's secret: that agent checks it.
+                $ok = str_starts_with($u, 'https://shop.codeinchrome.com/__codeinchrome/sign-in?') && $q['u'] === '2' && $q['p'] === '/admin'
+                    && $q['s'] === SignInLink::signature(str_repeat('a', 64), 'shop', 2, 'web', '/admin', (int) $q['e'], $q['n']);
+                if (! $ok) {
+                    return false;
+                }
+            }
+
+            return true;
+        });
+        $this->assertDatabaseHas('audit_events', ['action' => 'site.signin_link', 'site' => 'shop']);
     }
 }
