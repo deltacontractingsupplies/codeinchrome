@@ -425,6 +425,12 @@ class AgentClient
         $this->send('put', "/v1/sites/$id/indexing", ['noIndex' => $noIndex]);
     }
 
+    /** A new free site's first week: web ports only out, no UDP, ~8 Mbit/s (agent restrict.go). */
+    public function setRestrictedEgress(string $id, bool $restricted): void
+    {
+        $this->send('put', "/v1/sites/$id/egress", ['restricted' => $restricted]);
+    }
+
     /** Every site's CPU counter on this host (agent sites/cpu.go): {sites: [...], at}. */
     public function cpu(): array
     {

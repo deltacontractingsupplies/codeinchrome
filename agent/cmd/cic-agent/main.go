@@ -98,6 +98,8 @@ func main() {
 	} else {
 		slog.Info("vhosts already match the running containers", "sites", len(changed))
 	}
+	// A new free site's first-week egress limits (a reboot clears firewall rules).
+	mgr.ApplyAllRestrictedEgress(context.Background())
 
 	srv := &http.Server{
 		Addr:              *addr,

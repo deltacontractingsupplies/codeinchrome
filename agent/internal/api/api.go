@@ -754,6 +754,21 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"applied": applied}))
 	})
 
+	// A new free site's first week: web ports only out, no UDP, ~8 Mbit/s.
+	mux.HandleFunc("PUT /v1/sites/{id}/egress", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Restricted bool `json:"restricted"`
+		}
+		if err := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024)).Decode(&body); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("bad_json", "body must be {restricted}"))
+			return
+		}
+		if err := mgr.SetRestrictedEgress(r.Context(), r.PathValue("id"), body.Restricted); err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("cannot_apply", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"restricted": body.Restricted}))
+	})
 	mux.HandleFunc("PUT /v1/sites/{id}/indexing", func(w http.ResponseWriter, r *http.Request) {
 		var body struct {
 			NoIndex bool `json:"noIndex"`

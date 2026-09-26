@@ -149,14 +149,17 @@ class Provisioner
             Audit::record('site.created', $user, $site, ['host' => $host, 'plan' => $user->plan]);
 
             // A new free site stays out of search engines for its first week
-            // (owner's decision, 2026-09-25; lifted by sites:indexing). Never a
-            // reason for the site itself to fail: retried by that command.
+            // (owner's decision, 2026-09-25), and reaches out only on the
+            // web's ports, without UDP, at ~8 Mbit/s (audit A21): both lifted
+            // together by sites:indexing. Never a reason for the site itself
+            // to fail: that command retries every hour.
             if (! $user->isPaid()) {
                 $site->update(['noindex_until' => now()->addDays(self::NOINDEX_DAYS)]);
                 try {
                     AgentClient::for($host)->setNoIndex($siteId, true);
+                    AgentClient::for($host)->setRestrictedEgress($siteId, true);
                 } catch (\Throwable $e) {
-                    Log::warning('noindex not applied yet', ['site' => $siteId, 'error' => $e->getMessage()]);
+                    Log::warning('first-week limits not applied yet', ['site' => $siteId, 'error' => $e->getMessage()]);
                 }
             }
         } catch (\Throwable $e) {

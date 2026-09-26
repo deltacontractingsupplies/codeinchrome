@@ -274,6 +274,21 @@ e -p tcp --syn -m multiport ! --dports 80,443 -m hashlimit --hashlimit-above 2/s
   --hashlimit-mode srcip --hashlimit-name cic-syn-other -j CIC-REJECT
 e -j RETURN
 
+# A new free site's first week (audit A21), entered from DOCKER-USER for that
+# site's bridge only, by the agent (restrict.go), BEFORE the chain above:
+# the web's ports out and nothing else, no UDP (Docker's resolver asks from
+# the host's side, so names still resolve), about 8 Mbit/s. What it allows
+# returns, and the ordinary chain applies after it. Measured on h4 first:
+# https 200, port 22 refused, names resolve, upload ~11 Mbit/s with burst.
+# Flushed and refilled, never deleted: the agent's per-site jumps stay.
+chain CIC-RESTRICT
+r() { iptables -A CIC-RESTRICT "$@"; }
+r -m hashlimit --hashlimit-above 1mb/s --hashlimit-burst 2mb --hashlimit-mode srcip --hashlimit-name cic-restrict-bytes -j DROP
+r -m conntrack --ctstate ESTABLISHED,RELATED -j RETURN
+r -p tcp -m multiport ! --dports 80,443 -j CIC-REJECT
+r -p udp -j CIC-REJECT
+r -j RETURN
+
 # Entered for traffic FROM a container bridge, first thing in DOCKER-USER.
 for dev in 'br-+' docker0; do
   iptables -C DOCKER-USER -i "$dev" -j CIC-EGRESS 2>/dev/null || iptables -I DOCKER-USER -i "$dev" -j CIC-EGRESS
@@ -533,6 +548,7 @@ check "swap active"              '[[ -n "$(swapon --show)" ]]'
 check "host id present"          'test -s /opt/codeinchrome/etc/host.id'
 check "customer root private"    '[[ "$(stat -c %a /srv/customers)" == "750" ]]'
 check "container upload capped (~100 Mbit/s each)" 'iptables -S CIC-EGRESS | head -2 | grep -q "hashlimit-name cic-bytes"'
+check "first-week restricted egress chain present" 'iptables -S CIC-RESTRICT | grep -q "hashlimit-name cic-restrict-bytes"'
 # DNS (audit A21), proven with a throwaway container on a throwaway network:
 # names still resolve through Docker's resolver, and a direct query to an
 # outside resolver is refused. The test image is the site image already on
