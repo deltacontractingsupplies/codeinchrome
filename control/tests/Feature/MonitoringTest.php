@@ -3,10 +3,12 @@
 namespace Tests\Feature;
 
 use App\Fleet\Monitoring;
+use App\Fleet\Stock;
 use App\Models\Incident;
 use App\Models\Monitor;
 use App\Models\Site;
 use App\Models\User;
+use Illuminate\Http\Client\ConnectionException;
 use Illuminate\Support\Facades\Http;
 use Tests\TestCase;
 
@@ -19,6 +21,8 @@ class MonitoringTest extends TestCase
     private bool $agentDown = false;
 
     private float $diskFree = 0.5;
+
+    private float $load = 0.4;
 
     private array $alerts = [];
 
@@ -33,18 +37,18 @@ class MonitoringTest extends TestCase
         Http::fake([
             '127.0.0.1:944*/v1/host/stats' => function () {
                 if ($this->agentDown) {
-                    throw new \Illuminate\Http\Client\ConnectionException('tunnel down');
+                    throw new ConnectionException('tunnel down');
                 }
 
                 return Http::response(['ok' => true, 'stats' => [
                     'diskFreeBytes' => (int) (100e9 * $this->diskFree), 'diskTotalBytes' => (int) 100e9,
-                    'memAvailableBytes' => 8e9, 'memTotalBytes' => 16e9, 'load1' => 0.4, 'cpus' => 4,
+                    'memAvailableBytes' => 8e9, 'memTotalBytes' => 16e9, 'load1' => $this->load, 'cpus' => 4,
                     'mysqlUp' => true, 'caddyUp' => true, 'sitesNotRunning' => [], 'disksUnmounted' => [],
                 ] + ($this->rebootSince ? ['rebootRequiredSince' => $this->rebootSince] : [])]);
             },
             'shop.codeinchrome.com*' => function () {
                 if ($this->siteDown) {
-                    throw new \Illuminate\Http\Client\ConnectionException('connection refused');
+                    throw new ConnectionException('connection refused');
                 }
 
                 return Http::response('ok', $this->siteStatus);
@@ -62,6 +66,23 @@ class MonitoringTest extends TestCase
     private function tick(): void
     {
         app(Monitoring::class)->run();
+    }
+
+    public function test_a_host_that_stays_full_is_an_alert_a_burst_is_not(): void
+    {
+        $this->load = 7.0; // 1.75 per CPU on 4 CPUs
+        for ($i = 1; $i <= 9; $i++) {
+            $this->tick();
+        }
+        $this->assertSame(0, Incident::where('monitor_key', 'host:h1:cpu')->count(), 'Nine minutes full is still a burst.');
+        $this->tick();
+        $incident = Incident::where('monitor_key', 'host:h1:cpu')->first();
+        $this->assertNotNull($incident, 'Ten minutes full is a host to add.');
+        $this->assertStringContainsString('paid sites are served first', $incident->detail);
+
+        $this->load = 2.0; // 0.5 per CPU
+        $this->tick();
+        $this->assertNotNull($incident->fresh()->resolved_at, 'It closes when the host has room again.');
     }
 
     public function test_one_failure_is_not_an_outage_two_are_and_recovery_closes_it(): void
@@ -176,11 +197,11 @@ class MonitoringTest extends TestCase
 
     public function test_low_stock_is_alerted_once_and_its_recovery_too(): void
     {
-        $monitor = app(\App\Fleet\Monitoring::class);
+        $monitor = app(Monitoring::class);
         config(['fleet.stock.alert_below' => 0]);
         $monitor->run(); // records the fake host's figures
         // However many Starters the fake host holds, set the bar just above it.
-        $left = app(\App\Fleet\Stock::class)->available('starter');
+        $left = app(Stock::class)->available('starter');
         config(['fleet.stock.alert_below' => $left + 1]);
         $monitor->run();
         $monitor->run(); // opens the incident on the second failure, as for everything else
@@ -197,7 +218,7 @@ class MonitoringTest extends TestCase
     public function test_a_site_running_out_of_file_slots_is_alerted(): void
     {
         Site::where('site_id', 'shop')->update(['inodes_used' => 62000, 'inodes_total' => 65536]);
-        $monitor = app(\App\Fleet\Monitoring::class);
+        $monitor = app(Monitoring::class);
         foreach (range(1, 3) as $check) {
             $monitor->run(); // an incident opens once the failure repeats, as for everything else
         }
@@ -208,12 +229,12 @@ class MonitoringTest extends TestCase
         // Its checks go with the site, the suffixed ones included.
         Site::where('site_id', 'shop')->delete();
         $monitor->run();
-        $this->assertSame(0, \App\Models\Monitor::where('key', 'like', 'site:shop%')->count());
+        $this->assertSame(0, Monitor::where('key', 'like', 'site:shop%')->count());
     }
 
     public function test_the_off_provider_copy_is_watched_once_it_has_ever_run(): void
     {
-        $monitor = app(\App\Fleet\Monitoring::class);
+        $monitor = app(Monitoring::class);
         $stamp = storage_path('framework/testing/offsite-'.getmypid().'.ok');
         @unlink($stamp);
         config(['fleet.offsite_stamp' => $stamp]);
@@ -234,7 +255,7 @@ class MonitoringTest extends TestCase
 
     public function test_the_control_planes_own_backup_is_watched_by_its_stamp(): void
     {
-        $monitor = app(\App\Fleet\Monitoring::class);
+        $monitor = app(Monitoring::class);
         // Not configured (development): not checked at all.
         config(['fleet.control_backup_stamp' => null]);
         $this->assertArrayNotHasKey('control:backup', $monitor->run());
@@ -255,7 +276,7 @@ class MonitoringTest extends TestCase
             $check = $monitor->run()['control:backup'];
             $this->assertFalse($check[1]);
             $this->assertStringContainsString('newest complete backup 1 day ago', $check[2]);
-            $this->assertNotNull(\App\Models\Monitor::where('key', 'control:backup')->first(), 'kept, never retired as a gone site');
+            $this->assertNotNull(Monitor::where('key', 'control:backup')->first(), 'kept, never retired as a gone site');
         } finally {
             @unlink($stamp);
         }
@@ -265,7 +286,7 @@ class MonitoringTest extends TestCase
 
     public function test_an_update_waiting_days_for_a_reboot_is_an_incident_a_fresh_one_is_not(): void
     {
-        $monitor = app(\App\Fleet\Monitoring::class);
+        $monitor = app(Monitoring::class);
         $this->assertTrue($monitor->run()['host:h1:reboot'][1], 'no update waiting');
 
         $this->rebootSince = now()->subHours(20)->toIso8601String();
@@ -279,7 +300,7 @@ class MonitoringTest extends TestCase
 
     public function test_a_site_whose_backups_stopped_is_alerted_once(): void
     {
-        $monitor = app(\App\Fleet\Monitoring::class);
+        $monitor = app(Monitoring::class);
         $site = Site::where('site_id', 'shop')->first();
 
         // A new site is not held to it before its first night...

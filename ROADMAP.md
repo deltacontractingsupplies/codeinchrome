@@ -49,9 +49,10 @@ tested, and verified on production before it is ticked.
       DONE 2026-09-26 (#75, agent 0.44.0): every site bursts to 2 CPUs (half a host), --cpu-shares free 256 / paid 1024, applied live with no restart. Measured on the free store on h1: artisan route:list 478-503 ms before, 229-284 ms after.
 - [ ] F2. Show how many free trial places are left (from measured capacity:
       config fleet.stock), on the home and pricing pages.
-- [ ] F3. When free sites crowd paid ones (measured, not guessed), the free
+- [x] F3. When free sites crowd paid ones (measured, not guessed), the free
       share shrinks first, automatically; paid sites are never slowed by free
       ones. Alert the owner when it happens.
+      DONE 2026-09-26: the shrinking is the kernel's, instant, per host - CPU weights (F1) give paid sites four times a trial's share the moment a host is busy, and trials take only room left over (Stock::siteFits counts every running trial). A host that stays full (load above 1.5 per CPU for 10 minutes) is an incident and an alert to the owner: paid sites are sharing a crowded host, add one.
 
 **See the agent work, live**
 - [ ] L1. Every cic write, edit and delete shows in the editor the moment it

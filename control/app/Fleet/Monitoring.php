@@ -30,6 +30,11 @@ class Monitoring
 {
     public const FAIL_THRESHOLD = 2;
 
+    /** Load per CPU above which a host is full, and for how many minutes in a row it must be. */
+    public const CPU_SATURATED = 1.5;
+
+    public const CPU_SATURATED_MINUTES = 10;
+
     // 25%, not 10%: disk is overcommitted (config/fleet.php), so the alert has
     // to leave time to move sites off a filling host (fleet:move-site).
     public const DISK_FREE_MIN = 0.25;
@@ -47,8 +52,10 @@ class Monitoring
         $results += $this->checkFiles();
         $results += $this->checkBackups();
 
-        foreach ($results as $key => [$label, $up, $detail, $latency]) {
-            $this->record($key, $label, $up, $detail, $latency);
+        foreach ($results as $key => $row) {
+            // A fifth element: that check's own streak before an incident.
+            [$label, $up, $detail, $latency] = $row;
+            $this->record($key, $label, $up, $detail, $latency, $row[4] ?? self::FAIL_THRESHOLD);
         }
 
         $this->retireGone(array_keys($results));
@@ -169,6 +176,18 @@ class Monitoring
         } else {
             $out["host:$host:reboot"] = ["$label reboot", true, 'no update is waiting for a reboot', null];
         }
+
+        // CPU: every site bursts into idle cores, and when the host is full the
+        // kernel serves paid sites first (their CPU weight is four times a
+        // trial's - agent cpupolicy.go). A host that STAYS full means paid
+        // sites are sharing a crowded host: time to add one (infra/add-host.sh).
+        // Ten minutes in a row, so a burst is never an alarm.
+        $perCpu = $s['cpus'] > 0 ? $s['load1'] / $s['cpus'] : 0;
+        $out["host:$host:cpu"] = ["$label CPU", $perCpu <= self::CPU_SATURATED,
+            $perCpu <= self::CPU_SATURATED
+                ? sprintf('load %.2f per CPU', $perCpu)
+                : sprintf('saturated: load %.2f per CPU for 10 minutes - paid sites are served first, but the host is full; add a host', $perCpu),
+            null, self::CPU_SATURATED_MINUTES];
 
         $free = $s['diskTotalBytes'] ? $s['diskFreeBytes'] / $s['diskTotalBytes'] : 0;
         $out["host:$host:disk"] = ["$label disk", $free >= self::DISK_FREE_MIN,
