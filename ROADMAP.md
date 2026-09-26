@@ -34,6 +34,77 @@ verified on production.
    commitment for the terms, and (deferred: "not now") a separate
    customer-site domain. (The sandbox was decided 2026-09-26: runc stays.)
 
+### Owner's requests, 2026-09-26: speed, live UX, GitHub, testing, data safety
+
+Every item is built on what exists (checked first, so nothing is duplicated),
+tested, and verified on production before it is ticked.
+
+**Free that feels like the real thing, and uses every idle core**
+- [ ] F1. Free sites feel slow. Free already has Starter's 0.5 CPU / 384 MB, but
+      as a hard cap. Let every site burst into idle host CPU (a higher cap with
+      CPU weights: paid sites win when the host is busy, free sites get the
+      rest). The kernel rebalances instantly, so free gets full power while
+      the host is quiet and shrinks only when paid sites need it. Measure a
+      page's p50/p95 before and after on a free site.
+- [ ] F2. Show how many free trial places are left (from measured capacity:
+      config fleet.stock), on the home and pricing pages.
+- [ ] F3. When free sites crowd paid ones (measured, not guessed), the free
+      share shrinks first, automatically; paid sites are never slowed by free
+      ones. Alert the owner when it happens.
+
+**See the agent work, live**
+- [ ] L1. Every cic write, edit and delete shows in the editor the moment it
+      happens: the file opens (or its tab updates), the changed lines are
+      highlighted, the file tree marks what changed - not all at once at the
+      end of a long script.
+- [ ] L2. An activity timeline beside the editor: each step the agent takes
+      (file written, command run, test result), with the time, as it happens.
+- [ ] L3. Shell and artisan output streams line by line into the terminal as
+      the command runs, like a real terminal; exit code at the end.
+- [ ] L4. Fast with large changes: batched UI updates, no freeze on writeMany
+      of hundreds of files.
+      (Research first: how Lovable, Replit, Bolt, v0, Cursor show this.)
+
+**Never lose code, and link GitHub**
+- [ ] G1. Every change is a commit already (history.git, verified). Re-check
+      every path that changes files (write, edit, delete, rename, shell, eval,
+      restore, import) records a version, and that no agent call can erase
+      history.
+- [ ] G2. Link a GitHub repository: from then on every commit is pushed to the
+      customer's repo automatically. Simplest secure path first (research:
+      deploy key vs GitHub App); the free plan says plainly that a deleted
+      free site is gone unless GitHub is linked.
+- [ ] G3. Claude in Chrome can do the linking for the user (the skill says how).
+
+**The agent can test like a person, safely, on production**
+- [ ] T1. A one-time sign-in link for the site: opens the site in the browser
+      already signed in as a chosen user, no password (Claude in Chrome cannot
+      type passwords). Builds on cic.request({ as }) and the login-cookie route.
+- [ ] T2. A headless browser for the agent: visit pages as a visitor, click
+      through a flow, and take screenshots at phone, tablet and desktop widths
+      (responsiveness) - built on the renderer the link scanner already uses.
+- [ ] T3. Tests never touch live data: the site's tests run on their own
+      database with every test rolled back; RefreshDatabase, migrate:fresh,
+      db:wipe and friends are refused by the platform, not only discouraged.
+- [ ] T4. Database history: a snapshot before every migration and seeder the
+      agent runs, plus frequent automatic snapshots, restorable from the
+      backups page - so a database is never lost, free or paid.
+
+**The skill**
+- [ ] S1. Testing first: every feature ships with tests and a browser check
+      (T1/T2), responsiveness checked at three widths.
+- [ ] S2. Security: roles and permissions for every route, no data exposed to
+      the wrong user, checked by a test; no secrets anywhere public.
+- [ ] S3. DRY: before building, search the app for an existing feature or
+      component that already does it and extend it; never duplicate. Keep a
+      todo list for multi-step work and tick it off.
+- [ ] S4. Claude in Chrome knows the skill in every chat - find the simplest
+      way to load it in the extension (research: skills, shortcuts).
+
+**Speed and polish everywhere**
+- [ ] P1. The editor and dashboard fast and polished on every device (measure
+      load time and interaction latency; fix the slowest first).
+
 ### Security audit, round 2 (2026-09-25): 49 confirmed findings
 
 Six auditors (redirects and downloads, malware and PHP, host hardening,
@@ -61,7 +132,7 @@ before it is ticked.
 - [x] **A16 [high]** The control host h2 answers on 80/443 to the whole internet: an old iptables snapshot, restored at boot, undid the Cloudflare-only firewall, and the deploy check still reports the ports as closed - FIXED 2026-09-25 (#21): the snapshot and unit retired, ufw rebuilt, and the deploy now checks the live ruleset and a direct request from outside.
 - [x] **A17 [medium]** No CSP or Service-Worker restriction at the edge: page scripts can register a Service Worker and make blob: downloads that never pass through Caddy - PART DONE 2026-09-25: Service Worker registration refused at the edge (verified live); blob: downloads by page script remain (a sandbox CSP would also block legitimate downloads - owner decision). DETECTED 2026-09-26 without blocking anything honest: the link scanner bans a page whose script builds a program download (a Blob or download of an .exe/.msi/.apk..., or an installer's MIME type) or carries a Windows program inline (base64 "TVqQ..."), and now also reads the site's own script files (up to 5 a scan) with the same checks and the clipboard-command check; a CSV export built the same way is not flagged (tested). Blocking them outright stays the owner's decision. The dry run before it went on put EVERY page of every site up for review: Cloudflare adds its Web Analytics beacon (static.cloudflareinsights.com) to proxied pages at the edge, so it is on pages no site wrote. It is an allowed host now (tested); the live scan after the deploy: every site clean. DECIDED 2026-09-26 (owner): detect, do not block - a sandbox CSP would stop every honest script-made download too (CSV exports, generated PDFs).
 - [x] **A18 [medium]** The link scanner is blind to JS navigation and iframes, uses a self-identifying User-Agent from the control host, only reviews offsite meta refreshes, and checks only the path extension - FIXED 2026-09-25: the link check reads iframes, script sources and script redirects (reviewed when offsite), and an offsite meta refresh is a ban like the edge's redirect rule; it sends a browser's headers; tested.
-- [ ] **A19 [medium]** A banned person can come straight back: no network/device link between accounts, no daily sign-up cap, Turnstile off - PART DONE 2026-09-25: the sign-up network is kept as a keyed hash (IPv4 /24, IPv6 /48); an account from the network of one banned in the last 30 days is held before it can create a site (owner emailed once), and a ban email names other accounts from the same network; tested. DONE 2026-09-26: a device cookie - a random id in a long-lived, encrypted, httpOnly cookie; accounts keep a keyed hash of the browser they were made in (signup_device) and last signed in from (last_device, on every sign-in by any route); a free account from the browser of one banned in the last 30 days is held for a person, even from another network, and a ban email names accounts from the same browser; a forged cookie cannot be read and is replaced. Still open: Turnstile keys (owner).
+- [x] **A19 [medium]** A banned person can come straight back: no network/device link between accounts, no daily sign-up cap, Turnstile off - PART DONE 2026-09-25: the sign-up network is kept as a keyed hash (IPv4 /24, IPv6 /48); an account from the network of one banned in the last 30 days is held before it can create a site (owner emailed once), and a ban email names other accounts from the same network; tested. DONE 2026-09-26: a device cookie - a random id in a long-lived, encrypted, httpOnly cookie; accounts keep a keyed hash of the browser they were made in (signup_device) and last signed in from (last_device, on every sign-in by any route); a free account from the browser of one banned in the last 30 days is held for a person, even from another network, and a ban email names accounts from the same browser; a forged cookie cannot be read and is replaced. Still open: Turnstile keys (owner). Turnstile ON 2026-09-26 (owner approved): widget "codeinchrome app" for app.codeinchrome.com only, Managed mode; keys only in the operator .env and the control host's .env; siteverify accepts the secret; the widget and its CSP origin are on /login and /register only (checked live); the e2e suite's reserved addresses skip it - full e2e green with it on (15 passed).
 - [x] **A20 [medium]** No per-site outbound bandwidth cap or byte-volume watch - PART DONE 2026-09-25: the agent reports each site's bytes sent (its bridge counter, agent 0.31.2), and a free site sending over 1 GB in ten minutes is paused and reported (a paid one reported); tested with a counter reset. DONE 2026-09-26: every container sends to the internet at most ~100 Mbit/s (12 MB/s, 24 MB burst): a byte-rate hashlimit as the first rule of the container egress chain, established connections included - safer than tc on each bridge, in the chain every deploy already builds and proves. Measured on h4 first: a 100 MB upload 720-835 Mbit/s without it, 108-157 with it (the burst lifts short runs); a site's answers to its visitors never cross that chain (18-22 Gbit/s to the host either way). The 1 GB/10 min watch still fires under the cap (up to 7.5 GB).
 - [x] **A21 [medium]** No domain-level egress visibility: containers can use any DNS resolver, and Telegram exfil and pools on 443 are unrecorded; no restricted tier for new accounts - PART DONE 2026-09-26: containers can no longer use any resolver - measured first on h4 that Docker's resolver forwards from the host's side (a container's lookup crossed the container egress chain 0 times, a direct query to 8.8.8.8 twice), then direct DNS (53), DNS over TLS (853) and the public DNS-over-HTTPS resolvers' addresses are refused; every deploy proves it with a throwaway container (names resolve; a direct query is refused). FOUND the same day, before it did harm: the refusal also hit the default bridge, where image builds run without Docker's resolver - apt failed in a build, and the weekly site-image rebuild (next run 2026-09-27 03:45) would have failed. Now limited to the site bridges (br-*), with a deploy check that a build container resolves names (it failed 3 of 3 under the faulty rule). DONE 2026-09-26, the restricted tier: a new free site's first week - the same window as its noindex, lifted with it by sites:indexing (past the week or paid, and clean on both scans) - reaches out only on TCP 80/443, with no UDP, at about 8 Mbit/s (CIC-RESTRICT, entered from DOCKER-USER for that site's bridge only, before the ordinary chain; the agent records it and re-applies it at every start). Measured on h4 first: https 200, port 22 refused, names resolve, upload ~11 Mbit/s with the burst. DONE 2026-09-26, the names each site looks up: measured on h4 that Docker's resolver, given the bridge gateway as its upstream, asks FROM THE CONTAINER'S address - so a forwarder on the host sees which site asked (the host's own resolver could not: systemd 249 has no query stream, and a loopback upstream does not work). cic-dns (the agent binary's dns mode, its own service and user, bound to the default bridge's gateway, restarted at once if it stops) forwards every question to the host's resolvers unchanged and logs time, asking address and name (50 MB, one previous file kept). Sites are pointed at it only once a throwaway container proved it answers; the run-spec label moves sites onto it one at a time through fleet:roll-image. The agent reports each site's names (/v1/dns); abuse:dns sends a site that looked up an exfiltration or mining endpoint (the Telegram bot API, Discord, paste and file-drop sites, request catchers, tunnels, pools) to a person, once a week per name - never a ban. Proven on h4 on a throwaway network first: names resolve, and the log named the container and each name. LIVE 2026-09-26: the first deploy could not start cic-dns anywhere (its user cannot enter the agent's 0750 directory - "Permission denied"); the proof that gates the sites caught it and no site was pointed at it. With its own copy of the binary it runs on every host; one site per host was moved first, then the rest: all 7 live sites resolve through it, a lookup from each was attributed to exactly that site, every site answered as before, and the first-week restrictions survived the moves. HARDENED 2026-09-26 (found reviewing it): every site reaches the forwarder, and nothing bounded what one could make it hold - a flood started a goroutine and a 64 KB buffer per packet (2,000 in flight from a 2,000-packet test flood). Now at most 256 questions in flight and 64 TCP connections (the rest dropped, as a busy resolver drops), a 96 MB memory ceiling on the service, and 50 questions a second per site at the firewall (the same budget as DNS on the way out; this traffic arrives through INPUT, which the egress chain never sees). Measured live on h4 (agent 0.43.2) from a throwaway container: 5,000 questions sent in 0.04 s, 101 let through and 4,899 dropped at the firewall, the forwarder's memory 7.3 -> 9.7 MB, and a different container resolved normally straight after. Rolled out to h1 and h3; every site answering.
 - [x] **A22 [medium]** Abuse reports trigger no automatic scan or pause; no abuse@ contact exists, which risks Cloudflare's 24-hour response rule - PART DONE 2026-09-25: a report now triggers the link check of the site at once (a ClickFix or program on the site bans, the rest goes to review), and three different reporters (per /64) in 24 hours pause the site - never a ban; tested. LEFT (owner): an abuse@ mailbox registered with Cloudflare. APPROVED 2026-09-26 (owner): abuse@ forwards to the owner's inbox. Waiting on the Cloudflare token: it has no Email Routing permission (checked: routing is on for the zone, the rules API answers "Authentication error"). DONE 2026-09-26: abuse@codeinchrome.com forwards to the owner's inbox (Cloudflare Email Routing, created in the dashboard: the API token has no Email Routing permission; the destination was already verified; MX points at Cloudflare's routing), and it is published on the report page and in the terms.
@@ -112,7 +183,7 @@ before it is ticked.
 - [x] **A45 [low]** fail2ban runs only the default sshd jail (10-minute bans, no recidive), and sshd keeps defaults while SSH is open to the world - FIXED 2026-09-25: fail2ban sshd aggressive with growing bans (to a week) and recidive, on every host and the control host; sshd LoginGraceTime 30, no X11 or agent forwarding, MaxStartups 10:30:60; checked by the deploy scripts.
 - [x] **A46 [low]** The control host's tunnel key (cictunnel) can open remote (-R) and unix-socket forwards on every customer host - FIXED 2026-09-25: the tunnel key also carries permitlisten="localhost:1" and command=nologin; proved with a throwaway key first (agent forward works, -R and a shell refused), then the tunnels were restarted one at a time.
 - [x] **A47 [low]** The control host still runs an unused root cic-agent, the Docker daemon and old DOCKER-USER rules - FIXED 2026-09-25: the control host runs no agent and no Docker; checked by deploy-control.
-- [ ] **A48 [low]** There is no verifiable Cloudflare-side rate limiting or IP reputation, and the API token cannot read or manage it - PART VERIFIED 2026-09-26: IP reputation is on - the zone's Security Level is "medium" (visitors with a poor reputation are challenged) and Browser Integrity Check is on, both read through the API. Rate-limiting rules: the token is still refused on rulesets (owner: add Zone WAF edit to it, or add one rule in the dashboard).
+- [x] **A48 [low]** There is no verifiable Cloudflare-side rate limiting or IP reputation, and the API token cannot read or manage it - PART VERIFIED 2026-09-26: IP reputation is on - the zone's Security Level is "medium" (visitors with a poor reputation are challenged) and Browser Integrity Check is on, both read through the API. Rate-limiting rules: the token is still refused on rulesets (owner: add Zone WAF edit to it, or add one rule in the dashboard). DONE 2026-09-26: the owner added Zone WAF: Edit to the platform token (codeinchrome.com only); one rate-limiting rule, kept in infra/setup-cloudflare-proxy.sh: POSTs to sign-in, sign-up, reset, 2FA and the email code on app.codeinchrome.com, 10 per 10 s per address, then blocked 10 s. Verified live: 10 reached the app, the 11th-15th got 429, the form was back 12 s later, and a customer site's /login is never limited.
 - [x] **A49 [low]** Host auditing and kernel hardening are at Ubuntu defaults: no auditd, and several sysctls are not hardened - FIXED 2026-09-25: sysctl hardening (bpf_jit_harden, kexec off, ldisc autoload off, no ICMP redirects, sysrq off, no setuid dumps) and auditd watching SSH, firewall, Docker, Caddy, sudoers, root's keys and /opt/codeinchrome/etc, on every host and the control host; checked by the deploy.
 
 - [x] **Every site's trailing-slash and directory redirects went to
@@ -922,8 +993,12 @@ fixed, deployed and verified (above). These remain - each needs the owner:
       List. **Owner, 2026-09-25: not now** - deferred, the risk accepted
       and reduced by the phishing checks (name refusals, LinkScanner, the
       report form, first-week noindex). The move is scripted when it is bought.
-- [ ] **Bot protection on sign-up and login** (Cloudflare Turnstile, Bot Fight
-      Mode): our Cloudflare token has no permission for either. Owner: turn on
+- [x] **Bot protection on sign-up and login** - DONE 2026-09-26 with Turnstile
+      (on, see A19) and the edge rate limit (A48). Bot Fight Mode deliberately
+      NOT on: on the Free plan it cannot be skipped by a rule, so it would
+      challenge the payment provider's webhooks, our own monitor and link
+      scans, and customer sites' API clients. Was: our Cloudflare token has no
+      permission for either. Owner: turn on
       Bot Fight Mode, and create a Turnstile widget (or give the token
       Turnstile:Edit). The forms are WIRED (App\Auth\Turnstile): sign-up,
       email sign-in and the reset mail, off until TURNSTILE_SITE_KEY and
