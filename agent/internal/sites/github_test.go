@@ -84,7 +84,8 @@ func TestSomethingPushedOnGitHubIsNeverOverwritten(t *testing.T) {
 	// The owner pushes to GitHub directly.
 	work := t.TempDir()
 	for _, args := range [][]string{
-		{"clone", "-q", remote, work},
+		// -b main: whatever the machine's default branch (CI's git says master).
+		{"clone", "-q", "-b", "main", remote, work},
 		{"-C", work, "-c", "user.name=owner", "-c", "user.email=o@example.com", "commit", "-q", "--allow-empty", "-m", "owner's own commit"},
 		{"-C", work, "push", "-q", "origin", "HEAD:main"},
 	} {
