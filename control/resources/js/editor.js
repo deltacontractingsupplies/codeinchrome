@@ -3610,7 +3610,9 @@ const cicApi = {
     seenRevision.set(norm(path), res.revision);
     rememberContent(norm(path), res.content);
     const lines = res.content.split('\n');
-    const re = match ? (match instanceof RegExp ? match : new RegExp(String(match), 'i')) : null;
+    // Without "g": a global RegExp's test() carries lastIndex from one line to
+    // the next and skips matches.
+    const re = match ? (match instanceof RegExp ? new RegExp(match.source, match.flags.replace(/[gy]/g, '')) : new RegExp(String(match), 'i')) : null;
     const out = [];
     let used = 0;
     let n = Math.max(1, from);
@@ -3624,9 +3626,13 @@ const cicApi = {
     const last = Math.min(lines.length, to);
     const next = n <= last ? n : null;
     // The last line says what this page is, so a page cut short by a tool is
-    // noticed (no footer = not all of it), and names the next call.
+    // noticed (no footer = not all of it), and names the next call. "end of
+    // file" only when it is: a view stopped by `to` says how much is left.
     const shown = out.length ? `lines ${out[0].trim().split('|')[0]}-${out.at(-1).trim().split('|')[0]} of ${lines.length}` : `no lines of ${lines.length}`;
-    const footer = `[${shown}${re ? ' matching' : ''} - ${next ? `more: cic.view(${JSON.stringify(norm(path))}, { from: ${next}${re ? ', match' : ''} })` : 'end of file'}]`;
+    const rest = next ? `more: cic.view(${JSON.stringify(norm(path))}, { from: ${next}${re ? ', match' : ''} })`
+      : last < lines.length ? `stopped at line ${last} as asked; ${lines.length - last} more after it`
+        : 'end of file';
+    const footer = `[${shown}${re ? ' matching' : ''} - ${rest}]`;
     return { ok: true, path: norm(path), lines: lines.length, next, text: `${out.join('\n')}\n${footer}` };
   },
 
