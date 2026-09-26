@@ -332,6 +332,11 @@ ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
 ReadWritePaths=/var/log/cic-dns
+# Every site can reach it: a ceiling, so no flood ever costs the host its
+# memory (measured 2026-09-26: ~4 MB and 8 tasks in use; the forwarder's own
+# caps hold it near 16 MB at worst).
+MemoryMax=96M
+TasksMax=64
 Restart=always
 RestartSec=1
 [Install]
@@ -408,6 +413,8 @@ check "agent not on public iface" '! has "0.0.0.0:9440" ss -ltn'
 check "token file is 0600"       '[[ "$(stat -c %a '"$CIC"'/etc/agent.env)" == "600" ]]'
 check "caddy active"             'systemctl is-active caddy'
 check "sites' DNS forwarder active" 'systemctl is-active cic-dns'
+check "DNS forwarder has a memory ceiling" '[[ "$(systemctl show cic-dns -p MemoryMax --value)" != infinity ]]'
+check "DNS forwarder rate-limited per site" 'iptables -S INPUT | grep -q -- "-j CIC-DNSFWD" && ! iptables -S INPUT | grep -E -- "--dport 53 -j ACCEPT" && iptables -S CIC-DNSFWD | grep -q hashlimit'
 # Origin pulls (A33): a live platform site answers the probe's certificate
 # and refuses a connection without one. The agent rewrites every vhost as it
 # starts, so this waits for Caddy to have the new config.

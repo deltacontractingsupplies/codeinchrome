@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/binary"
 	"encoding/json"
+	"errors"
 	"io"
 	"net"
 	"os"
@@ -161,5 +162,77 @@ func TestTheLogRotatesAtItsCap(t *testing.T) {
 	old, err := os.Stat(p + ".1")
 	if err != nil || info.Size() > 100 || old.Size() > 100 {
 		t.Fatalf("sizes %d %v %v", info.Size(), old, err)
+	}
+}
+
+// A site flooding its gateway with questions must not make the forwarder
+// start a goroutine (and a 64 KB buffer) per packet: with an upstream that
+// never answers, what is in flight stays at the cap and the rest is dropped,
+// as a busy resolver drops - the client asks again.
+func TestAFloodIsBoundedNotQueued(t *testing.T) {
+	silent, err := net.ListenPacket("udp", "127.0.0.1:0") // reads nothing, answers nothing
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer silent.Close()
+	f := &Forwarder{Upstreams: []string{silent.LocalAddr().String()}, Timeout: 2 * time.Second, MaxInflight: 8}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pc, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	go f.ServeUDP(ctx, pc)
+
+	c, _ := net.Dial("udp", pc.LocalAddr().String())
+	defer c.Close()
+	q := query(1, "flood.example")
+	for i := 0; i < 2000; i++ {
+		c.Write(q)
+	}
+	peak := int64(0)
+	deadline := time.Now().Add(500 * time.Millisecond)
+	for time.Now().Before(deadline) {
+		if n := f.inflight.Load(); n > peak {
+			peak = n
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	if peak == 0 || peak > 8 {
+		t.Fatalf("in flight peaked at %d, want 1..8", peak)
+	}
+	if f.dropped.Load() == 0 {
+		t.Fatal("nothing was dropped from a 2,000-packet flood against a cap of 8")
+	}
+}
+
+// TCP connections are capped the same way: past the cap a connection is
+// closed at once instead of held for its 10-second deadline.
+func TestTCPConnectionsAreCapped(t *testing.T) {
+	f := &Forwarder{Upstreams: []string{"127.0.0.1:1"}, MaxConns: 2}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	go f.ServeTCP(ctx, l)
+
+	var held []net.Conn
+	for i := 0; i < 2; i++ { // two silent connections take both slots
+		c, err := net.Dial("tcp", l.Addr().String())
+		if err != nil {
+			t.Fatal(err)
+		}
+		held = append(held, c)
+	}
+	defer func() {
+		for _, c := range held {
+			c.Close()
+		}
+	}()
+	time.Sleep(100 * time.Millisecond)
+	extra, err := net.Dial("tcp", l.Addr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer extra.Close()
+	extra.SetReadDeadline(time.Now().Add(2 * time.Second))
+	if _, err := extra.Read(make([]byte, 1)); err == nil || errors.Is(err, os.ErrDeadlineExceeded) {
+		t.Fatalf("a connection past the cap was held open (%v), not closed", err)
 	}
 }
