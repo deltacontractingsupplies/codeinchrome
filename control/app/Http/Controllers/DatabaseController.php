@@ -112,6 +112,30 @@ class DatabaseController extends Controller
         });
     }
 
+    /** The database's snapshots, newest first (taken before every import, migration and seeder). */
+    public function snapshots(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+
+        return $this->attempt(fn () => ['snapshots' => AgentClient::for($site->host)->dbSnapshots($site->site_id)]);
+    }
+
+    /** Put a snapshot back. What it replaces is snapshotted first, so this is undoable too. */
+    public function restoreSnapshot(Request $request, Site $site, string $name): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $request->validate(['confirm' => ['accepted']]);
+        $this->longRequest();
+        ignore_user_abort(true);
+
+        return $this->attempt(function () use ($site, $name) {
+            AgentClient::for($site->host)->dbRestoreSnapshot($site->site_id, $name);
+            Audit::record('db.snapshot_restored', site: $site, detail: ['snapshot' => $name]);
+
+            return ['restored' => $name];
+        });
+    }
+
     /**
      * A dump can take minutes. Only for a web request: set_time_limit applies
      * to the whole PROCESS, and in a console process (a test run, a worker)

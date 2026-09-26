@@ -358,6 +358,31 @@ test('a person and an agent can both edit a real site, without erasing each othe
     expect(tables.tables.map((t) => t.name)).toContain('invoices');
   });
 
+  await test.step('the database was saved before the migration, and it can be put back', async () => {
+    const snaps = await page.evaluate(() => window.cic.db.snapshots());
+    expect(snaps.ok, snaps.hint).toBe(true);
+    const before = snaps.snapshots.find((s) => s.reason === 'before-migrate');
+    expect(before, JSON.stringify(snaps.snapshots)).toBeTruthy();
+    await expect(page.locator('#dbSnapshots li', { hasText: 'before migrate' }).first()).toBeAttached();
+
+    // Never without confirm: the database is untouched.
+    const refused = await page.evaluate((n) => window.cic.db.restore(n), before.name);
+    expect(refused.error).toBe('needs_confirm');
+    expect((await page.evaluate(() => window.cic.db.tables())).tables.map((t) => t.name)).toContain('invoices');
+
+    // Restored: the invoices table (made by that migration) is gone again,
+    // and what was there is itself a snapshot, so the restore is undoable.
+    const restored = await page.evaluate((n) => window.cic.db.restore(n, { confirm: true }), before.name);
+    expect(restored.ok, restored.hint).toBe(true);
+    expect((await page.evaluate(() => window.cic.db.tables())).tables.map((t) => t.name)).not.toContain('invoices');
+    const after = await page.evaluate(() => window.cic.db.snapshots());
+    expect(after.snapshots[0].reason).toBe('before-import');
+
+    // Put the migration back, for the steps that follow.
+    const again = await page.evaluate(() => window.cic.run('artisan', ['migrate']));
+    expect(again.ok, again.result?.output).toBe(true);
+  });
+
   await test.step('a destructive command runs nothing without confirm', async () => {
     const refused = await page.evaluate(() => window.cic.run('artisan', ['migrate:fresh']));
     expect(refused.status).toBe(409);

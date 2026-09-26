@@ -319,6 +319,8 @@ What the calls return (so you never have to guess or print a whole object):
 | `cic.run(tool, args)` | `{ ok, created, result: { exitCode, text, truncated } }` - `text` has no colour codes |
 | `cic.request(path, opts)` | `{ ok, status, location, headers, cookies, body, json, redirects }` - `headers` is a plain object with lower-case names; `location` is a path |
 | `cic.db.query(sql)` | `{ ok, result: { columns, rows: [[...]], rowsAffected, mode } }` - rows are arrays; writes need `{ write: true }` |
+| `cic.db.snapshots()` | `{ ok, snapshots: [{ name, reason, at, bytes }] }` - the database is saved by itself before every import, `migrate`, `migrate:rollback`, `migrate:fresh` and `db:seed`, newest first |
+| `cic.db.restore(name, { confirm: true })` | puts a snapshot back; what the database holds now is saved first (undoable). Ask the person before you restore |
 | `cic.logs('app', n)` | `{ ok, log: { lines } }` - `lines` is ONE string; `.split('\n')` it |
 | `cic.eval(php)` | `{ ok, output, exitCode }` - `output` is what the code printed or returned |
 

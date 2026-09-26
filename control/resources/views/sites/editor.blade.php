@@ -40,6 +40,8 @@
      data-db-import="{{ route('db.import', $site) }}"
      data-command="{{ route('console.run', $site) }}"
      data-command-live="{{ route('console.live', $site) }}"
+     data-db-snapshots="{{ route('db.snapshots', $site) }}"
+     data-db-snapshot-restore="{{ route('db.snapshots.restore', [$site, '20000101T000000Z-name.sql.gz']) }}"
      data-logs="{{ route('console.logs', $site) }}"
      data-history="{{ route('history.index', $site) }}"
      data-bin="{{ route('history.bin', $site) }}"
@@ -126,6 +128,9 @@
                     <input type="file" id="dbImportFile" accept=".sql,.gz,application/sql,application/gzip" hidden>
                     <a id="dbUndoImport" href="#" hidden>Download the database from before the last import</a>
                 </div>
+                <div class="side-head"><span>SNAPSHOTS</span></div>
+                <p class="snap-note">Taken by themselves before every import, migration and seeder. Restoring saves what is there now first.</p>
+                <ol id="dbSnapshots" class="snapshots"></ol>
             </div>
             <div id="historySide" class="tree" hidden>
                 <div class="side-head"><span id="historyTitle">THIS FILE</span>

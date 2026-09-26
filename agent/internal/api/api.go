@@ -958,6 +958,38 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 	// is also sent as an HTTP trailer (X-Export-Status) for any client that
 	// reads trailers.
 	// ?saved=before-import returns the copy the last import saved instead.
+	// The database's snapshots (taken before every import, migration and
+	// seeder), newest first, and restoring one - which saves what it
+	// replaces first, so it is undoable too.
+	mux.HandleFunc("GET /v1/sites/{id}/db/snapshots", func(w http.ResponseWriter, r *http.Request) {
+		list, err := mgr.DBSnapshots(r.PathValue("id"))
+		if err != nil {
+			writeJSON(w, http.StatusBadRequest, fail("invalid", err.Error()))
+			return
+		}
+		writeJSON(w, http.StatusOK, ok(resp{"snapshots": list}))
+	})
+	mux.HandleFunc("POST /v1/sites/{id}/db/snapshots/{name}/restore", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Confirm bool `json:"confirm"`
+		}
+		_ = json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<10)).Decode(&body)
+		if !body.Confirm {
+			writeJSON(w, http.StatusConflict, fail("needs_confirm", "restoring replaces the database's current contents (they are saved first). Send confirm: true."))
+			return
+		}
+		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(35 * time.Minute))
+		err := mgr.RestoreDBSnapshot(r.Context(), r.PathValue("id"), r.PathValue("name"))
+		switch {
+		case errors.Is(err, sites.ErrBusy):
+			writeJSON(w, http.StatusConflict, fail("busy", "a command is running on this site; try again when it finishes"))
+		case err != nil:
+			writeJSON(w, http.StatusUnprocessableEntity, fail("restore_failed", err.Error()))
+		default:
+			writeJSON(w, http.StatusOK, ok(resp{"restored": r.PathValue("name")}))
+		}
+	})
+
 	mux.HandleFunc("GET /v1/sites/{id}/db/export", func(w http.ResponseWriter, r *http.Request) {
 		// The server's 5-minute write timeout is for API calls, not a dump.
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(35 * time.Minute))

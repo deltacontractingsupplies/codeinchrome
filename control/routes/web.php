@@ -205,6 +205,9 @@ Route::middleware(['auth', 'auth.session'])->group(function () {
     Route::delete('/sites/{site}/lsp/{session}', [LspController::class, 'close'])->name('lsp.close');
     Route::get('/sites/{site}/db/export', [DatabaseController::class, 'export'])->middleware('throttle:db')->name('db.export');
     Route::post('/sites/{site}/db/import', [DatabaseController::class, 'import'])->middleware(['throttle:db', \App\Http\Middleware\StorageLimit::class])->name('db.import');
+    Route::get('/sites/{site}/db/snapshots', [DatabaseController::class, 'snapshots'])->middleware('throttle:db')->name('db.snapshots');
+    Route::post('/sites/{site}/db/snapshots/{name}/restore', [DatabaseController::class, 'restoreSnapshot'])
+        ->where('name', '\d{8}T\d{6}Z-[a-z0-9-]{1,40}\.sql\.gz')->middleware('throttle:db')->name('db.snapshots.restore');
 });
 
 /*

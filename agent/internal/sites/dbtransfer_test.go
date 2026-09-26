@@ -106,11 +106,16 @@ func TestImportSavesTheCurrentDatabaseFirstAndAcceptsGzip(t *testing.T) {
 	if old.String() != "-- the old data\n" {
 		t.Fatalf("saved copy holds %q", old.String())
 	}
-	if info, _ := os.Stat(filepath.Join(m.dir(id), beforeImportFile)); info.Mode().Perm() != 0o600 {
+	snaps, _ := m.DBSnapshots(id)
+	if len(snaps) != 1 || snaps[0].Reason != "before-import" {
+		t.Fatalf("snapshots: %+v", snaps)
+	}
+	saved := filepath.Join(m.dir(id), snapshotDir, snaps[0].Name)
+	if info, _ := os.Stat(saved); info.Mode().Perm() != 0o600 {
 		t.Fatalf("saved copy is %v, want 0600", info.Mode().Perm())
 	}
 	// The saved copy is outside the app: the site's code cannot reach it.
-	if strings.HasPrefix(filepath.Join(m.dir(id), beforeImportFile), m.appDir(id)+string(os.PathSeparator)) {
+	if strings.HasPrefix(saved, m.appDir(id)+string(os.PathSeparator)) {
 		t.Fatal("the saved copy is inside the site's app directory")
 	}
 }
@@ -139,7 +144,7 @@ func TestAFailedImportSaysTheOldDatabaseIsKept(t *testing.T) {
 	m, id := withDB(t)
 	fakeMySQL(t, "-- old\n", true)
 	err := m.ImportDB(context.Background(), id, strings.NewReader("NOT SQL"))
-	if err == nil || !strings.Contains(err.Error(), "ERROR 1064") || !strings.Contains(err.Error(), "import it back to undo") {
+	if err == nil || !strings.Contains(err.Error(), "ERROR 1064") || !strings.Contains(err.Error(), "saved as snapshot") || !strings.Contains(err.Error(), "to undo") {
 		t.Fatalf("got %v", err)
 	}
 	if _, err := m.BeforeImport(id); err != nil {
