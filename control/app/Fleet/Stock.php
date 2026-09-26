@@ -154,6 +154,17 @@ class Stock
         return $this->fits(self::footprint($planKey, 1), $this->committed()) > 0;
     }
 
+    /**
+     * How many more free trial sites fit right now (owner, 2026-09-26: show
+     * how many free places there are). The same room siteFits() gives one
+     * trial - what is left after paid plans' whole allowance AND every
+     * running trial - counted instead of yes/no.
+     */
+    public function trialsLeft(): int
+    {
+        return $this->fits(self::footprint('free', 1), $this->committed());
+    }
+
     private function fits(array $need, array $committed): int
     {
         $cap = $this->capacity();

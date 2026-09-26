@@ -90,6 +90,32 @@ class StockTest extends TestCase
         $this->assertTrue(app(Stock::class)->siteFits('free'));
     }
 
+    public function test_the_trial_places_left_are_what_is_really_free_and_the_public_pages_say_so(): void
+    {
+        // 8 CPUs; two Starters reserve 3.0; a running trial holds 2.0.
+        User::factory()->count(2)->create(['plan' => 'starter']);
+        $free = User::factory()->create(['plan' => 'free']);
+        Site::create(['user_id' => $free->id, 'site_id' => 'hobby', 'domain' => 'hobby.codeinchrome.com', 'host' => 'h1',
+            'status' => 'live', 'cpu_limit' => '2.0', 'memory_limit' => '256m']);
+
+        // 8 - 3 - 2 = 3 CPU left: 12 more 0.25-CPU trial sites (memory and disk allow more).
+        $this->assertSame(12, app(Stock::class)->trialsLeft());
+        // The same room siteFits() gives a trial: counted, not just yes/no.
+        $this->assertTrue(app(Stock::class)->siteFits('free'));
+
+        Cache::forget('fleet.trials_left');
+        foreach (['/', '/pricing'] as $page) {
+            $this->get($page)->assertOk()->assertSee('12 free trial places left right now')->assertSee('data-trials-left="12"', false);
+        }
+
+        // Full: the pages say so, and never a number that is not there.
+        Site::create(['user_id' => $free->id, 'site_id' => 'hobby2', 'domain' => 'hobby2.codeinchrome.com', 'host' => 'h1',
+            'status' => 'live', 'cpu_limit' => '3.0', 'memory_limit' => '256m']);
+        $this->assertSame(0, app(Stock::class)->trialsLeft());
+        Cache::forget('fleet.trials_left');
+        $this->get('/pricing')->assertOk()->assertSee('Free trials are full right now')->assertSee('data-trials-left="0"', false);
+    }
+
     public function test_a_plan_with_a_storage_total_reserves_the_total_not_every_sites_ceiling(): void
     {
         config(['billing.plans.starter.storage_gb' => 6]); // 3 sites x 5 GB ceilings, 6 GB between them

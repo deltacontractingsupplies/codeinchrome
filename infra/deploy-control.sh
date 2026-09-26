@@ -22,6 +22,17 @@ for forbidden in $CIC_FORBIDDEN_HOSTS; do
   [[ "$ip" == "$forbidden" ]] && { echo "REFUSING: $ip is the production host" >&2; exit 1; }
 done
 
+# The browser code is shipped as built here (public/build), so build it from
+# the source being deployed - every time. Once a fix to editor.js was deployed
+# with an older build: the source was right and production ran the old code,
+# with cic.check broken, until the e2e suite said so. Built BEFORE the tests:
+# pages render through the build's manifest, so from a clean checkout the
+# tests failed on every page until it existed (found 2026-09-26).
+( cd control && npm run build --silent >/dev/null 2>&1 ) || {
+  echo "REFUSING to deploy: the front end does not build (cd control && npm run build)" >&2
+  exit 1
+}
+
 # Never deploy code whose tests fail. (A deploy chained on `grep` finding the
 # test summary line went out once with a failing test - the summary line is
 # printed either way.) CIC_SKIP_TESTS=1 exists for emergencies, and says so.
@@ -36,14 +47,6 @@ else
   echo "WARNING: deploying WITHOUT running tests (CIC_SKIP_TESTS=1)" >&2
 fi
 
-# The browser code is shipped as built here (public/build), so build it from
-# the source being deployed - every time. Once a fix to editor.js was deployed
-# with an older build: the source was right and production ran the old code,
-# with cic.check broken, until the e2e suite said so.
-( cd control && npm run build --silent >/dev/null 2>&1 ) || {
-  echo "REFUSING to deploy: the front end does not build (cd control && npm run build)" >&2
-  exit 1
-}
 
 say()  { printf '\n\033[1;36m[%s]\033[0m %s\n' "$name" "$*"; }
 ok()   { printf '\033[32m  ok\033[0m %s\n' "$*"; }

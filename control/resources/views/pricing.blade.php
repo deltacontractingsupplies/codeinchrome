@@ -104,5 +104,6 @@
 @endif
 <div class="mt-10">
     <a href="{{ route('register') }}" class="rounded-md bg-teal-500 px-5 py-2.5 font-medium text-neutral-950 hover:bg-teal-400">{{ \App\Billing\Sales::open() ? 'Try it free for '.config('billing.trial.days').' days' : 'Start free' }}</a>
+    @include('partials.trial-places')
 </div>
 @endsection
