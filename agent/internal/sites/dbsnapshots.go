@@ -68,12 +68,20 @@ func (m *Manager) SnapshotDB(ctx context.Context, id, reason string) (DBSnapshot
 		return DBSnapshot{}, err
 	}
 	at := snapshotNow().UTC()
-	name := at.Format("20060102T150405Z") + "-" + reason + ".sql.gz"
-	for n := 2; ; n++ { // two in the same second
+	var name string
+	for n := 1; ; n++ { // two in the same second get -2, -3...
+		name = at.Format("20060102T150405Z") + "-" + reason + ".sql.gz"
+		if n > 1 {
+			name = fmt.Sprintf("%s-%s-%d.sql.gz", at.Format("20060102T150405Z"), strings.TrimSuffix(reason[:min(len(reason), 37)], "-"), n)
+		}
+		// Only ever a bare snapshot file name inside dir: the reason is
+		// reduced to [a-z0-9-] above, and this proves the result.
+		if !snapshotName.MatchString(name) || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
+			return DBSnapshot{}, fmt.Errorf("invalid snapshot name %q", name)
+		}
 		if _, err := os.Stat(filepath.Join(dir, name)); os.IsNotExist(err) {
 			break
 		}
-		name = fmt.Sprintf("%s-%s-%d.sql.gz", at.Format("20060102T150405Z"), strings.TrimSuffix(reason[:min(len(reason), 37)], "-"), n)
 	}
 	tmp, err := os.CreateTemp(dir, ".snap-*")
 	if err != nil {
@@ -161,7 +169,7 @@ func (m *Manager) openSnapshot(id, name string) (*os.File, error) {
 	if err := ValidID(id); err != nil {
 		return nil, err
 	}
-	if !snapshotName.MatchString(name) {
+	if !snapshotName.MatchString(name) || strings.Contains(name, "..") || strings.ContainsAny(name, `/\`) {
 		return nil, fmt.Errorf("no such snapshot")
 	}
 	f, err := os.Open(filepath.Join(m.dir(id), snapshotDir, name))
