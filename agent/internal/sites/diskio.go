@@ -37,10 +37,16 @@ const (
 const runSpecVersion = "2"
 
 func (m *Manager) runSpec() string {
+	spec := runSpecVersion + "-io"
 	if m.ioDisk == "" {
-		return runSpecVersion + "-none"
+		spec = runSpecVersion + "-none"
 	}
-	return runSpecVersion + "-io"
+	// "-dns": resolving through the host's forwarder, which needs a new
+	// container; fleet:roll-image moves sites onto it one at a time.
+	if m.cfg.SiteDNS != "" {
+		spec += "-dns"
+	}
+	return spec
 }
 
 // ioArgs are the docker run flags for the ceilings, or none when the disk is

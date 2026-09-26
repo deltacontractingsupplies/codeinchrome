@@ -1,0 +1,165 @@
+package dnsfwd
+
+import (
+	"bytes"
+	"context"
+	"encoding/binary"
+	"encoding/json"
+	"io"
+	"net"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+	"time"
+)
+
+// query builds a DNS question for name, type A.
+func query(id uint16, name string) []byte {
+	b := make([]byte, 12)
+	binary.BigEndian.PutUint16(b[0:2], id)
+	b[2] = 0x01                           // recursion desired
+	binary.BigEndian.PutUint16(b[4:6], 1) // one question
+	for _, l := range strings.Split(name, ".") {
+		b = append(b, byte(len(l)))
+		b = append(b, l...)
+	}
+	return append(b, 0, 0, 1, 0, 1)
+}
+
+func TestParseQuestion(t *testing.T) {
+	name, qtype, ok := ParseQuestion(query(7, "API.Telegram.org"))
+	if !ok || name != "api.telegram.org" || qtype != 1 {
+		t.Fatalf("got %q %d %v", name, qtype, ok)
+	}
+	bad := [][]byte{
+		nil, make([]byte, 11),
+		append(query(1, "a.b")[:12], 0xC0, 0x0C, 0, 1, 0, 1), // a compression pointer in a question
+		query(1, "example.com")[:20],                         // cut short
+		query(1, strings.Repeat("a.", 130)+"com"),            // over 255 bytes
+	}
+	for i, m := range bad {
+		if _, _, ok := ParseQuestion(m); ok {
+			t.Errorf("bad message %d accepted", i)
+		}
+	}
+	noQuestion := query(1, "a.b")
+	binary.BigEndian.PutUint16(noQuestion[4:6], 0)
+	if _, _, ok := ParseQuestion(noQuestion); ok {
+		t.Error("a message with no question accepted")
+	}
+}
+
+func TestUpstreamsAreTheRealResolversNotTheStub(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "resolv.conf")
+	os.WriteFile(p, []byte("# comment\nnameserver 2a01:4ff:ff00::add:2\nnameserver 127.0.0.53\nnameserver 185.12.64.2\nsearch .\n"), 0o644)
+	got := Upstreams(p)
+	if strings.Join(got, ",") != "[2a01:4ff:ff00::add:2]:53,185.12.64.2:53" {
+		t.Fatalf("upstreams %v", got)
+	}
+}
+
+// fakeUpstream answers every UDP and TCP question with the question itself
+// and the answer flag set, and counts them.
+func fakeUpstream(t *testing.T) string {
+	t.Helper()
+	pc, err := net.ListenPacket("udp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { pc.Close() })
+	go func() {
+		buf := make([]byte, 65535)
+		for {
+			n, src, err := pc.ReadFrom(buf)
+			if err != nil {
+				return
+			}
+			ans := append([]byte(nil), buf[:n]...)
+			ans[2] |= 0x80
+			pc.WriteTo(ans, src)
+		}
+	}()
+	l, err := net.Listen("tcp", pc.LocalAddr().String())
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { l.Close() })
+	go func() {
+		for {
+			c, err := l.Accept()
+			if err != nil {
+				return
+			}
+			var sz [2]byte
+			io.ReadFull(c, sz[:])
+			m := make([]byte, binary.BigEndian.Uint16(sz[:]))
+			io.ReadFull(c, m)
+			m[2] |= 0x80
+			c.Write(append(sz[:], m...))
+			c.Close()
+		}
+	}()
+	return pc.LocalAddr().String()
+}
+
+func TestAQuestionIsRelayedAndLoggedWithWhoAsked(t *testing.T) {
+	up := fakeUpstream(t)
+	var log bytes.Buffer
+	// A dead upstream first: the next one must still answer.
+	f := &Forwarder{Upstreams: []string{"127.0.0.1:1", up}, Log: &log, Timeout: 500 * time.Millisecond}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	pc, _ := net.ListenPacket("udp", "127.0.0.1:0")
+	go f.ServeUDP(ctx, pc)
+	l, _ := net.Listen("tcp", "127.0.0.1:0")
+	go f.ServeTCP(ctx, l)
+
+	// UDP.
+	c, _ := net.Dial("udp", pc.LocalAddr().String())
+	defer c.Close()
+	c.SetDeadline(time.Now().Add(5 * time.Second))
+	q := query(42, "api.telegram.org")
+	c.Write(q)
+	ans := make([]byte, 512)
+	n, err := c.Read(ans)
+	if err != nil || binary.BigEndian.Uint16(ans[0:2]) != 42 || ans[2]&0x80 == 0 || !bytes.Equal(ans[12:n], q[12:]) {
+		t.Fatalf("udp answer %x %v", ans[:n], err)
+	}
+	// TCP.
+	tc, _ := net.Dial("tcp", l.Addr().String())
+	defer tc.Close()
+	tc.SetDeadline(time.Now().Add(5 * time.Second))
+	q2 := query(43, "discord.com")
+	var sz [2]byte
+	binary.BigEndian.PutUint16(sz[:], uint16(len(q2)))
+	tc.Write(append(sz[:], q2...))
+	io.ReadFull(tc, sz[:])
+	a2 := make([]byte, binary.BigEndian.Uint16(sz[:]))
+	if _, err := io.ReadFull(tc, a2); err != nil || binary.BigEndian.Uint16(a2[0:2]) != 43 {
+		t.Fatalf("tcp answer %x %v", a2, err)
+	}
+
+	lines := strings.Split(strings.TrimSpace(log.String()), "\n")
+	if len(lines) != 2 {
+		t.Fatalf("log %q", log.String())
+	}
+	var first Question
+	json.Unmarshal([]byte(lines[0]), &first)
+	if first.Name != "api.telegram.org" || first.Src != "127.0.0.1" || first.Type != 1 || first.TS == 0 {
+		t.Fatalf("logged %+v", first)
+	}
+}
+
+func TestTheLogRotatesAtItsCap(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "q.log")
+	r := &RotatingFile{Path: p, Max: 100}
+	for i := 0; i < 30; i++ {
+		r.Write([]byte("0123456789\n"))
+	}
+	info, _ := os.Stat(p)
+	old, err := os.Stat(p + ".1")
+	if err != nil || info.Size() > 100 || old.Size() > 100 {
+		t.Fatalf("sizes %d %v %v", info.Size(), old, err)
+	}
+}

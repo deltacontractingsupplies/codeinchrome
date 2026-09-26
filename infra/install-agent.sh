@@ -297,6 +297,57 @@ if [[ -s /etc/caddy/origin/cert.pem && -s /etc/caddy/origin/key.pem ]]; then
     ok "origin pulls not authenticated (the zone setting is off)"
   fi
 fi
+
+# ─────────────────────────────────────────────────────────────────────────────
+log "sites' DNS forwarder"
+# Which site looked up which name (audit A21): cic-dns (the agent binary's
+# `dns` mode) answers on the default bridge's gateway and forwards to the
+# host's resolvers, logging each question with the asking container's
+# address. Its own service and user, apart from the agent, so an agent
+# restart never interrupts a lookup. Sites are pointed at it only once it
+# is proven to answer, below; until then they resolve as before.
+id cic-dns >/dev/null 2>&1 || useradd --system --no-create-home --shell /usr/sbin/nologin cic-dns
+install -d -o cic-dns -g cic-dns -m 0750 /var/log/cic-dns
+dns_gw=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || true)
+site_dns_flag=""
+if [[ -n $dns_gw ]]; then
+  cat > /etc/systemd/system/cic-dns.service <<UNIT
+[Unit]
+Description=codeinchrome: DNS forwarder for sites (which site asked what)
+After=docker.service
+Requires=docker.service
+[Service]
+ExecStart=$CIC/bin/cic-agent dns -listen $dns_gw:53
+User=cic-dns
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+ReadWritePaths=/var/log/cic-dns
+Restart=always
+RestartSec=1
+[Install]
+WantedBy=multi-user.target
+UNIT
+  systemctl daemon-reload
+  systemctl enable cic-dns >/dev/null 2>&1
+  systemctl restart cic-dns
+  sleep 1
+  # Proven the way a site will use it: a throwaway container on a throwaway
+  # site-style network, resolving through it.
+  docker network rm cic-dnsprove >/dev/null 2>&1 || true
+  if docker network create cic-dnsprove >/dev/null 2>&1 \
+     && docker run --rm --network cic-dnsprove --dns "$dns_gw" --entrypoint php codeinchrome/laravel:8.3 \
+          -r 'exit(gethostbyname("example.com") === "example.com" ? 1 : 0);' >/dev/null 2>&1; then
+    site_dns_flag="-site-dns $dns_gw"
+    ok "sites resolve through the host's forwarder ($dns_gw:53), which logs who asked"
+  else
+    warn "the DNS forwarder did not answer: sites keep resolving as before (not logged)"
+  fi
+  docker network rm cic-dnsprove >/dev/null 2>&1 || true
+fi
 cat > /etc/systemd/system/cic-agent.service <<UNIT
 [Unit]
 Description=codeinchrome host agent
@@ -309,7 +360,7 @@ EnvironmentFile=$CIC/etc/agent.env
 # The leading "-" makes it optional: a host without MySQL still runs the agent,
 # and creating a site there fails with that reason instead.
 EnvironmentFile=-$CIC/etc/mysql.env
-ExecStart=$CIC/bin/cic-agent -addr 127.0.0.1:9440 $origin_flags
+ExecStart=$CIC/bin/cic-agent -addr 127.0.0.1:9440 $origin_flags $site_dns_flag
 Restart=always
 RestartSec=3
 
@@ -350,6 +401,7 @@ check "agent accepts its token"  'has "\"ok\":true" curl -fsS -H "Authorization:
 check "agent not on public iface" '! has "0.0.0.0:9440" ss -ltn'
 check "token file is 0600"       '[[ "$(stat -c %a '"$CIC"'/etc/agent.env)" == "600" ]]'
 check "caddy active"             'systemctl is-active caddy'
+check "sites' DNS forwarder active" 'systemctl is-active cic-dns'
 # Origin pulls (A33): a live platform site answers the probe's certificate
 # and refuses a connection without one. The agent rewrites every vhost as it
 # starts, so this waits for Caddy to have the new config.

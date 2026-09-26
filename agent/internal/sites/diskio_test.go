@@ -74,3 +74,20 @@ func TestEverySiteGetsTheDiskCeilingsAndTheLabelSaysSo(t *testing.T) {
 		t.Errorf("without a disk: %s", plain)
 	}
 }
+
+// With the host's DNS forwarder proven, a site resolves through it; the
+// label changes, so fleet:roll-image moves every site onto it in turn.
+func TestSitesResolveThroughTheHostsForwarderWhenItIsSet(t *testing.T) {
+	s := Site{ID: "shop", Container: "cic-shop", CPULimit: "0.5", MemLimit: "384m", Port: 20001}
+	with := strings.Join((&Manager{cfg: Config{HostID: "h9", SiteDNS: "172.17.0.1"}, ioDisk: "/dev/sda"}).runArgs(s), " ")
+	if !strings.Contains(with, "--network cic-net-shop --dns 172.17.0.1 ") || !strings.Contains(with, "--label codeinchrome.runspec=2-io-dns") {
+		t.Errorf("with the forwarder: %s", with)
+	}
+	without := strings.Join((&Manager{cfg: Config{HostID: "h9"}, ioDisk: "/dev/sda"}).runArgs(s), " ")
+	if strings.Contains(without, "--dns") || !strings.Contains(without, "--label codeinchrome.runspec=2-io ") {
+		t.Errorf("without it: %s", without)
+	}
+	if !strings.HasSuffix(with, " "+laravelImage) {
+		t.Error("the image must stay the last argument")
+	}
+}

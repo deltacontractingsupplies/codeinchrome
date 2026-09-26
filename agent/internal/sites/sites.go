@@ -26,6 +26,11 @@ type Config struct {
 	CaddyDir string // /opt/codeinchrome/caddy/sites
 	HostID   string
 
+	// SiteDNS: the host's own DNS forwarder (cic-dns, internal/dnsfwd), set
+	// only once it was proven to answer. Sites then resolve through it, and
+	// the host knows which site looked up which name (audit A21).
+	SiteDNS string
+
 	// Root password for the host's MySQL, from /opt/codeinchrome/etc/mysql.env.
 	// Empty means this host has no database server, and creating a site fails
 	// with that reason rather than producing a site without a database.

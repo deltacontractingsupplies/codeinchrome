@@ -306,6 +306,17 @@ if ip6tables -L DOCKER-USER >/dev/null 2>&1; then
   done
 fi
 
+# The sites' DNS forwarder (cic-dns, audit A21) answers on the default
+# bridge's gateway; site bridges and that bridge may reach its port 53 there
+# and nothing else new (ufw refuses the rest of what arrives from a bridge).
+dns_gw=$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}' 2>/dev/null || echo 172.17.0.1)
+for dev in 'br-+' docker0; do
+  for proto in udp tcp; do
+    iptables -C INPUT -i "$dev" -d "$dns_gw" -p "$proto" --dport 53 -j ACCEPT 2>/dev/null \
+      || iptables -I INPUT -i "$dev" -d "$dns_gw" -p "$proto" --dport 53 -j ACCEPT
+  done
+done
+
 # A container reaches the host on its bridge gateway (that is how it gets to
 # MySQL): not to the host's SSH, which is for the operator (the audit found it
 # reachable - ufw allows 22 from anywhere, and a bridge is "anywhere").
