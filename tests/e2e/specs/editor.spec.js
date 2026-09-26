@@ -410,6 +410,19 @@ test('a person and an agent can both edit a real site, without erasing each othe
     expect(again.ok, again.result?.output).toBe(true);
   });
 
+  await test.step('the site at every screen size, as the devices show it, measured', async () => {
+    const r = await page.evaluate(() => window.cic.screens('/'));
+    expect(r.ok, r.hint).toBe(true);
+    expect(r.sizes).toEqual(['phone 390×844', 'tablet 820×1180', 'desktop 1440×900']);
+    // A fresh Laravel page fits every screen: nothing scrolls sideways.
+    expect(r.overflow, JSON.stringify(r.overflow)).toEqual([]);
+    // Real pictures of the real widths, shown over the editor.
+    const widths = await page.locator('#screensRow img').evaluateAll((imgs) => Promise.all(imgs.map((i) => i.decode().then(() => i.naturalWidth))));
+    expect(widths).toEqual([390, 820, 1440]);
+    await page.keyboard.press('Escape');
+    await expect(page.locator('#screens')).toBeHidden();
+  });
+
   await test.step('a one-time link opens the site signed in as one of its users, once', async () => {
     const made = await page.evaluate(() => window.cic.eval("return \\App\\Models\\User::forceCreate(['name' => 'Link Test', 'email' => 'link-'.uniqid().'@example.test', 'password' => bcrypt(Str::random(40))])->id;"));
     expect(made.ok, made.output).toBe(true);
