@@ -16,6 +16,15 @@ ip=${2:?usage: deploy-host.sh <name> <ip>}
 # The production box is not part of this fleet and no script here may touch it.
 # shellcheck disable=SC1091
 . infra/hosts.env
+
+# A connection that dies mid-transfer (the laptop's network drops) must fail,
+# not hang: on 2026-09-26 one scp waited five hours on a dead connection.
+# Keepalives are answered by the server even while a long build prints
+# nothing, so only a connection that is really gone is dropped (60 s).
+SSH_KEEPALIVE=(-o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+ssh() { command ssh "${SSH_KEEPALIVE[@]}" "$@"; }
+scp() { command scp "${SSH_KEEPALIVE[@]}" "$@"; }
+
 for forbidden in $CIC_FORBIDDEN_HOSTS; do
   [[ "$ip" == "$forbidden" ]] && { echo "REFUSING: $ip is the production host" >&2; exit 1; }
 done
