@@ -1039,6 +1039,29 @@ func Routes(mgr *sites.Manager, version string) http.Handler {
 		writeJSON(w, http.StatusOK, ok(resp{"linked": false}))
 	})
 
+	// A one-time sign-in link, handed over by Caddy from the site's own
+	// address (sites/signin.go). Not behind the bearer token - Caddy cannot
+	// send one; the link's signature is what is checked.
+	mux.HandleFunc("GET /v1/signin/{id}", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		key := mgr.SignInKey()
+		if len(key) == 0 {
+			http.Error(w, "Sign-in links are not available on this host.", http.StatusNotFound)
+			return
+		}
+		q := r.URL.Query()
+		name, value, path, err := mgr.SignIn(r.Context(), r.PathValue("id"), key, sites.SignInOpts{
+			User: q.Get("u"), Guard: q.Get("g"), Path: q.Get("p"), Expires: q.Get("e"), Nonce: q.Get("n"), Sig: q.Get("s"),
+		}, time.Now())
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusForbidden)
+			return
+		}
+		http.SetCookie(w, &http.Cookie{Name: name, Value: value, Path: "/", Secure: true, HttpOnly: true, SameSite: http.SameSiteLaxMode})
+		http.Redirect(w, r, path, http.StatusFound)
+	})
+
 	mux.HandleFunc("GET /v1/sites/{id}/db/export", func(w http.ResponseWriter, r *http.Request) {
 		// The server's 5-minute write timeout is for API calls, not a dump.
 		_ = http.NewResponseController(w).SetWriteDeadline(time.Now().Add(35 * time.Minute))

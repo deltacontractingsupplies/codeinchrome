@@ -56,6 +56,7 @@ const SITE = {
   githubUrl: root.dataset.github,
   githubLinkUrl: root.dataset.githubLink,
   githubPushUrl: root.dataset.githubPush,
+  signInLinkUrl: root.dataset.signInLink,
   commandLiveUrl: root.dataset.commandLive,
   dbSnapshotsUrl: root.dataset.dbSnapshots,
   dbSnapshotRestoreUrl: root.dataset.dbSnapshotRestore,
@@ -2732,6 +2733,8 @@ false. Nothing is paraphrased.
   cic.github.status()          the site's GitHub link: { linked, github: { repo, branch, state, publicKey, addKeyUrl } }
   cic.github.link('owner/repo') link it (branch 'main', or { branch }); every version is then pushed there
   cic.github.push()            push now - after the key is added on GitHub ("waiting_for_key" until then)
+  cic.signInUrl(path, { as })  a one-time link (10 minutes, once) that opens the site in a new tab
+                               signed in as the app's user \`as\` (default 1) - scripts and forms work
   cic.db.export()              download the whole database as .sql.gz
   cic.db.import(blob, { confirm }) load a .sql or .sql.gz File/Blob (95 MB at most).
                                Refused with "needs_confirm" unless confirm: true. The current
@@ -3816,6 +3819,10 @@ const cicApi = {
     link: (repo, options = {}) => apiAt(SITE.githubLinkUrl, 'POST', {}, { repo: String(repo ?? ''), branch: options.branch ?? 'main' }),
     push: () => apiAt(SITE.githubPushUrl, 'POST', {}, {}),
   }),
+  // A one-time link (ten minutes, once) that opens the site in the browser
+  // already signed in as the app's user `as` - a real session: scripts run,
+  // forms work. Open it in a NEW tab with your browser tool. No password.
+  signInUrl: (path = '/', { as = 1, guard } = {}) => apiAt(SITE.signInLinkUrl, 'POST', {}, { user: as, path, ...(guard ? { guard } : {}) }),
   // The Laravel names the editor completes, straight from the site.
   laravel: Object.freeze({
     routes: async () => ({ ok: true, names: await laravel.routeNames() }),

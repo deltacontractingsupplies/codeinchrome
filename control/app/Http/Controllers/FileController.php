@@ -2,10 +2,15 @@
 
 namespace App\Http\Controllers;
 
+use App\Abuse\Enforcer;
 use App\Audit\Audit;
 use App\Fleet\AgentClient;
 use App\Fleet\AgentRefused;
 use App\Fleet\AgentUnreachable;
+use App\Fleet\ExposureCheck;
+use App\Fleet\SignInLink;
+use App\Http\Middleware\BannedAccount;
+use App\Models\AuditEvent;
 use App\Models\Site;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -139,6 +144,25 @@ class FileController extends Controller
     }
 
     /** Sign in as one of the SITE's users, for testing pages behind its login. */
+    /**
+     * A one-time link that opens the site in the browser signed in as one of
+     * its app's users (App\Fleet\SignInLink): for testing the pages behind the
+     * app's own login in a real tab - scripts run, forms work.
+     */
+    public function signInLink(Request $request, Site $site): JsonResponse
+    {
+        $this->authorizeSite($request, $site);
+        $data = $request->validate([
+            'user' => ['required', 'integer', 'min:1'],
+            'guard' => ['nullable', 'string', 'regex:/^[a-z][a-z0-9_]{0,30}$/'],
+            // A path on the site only: never another address to go to.
+            'path' => ['nullable', 'string', 'max:2000', 'regex:~^/(?![/\\\\])[^\s]*$~'],
+        ]);
+        Audit::record('site.signin_link', site: $site, detail: ['user' => (int) $data['user']]);
+
+        return response()->json(['ok' => true] + SignInLink::make($site, (int) $data['user'], $data['guard'] ?? 'web', $data['path'] ?? '/'));
+    }
+
     public function loginCookie(Request $request, Site $site): JsonResponse
     {
         $this->authorizeSite($request, $site);
@@ -157,7 +181,7 @@ class FileController extends Controller
     {
         $this->authorizeSite($request, $site);
 
-        return $this->attempt(fn () => (new \App\Fleet\ExposureCheck($site))->run());
+        return $this->attempt(fn () => (new ExposureCheck($site))->run());
     }
 
     public function destroy(Request $request, Site $site): JsonResponse
@@ -210,10 +234,10 @@ class FileController extends Controller
             if ($error === 'malware' && $this->site) {
                 // The agent refused malware or obfuscated PHP and kept none of it
                 // (sites/scan.go). The account is banned (owner's decision).
-                app(\App\Abuse\Enforcer::class)->malware($this->site, $e->detail['findings'] ?? [], 'refused on write');
+                app(Enforcer::class)->malware($this->site, $e->detail['findings'] ?? [], 'refused on write');
 
                 return response()->json(['ok' => false, 'error' => 'malware',
-                    'hint' => ($e->detail['hint'] ?? 'Malware refused.').' '.\App\Http\Middleware\BannedAccount::MESSAGE], 403);
+                    'hint' => ($e->detail['hint'] ?? 'Malware refused.').' '.BannedAccount::MESSAGE], 403);
             }
 
             if ($error === 'malware_in_clone' && $this->site) {
@@ -223,16 +247,16 @@ class FileController extends Controller
                 // third in a day is treated like any malware (security review
                 // of 2026-09-25).
                 $owner = $this->site->user;
-                \App\Audit\Audit::record('abuse.clone_malware', $owner, $this->site, detail: ['hint' => mb_substr((string) ($e->detail['hint'] ?? ''), 0, 300)]);
-                $recent = \App\Models\AuditEvent::where('account_id', $owner?->id)->where('action', 'abuse.clone_malware')
+                Audit::record('abuse.clone_malware', $owner, $this->site, detail: ['hint' => mb_substr((string) ($e->detail['hint'] ?? ''), 0, 300)]);
+                $recent = AuditEvent::where('account_id', $owner?->id)->where('action', 'abuse.clone_malware')
                     ->where('created_at', '>=', now()->subDay())->count();
                 if ($owner && $recent >= 3) {
-                    app(\App\Abuse\Enforcer::class)->ban($owner, "Cloned repositories with malware $recent times in a day.");
+                    app(Enforcer::class)->ban($owner, "Cloned repositories with malware $recent times in a day.");
 
                     return response()->json(['ok' => false, 'error' => 'malware',
-                        'hint' => ($e->detail['hint'] ?? 'Malware refused.').' '.\App\Http\Middleware\BannedAccount::MESSAGE], 403);
+                        'hint' => ($e->detail['hint'] ?? 'Malware refused.').' '.BannedAccount::MESSAGE], 403);
                 }
-                app(\App\Abuse\Enforcer::class)->review($this->site, 'git clone refused: '.($e->detail['hint'] ?? 'malware in a repository'));
+                app(Enforcer::class)->review($this->site, 'git clone refused: '.($e->detail['hint'] ?? 'malware in a repository'));
             }
 
             return response()->json([
