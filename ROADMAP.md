@@ -47,25 +47,30 @@ tested, and verified on production before it is ticked.
       the host is quiet and shrinks only when paid sites need it. Measure a
       page's p50/p95 before and after on a free site.
       DONE 2026-09-26 (#75, agent 0.44.0): every site bursts to 2 CPUs (half a host), --cpu-shares free 256 / paid 1024, applied live with no restart. Measured on the free store on h1: artisan route:list 478-503 ms before, 229-284 ms after.
-- [ ] F2. Show how many free trial places are left (from measured capacity:
+- [x] F2. Show how many free trial places are left (from measured capacity:
       config fleet.stock), on the home and pricing pages.
+      DONE (#80): "131 free trial places left right now" on the home and pricing pages (Stock::trialsLeft, cached a minute; "full" when none), live.
 - [x] F3. When free sites crowd paid ones (measured, not guessed), the free
       share shrinks first, automatically; paid sites are never slowed by free
       ones. Alert the owner when it happens.
       DONE 2026-09-26: the shrinking is the kernel's, instant, per host - CPU weights (F1) give paid sites four times a trial's share the moment a host is busy, and trials take only room left over (Stock::siteFits counts every running trial). A host that stays full (load above 1.5 per CPU for 10 minutes) is an incident and an alert to the owner: paid sites are sharing a crowded host, add one.
 
 **See the agent work, live**
-- [ ] L1. Every cic write, edit and delete shows in the editor the moment it
+- [x] L1. Every cic write, edit and delete shows in the editor the moment it
       happens: the file opens (or its tab updates), the changed lines are
       highlighted, the file tree marks what changed - not all at once at the
       end of a long script.
-- [ ] L2. An activity timeline beside the editor: each step the agent takes
+      DONE (#76, #83, #89): each cic write/edit opens the file in one preview tab with the changed lines highlighted, and the explorer marks it A/M/D from the host's own answer; verified on production 2026-09-26 by the e2e suite (15 passed).
+- [x] L2. An activity timeline beside the editor: each step the agent takes
       (file written, command run, test result), with the time, as it happens.
-- [ ] L3. Shell and artisan output streams line by line into the terminal as
+      DONE (#76): the Agent panel - every write, edit, delete, move, command, eval, clone and restore as a step with its outcome and time, from one place (the window.cic wrapper); verified on production 2026-09-26 by the e2e suite (15 passed).
+- [x] L3. Shell and artisan output streams line by line into the terminal as
       the command runs, like a real terminal; exit code at the end.
-- [ ] L4. Fast with large changes: batched UI updates, no freeze on writeMany
+      DONE (#76, agent 0.45.0): artisan and composer output streams into the terminal as it prints (400 ms polls of the running command, keyed per run); verified on production 2026-09-26 by the e2e suite (15 passed) - composer's first lines on screen before it ends.
+- [x] L4. Fast with large changes: batched UI updates, no freeze on writeMany
       of hundreds of files.
       (Research first: how Lovable, Replit, Bolt, v0, Cursor show this.)
+      DONE (#76, #87): screen updates throttled to ~10 a second and one preview tab for a whole batch; verified on production 2026-09-26 by the e2e suite (15 passed) - a 150-file write with the editor following it, the longest frame gap under a second.
 
 **Never lose code, and link GitHub**
 - [x] G1. Every change is a commit already (history.git, verified). Re-check
@@ -100,9 +105,10 @@ tested, and verified on production before it is ticked.
       DONE 2026-09-26 (agent 0.46.0): a snapshot of the database before every import, migrate, migrate:rollback, migrate:fresh and db:seed - and if it cannot be taken, nothing runs. The newest 10 (1 GB at most) per site, outside the site's own files; listed in the Database view and by cic.db.snapshots(), put back by cic.db.restore(name, { confirm: true }) or a click, and a restore snapshots what it replaces first. The nightly backups keep the long history.
 
 **The skill**
-- [ ] S1. Testing first: every feature ships with tests and a browser check
+- [x] S1. Testing first: every feature ships with tests and a browser check
       (T1/T2), responsiveness checked at three widths.
       PART 2026-09-26: the skill asks for tests first and a check at phone, tablet and desktop widths (browser window resize + screenshot); T2 will make that one call.
+      DONE: the skill asks for tests first, an authorization test for every private page, validation tests, the site's own suite on the test database, and every screen size with cic.screens (signed in too, { as }) - T1 and T2 are the tools.
 - [x] S2. Security: roles and permissions for every route, no data exposed to
       the wrong user, checked by a test; no secrets anywhere public.
       DONE 2026-09-26 in the skill: a Policy per model action, a test that a guest is sent to log in and another user gets 403/404 on someone else's record, never trusting an id, price or role from the browser.
@@ -117,6 +123,7 @@ tested, and verified on production before it is ticked.
 **Speed and polish everywhere**
 - [ ] P1. The editor and dashboard fast and polished on every device (measure
       load time and interaction latency; fix the slowest first).
+      MEASURED 2026-09-26: built assets are hashed, cached a year (immutable), served from Cloudflare's cache and compressed - the editor's 1.1 MB (gzip, mostly Monaco; markdown and PDF split out) is paid once. Every app page answers in 220-300 ms for a visitor far from Europe, the trivial security.txt included, and 90-130 ms from a host in Europe with TLS: the app's own time is small; the rest is the distance from the visitor's Cloudflare node to the servers in Europe. Only a nearer region or Cloudflare's paid routing would cut it (owner's call). Free sites: see F1 (twice as fast).
 
 ### Security audit, round 2 (2026-09-25): 49 confirmed findings
 
