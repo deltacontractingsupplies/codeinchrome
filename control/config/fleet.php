@@ -128,6 +128,14 @@ return [
      */
     'heartbeat_url' => env('CIC_HEARTBEAT_URL'),
 
+    // Threat feeds watched for our own sites (abuse:feeds, audit A6): public,
+    // no key. A Google Safe Browsing key, when set, adds its verdicts too.
+    'threat_feeds' => [
+        'URLhaus (malware)' => 'https://urlhaus.abuse.ch/downloads/text_online/',
+        'OpenPhish (phishing)' => 'https://openphish.com/feed.txt',
+    ],
+    'safe_browsing_key' => env('CIC_SAFE_BROWSING_KEY'),
+
     /*
      * Accounts that can see the operator status page. By address, from the
      * environment, so no one can make themselves an operator from inside the

@@ -25,6 +25,8 @@ Schedule::command('sites:idle')->dailyAt('06:00')->withoutOverlapping();
 Schedule::command('abuse:links')->hourlyAt(50)->withoutOverlapping();
 // Which sites looked up exfiltration or mining endpoints (hosts' DNS forwarders).
 Schedule::command('abuse:dns')->hourlyAt(20)->withoutOverlapping();
+// Our sites in public threat feeds (URLhaus, OpenPhish; Safe Browsing with a key).
+Schedule::command('abuse:feeds')->hourlyAt(35)->withoutOverlapping();
 Schedule::command('audit:prune')->dailyAt('04:00');
 // Hosts rebuild the base image on Sundays at 03:30 (infra/install-agent.sh); sites move onto it here.
 Schedule::command('fleet:roll-image')->dailyAt('05:30')->withoutOverlapping();
