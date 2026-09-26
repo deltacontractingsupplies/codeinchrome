@@ -358,6 +358,26 @@ test('sed: print ranges, substitute with groups, and -i across files in one vers
   assert.equal(io.nodes.get('/notes.txt').content.includes('A'), false);
 });
 
+test('cp and mv ask for the folders they check together, not one round trip each', async () => {
+  const io = site();
+  const list = io.list;
+  let inFlight = 0;
+  let most = 0;
+  io.list = async (p) => {
+    inFlight++;
+    most = Math.max(most, inFlight);
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    inFlight--;
+    return list(p);
+  };
+  io.calls.length = 0;
+  assert.equal((await sh(io, 'cp app/Models/Item.php routes/Thing.php')).code, 0);
+  assert.ok(most >= 2, `listings were fetched one after another (at most ${most} at once)`);
+  const kinds = io.calls.map(([k]) => k);
+  assert.ok(kinds.lastIndexOf('list') < kinds.indexOf('copy'), 'every check is done before the copy');
+  assert.equal(io.nodes.get('/routes/Thing.php').content, io.nodes.get('/app/Models/Item.php').content);
+});
+
 test('cp, mv, rm, mkdir, touch and rmdir, with the shell\'s rules', async () => {
   const io = site();
   assert.equal((await sh(io, 'cp app/Models/Item.php app/Models/Thing.php')).code, 0);

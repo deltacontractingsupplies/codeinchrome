@@ -172,6 +172,10 @@ test('the explorer works like VS Code: menus, inline create and rename, clipboar
 
   await test.step('compact folders: a line of single folders is one row, as in VS Code', async () => {
     expect((await page.evaluate(() => window.cic.write('/src/main/java/App.java', 'class App {}', { expect: 'absent' }))).ok).toBe(true);
+    // The write answers before the explorer catches up; following the agent
+    // then reveals the file. The person collapses after seeing it - collapsing
+    // first, the reveal would open the folders again behind the click.
+    await expect(node('/src/main/java/App.java')).toBeVisible();
     await page.getByRole('button', { name: 'Collapse Folders in Explorer' }).click();
     const row = page.locator('#tree .node.compact', { hasText: 'src/main/java' });
     await expect(row).toBeVisible();

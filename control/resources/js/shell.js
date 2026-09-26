@@ -1320,6 +1320,12 @@ export function createShell(rawIo, { cwd = '/' } = {}) {
     const dest = operands.at(-1);
     const destAbs = resolvePath(state.cwd, dest);
     const sources = operands.slice(0, -1);
+    // Every folder the checks below will list, asked for at once: one round
+    // trip instead of one per stat (listings are remembered for this line).
+    // The destination itself is listed too, in case it is a folder to copy
+    // into; if it is not, that answer is simply not used.
+    await Promise.all([...new Set([dirName(destAbs), destAbs, ...sources.map((s) => dirName(resolvePath(state.cwd, s)))])]
+      .map((d) => io.list(d)));
     const ds = await stat(destAbs);
     const intoDir = ds.ok && ds.dir && !flags.T;
     if (sources.length > 1 && !intoDir) return fail(1, `${name}: target '${dest}' is not a directory`);

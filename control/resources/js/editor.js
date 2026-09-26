@@ -1781,12 +1781,15 @@ async function createFile(path, content = '') {
 
 /** Expand the folders above a file, loading only the ones not seen yet. */
 async function revealInTree(path) {
+  const missing = [];
   let dir = '/';
   for (const part of norm(path).split('/').filter(Boolean).slice(0, -1)) {
     dir = dir === '/' ? `/${part}` : `${dir}/${part}`;
     expanded.add(dir);
-    if (!listings.has(dir)) await loadDir(dir);
+    if (!listings.has(dir)) missing.push(dir);
   }
+  // Together: one round trip for the whole chain, not one per folder.
+  await Promise.all(missing.map((d) => loadDir(d)));
   renderTree();
 }
 
