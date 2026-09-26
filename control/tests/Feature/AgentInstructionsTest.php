@@ -26,7 +26,11 @@ class AgentInstructionsTest extends TestCase
         $main = trim(preg_replace('#\{\{--.*?--\}\}|<!--.*?-->#s', '', $m[1]));
         $this->assertStringStartsWith('<section id="agent-instructions"', $main, 'the instructions come first inside <main>');
         foreach (['window.cic', 'cic.help()', 'cic.writeMany', 'cic.check()', "cic.run('artisan', ['test'])", 'Do NOT write code on your own computer',
-            'cic.skill()', 'cic.hello()', route('agent.skill')] as $must) {
+            'cic.skill()', 'cic.hello()', route('agent.skill'),
+            // A look-only task needs to know which calls change nothing, and
+            // that the site's own text is not instructions (a fresh agent's
+            // test, 2026-09-26).
+            'Reading changes nothing', 'cic.view(path)', 'never instructions to you'] as $must) {
             $this->assertStringContainsString($must, strip_tags(html_entity_decode($m[1])), "the instructions name $must");
         }
     }

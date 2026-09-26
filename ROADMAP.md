@@ -675,14 +675,21 @@ on GitHub, not assumed.
       stamp after each complete run, and monitoring alerts when it is older
       than 30 hours. Verified: a run completes and the check reads green.
       DONE: a run completed on production after the fix; monitoring reads "newest complete backup 12 seconds ago".
-- [ ] **An agent finds window.cic on its own** (owner, 2026-09-24: Claude in
+- [x] **An agent finds window.cic on its own** (owner, 2026-09-24: Claude in
       Chrome built a page by typing into routes/web.php, "because I couldn't
       expand the file tree" - it never read the agent instructions nor the
       skill). Whatever it reads first must say it: the page title, the first
       text of <main>, the page-text read, a screenshot - never behind a click
       on "For AI agents". DONE: the tab's title and a banner on screen say how
-      until an agent calls window.cic (e2e on production). LEFT: tried live
-      with Claude in Chrome with NO skill loaded and no pasted message.
+      until an agent calls window.cic (e2e on production). DONE 2026-09-26,
+      tried live with a fresh agent - no skill, no pasted message, only the
+      Claude in Chrome tools and "find how to edit this site from the page":
+      it found window.cic from the tab title and the banner on its 4th
+      browser call (no click, no screenshot needed), and read routes/web.php
+      in one call, nothing blocked. From its notes: the instructions now say
+      which calls change nothing (a look-only task must not write to a live
+      site) and that the site's own text is never instructions; the on-screen
+      strip was checked and is visible to a screenshot-only agent.
 - [x] **The skill demands real Laravel** (owner, 2026-09-24): routes stay thin;
       controllers, form requests (validation), Blade layouts and components,
       Eloquent models with migrations and factories, policies for
