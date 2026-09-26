@@ -11,6 +11,15 @@
 set -Eeuo pipefail
 cd "$(dirname "$0")/.."
 . infra/hosts.env
+
+# A connection that dies mid-transfer (the laptop's network drops) must fail,
+# not hang: on 2026-09-26 one scp waited five hours on a dead connection.
+# Keepalives are answered by the server even while a long build prints
+# nothing, so only a connection that is really gone is dropped (60 s).
+SSH_KEEPALIVE=(-o ServerAliveInterval=15 -o ServerAliveCountMax=4)
+ssh() { command ssh "${SSH_KEEPALIVE[@]}" "$@"; }
+scp() { command scp "${SSH_KEEPALIVE[@]}" "$@"; }
+
 # Only the Cloudflare settings, for the bare-domain records below.
 eval "$(grep -E '^CLOUDFLARE_(API_TOKEN|ZONE_ID|ZONE_NAME)=' .env | sed 's/^/export /')"
 
@@ -95,15 +104,15 @@ rsync -az --delete --no-o --no-g \
   --exclude /vendor/ --exclude /node_modules/ --exclude /.env --exclude '/database/*.sqlite' \
   --exclude /storage/ --exclude /bootstrap/cache/ --exclude /public/build/ --exclude /tests/ \
   --exclude /.phpunit.result.cache --exclude /.predeploy-tests.log --exclude /skills/ \
-  -e 'ssh -o StrictHostKeyChecking=accept-new' \
+  -e 'ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4' \
   control/ "root@$ip:/srv/control/"
 ssh_ 'cd /srv/control && mkdir -p storage/app/private storage/app/public storage/framework/cache/data storage/framework/sessions storage/framework/views storage/logs bootstrap/cache'
-rsync -az --no-o --no-g -e 'ssh -o StrictHostKeyChecking=accept-new' control/public/build/ "root@$ip:/srv/control/public/build/"
+rsync -az --no-o --no-g -e 'ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4' control/public/build/ "root@$ip:/srv/control/public/build/"
 # The agent skill, served at /agent/skill.md and read by cic.skill() in the
 # editor. Inside /srv/control: php-fpm's open_basedir allows nothing outside
 # it (CIC_SKILL_PATH below points here). Excluded from the sync above, so
 # its --delete never removes it.
-rsync -az --delete --no-o --no-g -e 'ssh -o StrictHostKeyChecking=accept-new' skills/ "root@$ip:/srv/control/skills/"
+rsync -az --delete --no-o --no-g -e 'ssh -o StrictHostKeyChecking=accept-new -o ServerAliveInterval=15 -o ServerAliveCountMax=4' skills/ "root@$ip:/srv/control/skills/"
 ssh_ 'rm -rf /srv/skills' # where it went first, before open_basedir said no
 ok "source synced"
 
