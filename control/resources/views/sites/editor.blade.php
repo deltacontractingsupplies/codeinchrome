@@ -209,6 +209,7 @@
                 <div class="panel-tabs" role="tablist">
                     <button type="button" id="ptTerminal" class="on" role="tab">Terminal</button>
                     <button type="button" id="ptLogs" role="tab">Logs</button>
+                    <button type="button" id="ptAgent" role="tab">Agent</button>
                     <span class="panel-spacer"></span>
                     <button type="button" id="ptClose" title="Close panel (Ctrl `)">✕</button>
                 </div>
@@ -219,6 +220,14 @@
                         <input id="termArgs" autocomplete="off" spellcheck="false" placeholder="migrate:status" aria-label="Arguments">
                         <button type="submit">Run</button>
                     </form>
+                </div>
+                <div id="agentView" class="panel-body" hidden>
+                    <div class="logs-bar">
+                        <label class="agent-follow"><input type="checkbox" id="agentFollow"> Follow the agent (open each file it writes)</label>
+                        <button type="button" id="agentClear">Clear</button>
+                        <span id="agentMeta" class="logs-meta"></span>
+                    </div>
+                    <ol id="agentLog" class="agent-log" aria-live="polite"></ol>
                 </div>
                 <div id="logsView" class="panel-body" hidden>
                     <div class="logs-bar">
